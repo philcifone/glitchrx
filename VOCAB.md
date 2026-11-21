@@ -23,6 +23,7 @@ Shared terms for glitcharaxia, so we can name things precisely. Grouped by topic
 
 ## Project concepts
 
+- **Backwards.** The effect that reverses byte order inside each hit, like playing audio in reverse. It is not called "reverse", because `--reverse` is the undo option.
 - **Bake.** Decoding the glitched file and saving the result as a clean PNG. Different viewers render a broken JPEG differently; a baked PNG looks the same everywhere.
 - **Chain.** Several effects applied in order. On the CLI, the order of the effect flags is the chain order.
 - **Contact sheet.** A grid image showing one effect at a range of parameter values, side by side. Used to tune defaults.
@@ -35,10 +36,11 @@ Shared terms for glitcharaxia, so we can name things precisely. Grouped by topic
 - **Mode: safe / raw.** In **safe** mode (the default), effects see de-stuffed bytes, so they can never forge a marker. In **raw** mode, effects see the bytes exactly as stored, like Audacity did, so they can forge markers and truncate the image.
 - **Payload.** The de-stuffed scan data of the main image, the buffer every byte effect edits.
 - **Recipe.** A TOML file that lists the effects, parameters and seeds. Replaying it on the same input gives the same output.
-- **Region.** The part of the payload where hits may land, for example `5%:100%`.
+- **Region.** The part of the payload where hits may land, for example `5%:100%`. Payload percent is not image percent: busy, detailed areas take up far more bytes than smooth ones, so `50%` of the payload is rarely halfway down the picture.
 - **Seed.** The number that drives all randomness. The same seed always gives the same result.
 - **Target.** Choosing a byte region by image position, for example "rows 40-60%" (Phase 3). It is approximate, because damage bleeds downward.
-- **Window.** The bytes a single hit covers (`len`).
+- **Undo hint.** The `undo: glitchrx --reverse ...` line printed after a reversible run. Copy and paste it to restore the input exactly.
+- **Window.** The bytes a single hit covers (`len`). Some parameters (`shuffle` block, `stutter` chunk) can be a percent of the window.
 
 ## Math and audio terms
 
