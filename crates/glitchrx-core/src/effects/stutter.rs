@@ -4,25 +4,22 @@ use std::ops::Range;
 
 use super::{Effect, EffectInfo, PlacementDefaults, Reversibility, not_reversible};
 use crate::error::Result;
-use crate::params::{Kind, ParamSpec, Params};
+use crate::params::{Bound, Kind, ParamSpec, Params};
 use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "stutter",
     version: 1,
-    summary: "Copy the first `chunk` bytes of each window and repeat them until the window is full.",
+    summary: "Copy the start of each window (`chunk` bytes, or percent of the window) and repeat it until the window is full.",
     details: "Like a skipping CD. The bytes that get overwritten are lost, so the effect cannot \
               be reversed. The file length never changes: the repeats replace data rather than \
               insert it.",
     reversible: Reversibility::Never,
     params: &[ParamSpec {
         name: "chunk",
-        kind: Kind::Int {
-            min: 1,
-            max: 1 << 24,
-        },
-        default: "256",
-        help: "length of the repeated chunk in bytes",
+        kind: Kind::Size,
+        default: "12%",
+        help: "length of the repeated chunk: bytes, or percent of the window",
     }],
     placement: PlacementDefaults {
         region: "5%:100%",
@@ -35,18 +32,18 @@ pub static INFO: EffectInfo = EffectInfo {
 
 fn build(p: &Params) -> Result<Box<dyn Effect>> {
     Ok(Box::new(Stutter {
-        chunk: p.int("chunk") as usize,
+        chunk: p.size("chunk"),
     }))
 }
 
 struct Stutter {
-    chunk: usize,
+    chunk: Bound,
 }
 
 impl Effect for Stutter {
     fn apply(&self, buf: &mut [u8], w: Range<usize>, _rng: &mut Rng) {
         let win = &mut buf[w];
-        let c = self.chunk.min(win.len());
+        let c = self.chunk.resolve(win.len()).max(1);
         for i in c..win.len() {
             win[i] = win[i % c];
         }

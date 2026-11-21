@@ -20,6 +20,8 @@ Keywords: **must** means required for the phase to be done. **Should** means exp
 | D-10 | Icons | Lucide icons in the GUI, used sparingly (toolbox, save, export). No emojis anywhere. |
 | D-11 | Test photos | Phil supplies them in `samples/`, which is git-ignored and never committed (section 11.5). |
 | D-12 | 16-bit sample view | Deferred from Phase 1 to **later**. It adds a generic layer to every effect for little visual payoff before the GUI exists. |
+| D-13 | `reverse` effect renamed `backwards` | Found during implementation: an effect flag `--reverse` would collide with the `--reverse` (undo) option. |
+| D-14 | Window-relative sizes | `shuffle` `block` and `stutter` `chunk` accept a percent of the hit window (defaults `5%` and `12%`). The byte-count defaults were larger than the hit window on small images, which made both effects do nothing. A test now fails if any effect's defaults leave an image unchanged. |
 
 ## 0. Review of the brief (v0.1, kept for reference)
 
@@ -153,11 +155,11 @@ Arithmetic is mod 256 and `q` is a Q8 gain.
 | `echo` | Feed-forward taps: `y[i] = x[i] + sum_k (q_k * x[i - k*d]) >> 8` with `q_k = Q8(gain^k)` | Yes |
 | `reverb` | Three feedback combs in series, delays `d`, `1.37d`, `1.71d`: `y[i] = x[i] + (q * y[i-d]) >> 8` | Yes |
 | `shift` | Circular rotate of each window by `by` | Yes |
-| `reverse` | Reverse each window | Yes |
-| `shuffle` | Permute a `fraction` of the `block`-sized blocks | Yes |
+| `backwards` | Reverse each window (renamed, D-13) | Yes |
+| `shuffle` | Permute a `fraction` of the `block`-sized blocks (block: bytes or % of window) | Yes |
 | `amplify` | `wrap` mode: `(x-128)*m + 128` with odd `m`. `clip` mode: gain with clamping | wrap yes, clip no |
 | `bitcrush` | Keep the top `bits` bits | No |
-| `stutter` | Repeat the first `chunk` bytes over the window | No |
+| `stutter` | Repeat the first `chunk` (bytes or % of window) over the window | No |
 
 All eight are **must** for Phase 1. Defaults are tuned visually with the contact-sheet tool. The final parameters and defaults are documented in `docs/effects.md`, generated from the effect registry.
 

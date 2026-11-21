@@ -206,6 +206,20 @@ fn decoder_never_panics_on_glitched_corpus() {
 }
 
 #[test]
+fn every_effect_changes_the_image_at_its_defaults() {
+    // Guards against defaults that are no-ops on small images (for example
+    // a block size larger than the hit window).
+    for (name, bytes) in fixtures() {
+        for e in REGISTRY {
+            let out = recipe(e.id, "", 42, Mode::Safe)
+                .apply(bytes.clone())
+                .unwrap();
+            assert_ne!(out, bytes, "{name}: `{}` at defaults changed nothing", e.id);
+        }
+    }
+}
+
+#[test]
 fn golden_hashes() {
     // Determinism: these bytes must never change for a given effect version.
     // Snapshot updates need an effect VERSION bump or a written justification.
