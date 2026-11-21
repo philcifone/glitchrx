@@ -128,13 +128,20 @@ pub fn markdown_reference() -> String {
     s.push_str("# Effect reference\n\n");
     s.push_str(
         "Generated from the effect registry (`crates/glitchrx-core/src/effects`). \
-         Do not edit by hand; run `UPDATE_DOCS=1 cargo test -p glitchrx-core docs` to refresh.\n\n",
+         Do not edit by hand; run `UPDATE_DOCS=1 cargo test -p glitchrx-core --test docs` to refresh.\n\n",
     );
     s.push_str(
         "All byte effects edit the de-stuffed scan data (the payload) in windows called hits. \
          Arithmetic wraps modulo 256, so values never clip, and that is what makes most effects \
          exactly reversible. Percent positions and lengths are relative to the payload size, so \
          defaults look similar across image resolutions.\n\n",
+    );
+    s.push_str(
+        "Two things to expect. First, payload position does not map evenly onto image area: \
+         detailed regions (foliage, noise, text) use far more bytes than smooth ones (sky), so \
+         hits mostly land in the busy parts of a picture. Second, damage is not local: a hit \
+         usually affects everything after it in the image, as colour drift (DC drift) and \
+         smeared blocks (Huffman desync). See VOCAB.md for both terms.\n\n",
     );
     for e in REGISTRY {
         s.push_str(&format!(

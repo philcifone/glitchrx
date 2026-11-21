@@ -288,6 +288,9 @@ pub fn to_png(img: &Image) -> Vec<u8> {
         let mut enc = png::Encoder::new(&mut out, img.width, img.height);
         enc.set_color(png::ColorType::Rgb);
         enc.set_depth(png::BitDepth::Eight);
+        // Bakes are large (72 MB of pixels at 24 MP); fast compression is ~3x
+        // quicker for files only slightly bigger.
+        enc.set_compression(png::Compression::Fast);
         let mut w = enc.write_header().expect("writing to a Vec cannot fail");
         let rgb: Vec<u8> = img
             .rgba
