@@ -42,7 +42,7 @@ impl Placement {
             return Vec::new();
         }
         if self.hits == 0 {
-            return vec![s..e];
+            return std::iter::once(s..e).collect();
         }
         let span = e - s;
         let len = self.len.resolve(payload_len).clamp(1, span);

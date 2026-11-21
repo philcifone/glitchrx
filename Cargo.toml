@@ -24,7 +24,7 @@ same-file = "1"
 clap = { version = "4", features = ["derive"] }
 blake3 = "1"
 proptest = "1"
-insta = "1"
+insta = { version = "1", features = ["yaml"] }
 
 [profile.dev.package."*"]
 # Dependencies optimized even in debug builds; keeps tests on large buffers fast.
