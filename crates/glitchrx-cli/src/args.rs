@@ -1,0 +1,262 @@
+//! Command-line parsing.
+//!
+//! Effect flags are handled by a small pre-pass, everything else by clap.
+//! The pre-pass exists because an effect flag takes an *optional* parameter
+//! list: in `glitchrx --echo photo.jpg` the word after `--echo` is the input,
+//! while in `glitchrx --echo delay=400 photo.jpg` it is the parameters. clap
+//! cannot tell those apart (it would swallow `photo.jpg` as the value), but
+//! the rule is simple: the next argument is a parameter list if it contains
+//! `=`, does not start with `-`, and is not an existing file.
+
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
+use clap::{ArgAction, Parser, ValueEnum};
+use glitchrx_core::effects::{REGISTRY, Reversibility};
+
+/// One effect flag from the command line, in order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectArg {
+    pub id: &'static str,
+    pub params: String,
+}
+
+/// Pull effect flags (and their parameter lists) out of `args`, returning
+/// them in command-line order plus the remaining arguments for clap.
+pub fn split_effects(args: Vec<OsString>) -> (Vec<EffectArg>, Vec<OsString>) {
+    let mut effects = Vec::new();
+    let mut rest = Vec::new();
+    let mut it = args.into_iter().peekable();
+    while let Some(arg) = it.next() {
+        let text = arg.to_string_lossy().into_owned();
+        if text == "--" {
+            // Everything after `--` is positional; hand it to clap untouched.
+            rest.push(arg);
+            rest.extend(it);
+            break;
+        }
+        let Some(flag) = text.strip_prefix("--") else {
+            rest.push(arg);
+            continue;
+        };
+        let (name, inline) = match flag.split_once('=') {
+            Some((n, v)) => (n, Some(v.to_string())),
+            None => (flag, None),
+        };
+        let Some(info) = REGISTRY.iter().find(|e| e.id == name) else {
+            rest.push(arg);
+            continue;
+        };
+        let params = match inline {
+            Some(v) => v,
+            None => match it.peek() {
+                Some(next) if looks_like_params(&next.to_string_lossy()) => {
+                    it.next().unwrap().to_string_lossy().into_owned()
+                }
+                _ => String::new(),
+            },
+        };
+        effects.push(EffectArg {
+            id: info.id,
+            params,
+        });
+    }
+    (effects, rest)
+}
+
+fn looks_like_params(s: &str) -> bool {
+    s.contains('=') && !s.starts_with('-') && !Path::new(s).exists()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ModeArg {
+    /// Effects see de-stuffed data; the output is always structurally valid.
+    Safe,
+    /// Effects see the bytes as stored (Audacity-style); may truncate the image.
+    Raw,
+}
+
+/// Everything except the effect flags.
+#[derive(Debug, Parser)]
+#[command(
+    name = "glitchrx",
+    version,
+    about = "Glitch art from JPEG files: audio-style effects applied to the compressed image data.",
+    long_about = None,
+    override_usage = "glitchrx [--EFFECT [k=v,...]]... [OPTIONS] INPUT [OUTPUT]\n       \
+                      glitchrx [--EFFECT [k=v,...]]... [OPTIONS] --batch INPUT...\n       \
+                      glitchrx --info INPUT...\n       \
+                      glitchrx --list",
+    disable_help_subcommand = true
+)]
+pub struct Cli {
+    /// Input file(s). With exactly two and no --batch, the second is the output.
+    #[arg(value_name = "FILE")]
+    pub files: Vec<PathBuf>,
+
+    /// Output file (single input only). Default: INPUT-glitch.ext, -glitch-1, ...
+    #[arg(short, long, value_name = "FILE")]
+    pub output: Option<PathBuf>,
+
+    /// Master seed for all randomness. Default: random, always printed.
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(0..=i64::MAX as u64))]
+    pub seed: Option<u64>,
+
+    /// Undo the given effects (exactly the same flags and --seed) on a glitched file.
+    #[arg(long)]
+    pub reverse: bool,
+
+    /// Apply a saved recipe instead of effect flags.
+    #[arg(long, value_name = "FILE")]
+    pub recipe: Option<PathBuf>,
+
+    /// Also write the recipe used [default: OUTPUT-STEM.recipe.toml]
+    #[arg(long, value_name = "FILE", num_args = 0..=1, require_equals = true)]
+    pub save_recipe: Option<Option<PathBuf>>,
+
+    /// How effects see the image data.
+    #[arg(long, value_enum, default_value = "safe")]
+    pub mode: ModeArg,
+
+    /// Also write the decoded result as PNG [default: OUTPUT-STEM.png]
+    #[arg(long, value_name = "FILE", num_args = 0..=1, require_equals = true)]
+    pub bake: Option<Option<PathBuf>>,
+
+    /// Allow overwriting an existing output file (never the input).
+    #[arg(long)]
+    pub force: bool,
+
+    /// Treat every FILE as an input, with automatic output names.
+    #[arg(long)]
+    pub batch: bool,
+
+    /// Show the structure of the input JPEG(s) and exit.
+    #[arg(long)]
+    pub info: bool,
+
+    /// List every effect with its parameters and exit.
+    #[arg(long)]
+    pub list: bool,
+
+    /// Print nothing except errors.
+    #[arg(short, long, conflicts_with = "verbose")]
+    pub quiet: bool,
+
+    /// Print more detail (decoder messages, step seeds).
+    #[arg(short, long, action = ArgAction::SetTrue)]
+    pub verbose: bool,
+}
+
+/// Text appended to `--help`: the effect list and examples.
+pub fn after_help() -> String {
+    let mut s = String::from("Effects (chainable; applied in command-line order):\n");
+    for e in REGISTRY {
+        let rev = match e.reversible {
+            Reversibility::Always => "reversible",
+            Reversibility::Never => "not reversible",
+            Reversibility::Depends(_) => "reversible in wrap mode",
+        };
+        s.push_str(&format!("  --{:<10} {} [{rev}]\n", e.id, e.summary));
+    }
+    s.push_str(
+        "\nEffect parameters follow the flag as key=value pairs, e.g. --echo delay=4096,gain=0.7\n\
+         Run `glitchrx --list` for every parameter and its default.\n\
+         \nExamples:\n  \
+         glitchrx --echo photo.jpg                      writes photo-glitch.jpg\n  \
+         glitchrx --echo photo.jpg out.jpg              writes out.jpg\n  \
+         glitchrx --echo delay=4096 --shift by=200 photo.jpg\n  \
+         glitchrx --reverse --echo delay=4096 --seed 81723 photo-glitch.jpg\n  \
+         glitchrx --shuffle --batch *.jpg\n  \
+         glitchrx --info photo.jpg\n\
+         \nOriginals are never modified, and existing files are never overwritten without --force.",
+    );
+    s
+}
+
+/// Full parameter reference for `--list`.
+pub fn list_text() -> String {
+    let mut s = String::new();
+    for e in REGISTRY {
+        let rev = match e.reversible {
+            Reversibility::Always => "yes".to_string(),
+            Reversibility::Never => "no".to_string(),
+            Reversibility::Depends(why) => why.to_string(),
+        };
+        s.push_str(&format!(
+            "--{}\n  {}\n  reversible: {rev}\n",
+            e.id, e.summary
+        ));
+        for p in e.all_params() {
+            s.push_str(&format!(
+                "    {:<10} {:<10} {}\n",
+                p.name, p.default, p.help
+            ));
+        }
+        s.push_str(&format!("  example: {}\n\n", e.example));
+    }
+    s.push_str("Columns: parameter, default, meaning.\n");
+    s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn os(v: &[&str]) -> Vec<OsString> {
+        v.iter().map(OsString::from).collect()
+    }
+
+    #[test]
+    fn plain_effect_flag_does_not_eat_input() {
+        let (e, rest) = split_effects(os(&["--echo", "photo.jpg"]));
+        assert_eq!(
+            e,
+            vec![EffectArg {
+                id: "echo",
+                params: String::new()
+            }]
+        );
+        assert_eq!(rest, os(&["photo.jpg"]));
+    }
+
+    #[test]
+    fn params_and_order_are_kept() {
+        let (e, rest) = split_effects(os(&[
+            "--shift",
+            "by=5",
+            "--seed",
+            "3",
+            "--echo=delay=9,gain=0.1",
+            "in.jpg",
+        ]));
+        assert_eq!(
+            e[0],
+            EffectArg {
+                id: "shift",
+                params: "by=5".into()
+            }
+        );
+        assert_eq!(
+            e[1],
+            EffectArg {
+                id: "echo",
+                params: "delay=9,gain=0.1".into()
+            }
+        );
+        assert_eq!(rest, os(&["--seed", "3", "in.jpg"]));
+    }
+
+    #[test]
+    fn reverse_flag_is_not_an_effect() {
+        let (e, rest) = split_effects(os(&["--reverse", "--echo", "x.jpg"]));
+        assert_eq!(e.len(), 1);
+        assert_eq!(rest, os(&["--reverse", "x.jpg"]));
+    }
+
+    #[test]
+    fn double_dash_stops_effect_parsing() {
+        let (e, rest) = split_effects(os(&["--", "--echo"]));
+        assert!(e.is_empty());
+        assert_eq!(rest, os(&["--", "--echo"]));
+    }
+}

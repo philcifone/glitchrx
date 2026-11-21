@@ -122,7 +122,8 @@ pub fn auto_output(input: &Path, suffix: Suffix) -> io::Result<PathBuf> {
         name.push('.');
         name.push_str(&ext.to_string_lossy());
     }
-    Ok(dir.join(name))
+    // with_file_name keeps the input's own directory spelling (no "./").
+    Ok(input.with_file_name(name))
 }
 
 /// True if `a` and `b` are the same file on disk (symlinks and hard links
