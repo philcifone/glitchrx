@@ -1,0 +1,6 @@
+/target
+/samples/
+# Scratch output from tools and manual runs
+/out/
+*.recipe.toml
+!tests/fixtures/*.recipe.toml
