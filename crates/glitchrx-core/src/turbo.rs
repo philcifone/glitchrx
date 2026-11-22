@@ -1,13 +1,13 @@
-//! Tolerant JPEG decoding (and fixture encoding) through libjpeg-turbo.
+//! JPEG decoding and encoding through libjpeg-turbo (TurboJPEG 3 API).
 //!
-//! libjpeg-turbo is what Firefox, Chromium and most image viewers use, so a
-//! glitched file decoded here looks the way it will look to everyone else.
-//! See `docs/decisions/0001-decoder.md` for why it was chosen.
+//! libjpeg-turbo is what browsers and most viewers use. Since SPEC v0.3 the
+//! images it decodes are clean inputs (effects run on the decoded pixels),
+//! so a fatal decode error is simply an error. Warnings about slightly
+//! damaged files are tolerated, as viewers do.
 //!
-//! Glitched files are broken on purpose. The TurboJPEG API reports problems
-//! two ways: *warnings* (corrupt data that the decoder worked around; the
-//! image is complete) and *fatal errors* (decoding stopped; rows decoded so far
-//! are still in the buffer). Both are normal outcomes here, not failures.
+//! Decoding uses the accurate integer IDCT and default upsampling, never the
+//! "fast" variants, so the decoded raster (and everything bent from it) is
+//! the same on every machine (SPEC 3.3).
 
 use std::ffi::CStr;
 use std::os::raw::c_int;
@@ -46,48 +46,6 @@ impl Scale {
         }
         Scale::Full
     }
-}
-
-/// How well a decode went.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DecodeStatus {
-    /// No complaints.
-    Clean,
-    /// The decoder worked around corrupt data; the image is complete.
-    Recovered(String),
-    /// Decoding stopped part way; `rows` rows from the top are valid.
-    Partial { rows: u32, message: String },
-    /// Nothing usable.
-    Failed(String),
-}
-
-impl DecodeStatus {
-    /// One-word summary for status lines.
-    pub fn word(&self) -> &'static str {
-        match self {
-            DecodeStatus::Clean => "clean",
-            DecodeStatus::Recovered(_) => "recovered",
-            DecodeStatus::Partial { .. } => "partial",
-            DecodeStatus::Failed(_) => "failed",
-        }
-    }
-
-    /// The decoder's message, if any.
-    pub fn message(&self) -> Option<&str> {
-        match self {
-            DecodeStatus::Clean => None,
-            DecodeStatus::Recovered(m) | DecodeStatus::Failed(m) => Some(m),
-            DecodeStatus::Partial { message, .. } => Some(message),
-        }
-    }
-}
-
-/// Decoded pixels, 8-bit RGBA, rows top to bottom.
-#[derive(Debug, Clone)]
-pub struct Image {
-    pub width: u32,
-    pub height: u32,
-    pub rgba: Vec<u8>,
 }
 
 /// Owns a TurboJPEG handle and frees it on drop.
@@ -130,136 +88,110 @@ impl Drop for Handle {
     }
 }
 
-/// Decode a (possibly glitched) JPEG. Never panics; an undecodable file
-/// yields `(None, Failed)`.
-pub fn decode(jpeg: &[u8], scale: Scale) -> (Option<Image>, DecodeStatus) {
-    let Some(h) = Handle::new(tj::TJINIT_TJINIT_DECOMPRESS) else {
-        return (
-            None,
-            DecodeStatus::Failed("could not initialise libjpeg-turbo".into()),
-        );
-    };
-    // Keep going past corrupt data instead of stopping at the first warning.
+/// A decoded JPEG: RGB pixels plus its embedded colour profile, if any.
+#[derive(Debug, Clone)]
+pub struct Decoded {
+    pub width: u32,
+    pub height: u32,
+    /// 8-bit RGB, rows top to bottom (not yet oriented).
+    pub rgb: Vec<u8>,
+    pub icc: Option<Vec<u8>>,
+}
+
+/// Decode a JPEG to RGB, optionally scaled down inside the IDCT (much
+/// faster than decoding at full size and shrinking afterwards).
+pub fn decode(jpeg: &[u8], scale: Scale) -> Result<Decoded, String> {
+    let h =
+        Handle::new(tj::TJINIT_TJINIT_DECOMPRESS).ok_or("could not initialise libjpeg-turbo")?;
+    // Keep going past minor corruption, as viewers do.
     h.set(tj::TJPARAM_TJPARAM_STOPONWARNING, 0);
+    h.set(tj::TJPARAM_TJPARAM_FASTDCT, 0);
+    h.set(tj::TJPARAM_TJPARAM_FASTUPSAMPLE, 0);
+    // Keep APPn markers so the ICC profile can be read back.
+    h.set(tj::TJPARAM_TJPARAM_SAVEMARKERS, 2);
 
     // SAFETY: valid handle, pointer and length describe the caller's slice.
     let rc = unsafe { tj::tj3DecompressHeader(h.0, jpeg.as_ptr(), jpeg.len() as tj::size_t) };
-    if rc != 0 {
-        let (fatal, msg) = h.error();
-        if fatal {
-            return (None, DecodeStatus::Failed(msg));
-        }
+    if rc != 0 && h.error().0 {
+        return Err(h.error().1);
     }
     let (w, ht) = (
         h.get(tj::TJPARAM_TJPARAM_JPEGWIDTH),
         h.get(tj::TJPARAM_TJPARAM_JPEGHEIGHT),
     );
     if w <= 0 || ht <= 0 {
-        return (None, DecodeStatus::Failed("image has no dimensions".into()));
+        return Err("image has no dimensions".into());
     }
+    let icc = icc_profile(&h);
+    let cs = h.get(tj::TJPARAM_TJPARAM_COLORSPACE);
+    let cmyk = cs == tj::TJCS_TJCS_CMYK as c_int || cs == tj::TJCS_TJCS_YCCK as c_int;
+
     let f = scale.factor();
     // SAFETY: valid handle; 1/2, 1/4 and 1/8 are always supported factors.
     unsafe { tj::tj3SetScalingFactor(h.0, f) };
     // TJSCALED(): scaled dimensions round up.
     let sw = (w as u32).div_ceil(f.denom as u32);
     let sh = (ht as u32).div_ceil(f.denom as u32);
-
-    // Alpha starts at 0 and libjpeg-turbo writes 255 into every pixel it
-    // produces, which lets us count the rows a fatal error left behind.
-    let mut rgba = vec![0u8; sw as usize * sh as usize * 4];
-    // SAFETY: the buffer is exactly width * height * 4 bytes for the scaled
-    // size, which is what tj3Decompress8 writes with pitch 0 and TJPF_RGBA.
+    let (format, channels) = if cmyk {
+        (tj::TJPF_TJPF_CMYK, 4)
+    } else {
+        (tj::TJPF_TJPF_RGB, 3)
+    };
+    let mut px = vec![0u8; sw as usize * sh as usize * channels];
+    // SAFETY: the buffer is exactly width * height * channels bytes for the
+    // scaled size, which is what tj3Decompress8 writes with pitch 0.
     let rc = unsafe {
         tj::tj3Decompress8(
             h.0,
             jpeg.as_ptr(),
             jpeg.len() as tj::size_t,
-            rgba.as_mut_ptr(),
+            px.as_mut_ptr(),
             0,
-            tj::TJPF_TJPF_RGBA,
+            format,
         )
     };
-    let image = |rgba| Image {
-        width: sw,
-        height: sh,
-        rgba,
-    };
-    if rc == 0 {
-        return (Some(image(rgba)), DecodeStatus::Clean);
-    }
-    let (fatal, message) = h.error();
-    if !fatal {
-        return (Some(image(rgba)), DecodeStatus::Recovered(message));
-    }
-    let row_bytes = sw as usize * 4;
-    let rows = rgba
-        .chunks_exact(row_bytes)
-        .take_while(|row| row[row_bytes - 1] == 255)
-        .count() as u32;
-    if rows == 0 {
-        (None, DecodeStatus::Failed(message))
-    } else {
-        // Undecoded rows: make them opaque mid-gray rather than transparent.
-        for px in rgba[rows as usize * row_bytes..].chunks_exact_mut(4) {
-            px.copy_from_slice(&[128, 128, 128, 255]);
-        }
-        (Some(image(rgba)), DecodeStatus::Partial { rows, message })
-    }
-}
-
-/// Losslessly rewrite a JPEG with a restart marker every `rows` MCU rows
-/// (`rows = 0` removes all restart markers).
-///
-/// Why this matters for glitching: without restart markers, one damaged
-/// spot desyncs the Huffman decoder and shifts the DC (average colour) of
-/// every later block, so everything below it turns into a flat wash. A
-/// restart marker resets both, so damage stops at the next marker. The
-/// interval therefore sets how tall each glitch band can grow.
-///
-/// This is a *lossless transform*: libjpeg-turbo moves the DCT coefficients
-/// into a new file without decoding to pixels, so the image is pixel-for-pixel
-/// identical to the input. Header markers (EXIF, ICC, thumbnail) are copied.
-/// Bytes after the primary EOI (gain maps, MPF images) are not part of the
-/// transform, so the caller re-appends them (`trailing`).
-pub fn set_restarts(jpeg: &[u8], rows: u16, trailing: &[u8]) -> Result<Vec<u8>, String> {
-    let h = Handle::new(tj::TJINIT_TJINIT_TRANSFORM).ok_or("could not initialise libjpeg-turbo")?;
-    h.set(tj::TJPARAM_TJPARAM_RESTARTROWS, rows as c_int);
-    // A transform reads the header itself, but reading it first gives a
-    // clear error for files libjpeg-turbo will not accept.
-    // SAFETY: valid handle, pointer and length describe the caller's slice.
-    let rc = unsafe { tj::tj3DecompressHeader(h.0, jpeg.as_ptr(), jpeg.len() as tj::size_t) };
     if rc != 0 && h.error().0 {
         return Err(h.error().1);
     }
-    // All-zero = no crop, TJXOP_NONE, no options, no callback.
-    // SAFETY: tjtransform is a plain C struct; zero is valid for every field.
-    let xform: tj::tjtransform = unsafe { std::mem::zeroed() };
-    let mut out: *mut u8 = std::ptr::null_mut();
+    let rgb = if cmyk { cmyk_to_rgb(&px) } else { px };
+    Ok(Decoded {
+        width: sw,
+        height: sh,
+        rgb,
+        icc,
+    })
+}
+
+/// Naive CMYK to RGB. libjpeg delivers CMYK as stored, and nearly every
+/// CMYK JPEG comes from Adobe software, which stores the values inverted;
+/// for those `r = c * k / 255`. (Colour-managed conversion would need the
+/// file's CMYK profile; this is for getting usable pixels to bend.)
+fn cmyk_to_rgb(px: &[u8]) -> Vec<u8> {
+    px.chunks_exact(4)
+        .flat_map(|p| {
+            let k = p[3] as u32;
+            [0, 1, 2].map(|i| ((p[i] as u32 * k + 127) / 255) as u8)
+        })
+        .collect()
+}
+
+/// The embedded ICC profile, if the file has one.
+fn icc_profile(h: &Handle) -> Option<Vec<u8>> {
+    let mut buf: *mut u8 = std::ptr::null_mut();
     let mut size: tj::size_t = 0;
-    // SAFETY: n = 1 with one destination pointer, size and transform; a null
-    // destination makes TurboJPEG allocate it, and we free it with tj3Free.
+    // SAFETY: valid handle after reading the header; TurboJPEG allocates
+    // the buffer, which we copy and free with tj3Free.
     unsafe {
-        let rc = tj::tj3Transform(
-            h.0,
-            jpeg.as_ptr(),
-            jpeg.len() as tj::size_t,
-            1,
-            &mut out,
-            &mut size,
-            &xform,
-        );
-        let fatal = rc != 0 && h.error().0;
-        if fatal || out.is_null() {
-            let msg = h.error().1;
-            if !out.is_null() {
-                tj::tj3Free(out.cast());
+        let rc = tj::tj3GetICCProfile(h.0, &mut buf, &mut size);
+        if rc != 0 || buf.is_null() || size == 0 {
+            if !buf.is_null() {
+                tj::tj3Free(buf.cast());
             }
-            return Err(msg);
+            return None;
         }
-        let mut v = std::slice::from_raw_parts(out, size as usize).to_vec();
-        tj::tj3Free(out.cast());
-        v.extend_from_slice(trailing);
-        Ok(v)
+        let v = std::slice::from_raw_parts(buf, size as usize).to_vec();
+        tj::tj3Free(buf.cast());
+        Some(v)
     }
 }
 
@@ -293,8 +225,24 @@ impl Default for EncodeOptions {
     }
 }
 
-/// Encode RGBA pixels as a JPEG. Returns `None` if libjpeg-turbo fails.
-pub fn encode(img: &Image, opts: EncodeOptions) -> Option<Vec<u8>> {
+/// Pixel layouts [`encode`] accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PixelFormat {
+    Rgb,
+    /// Used to generate CMYK test fixtures.
+    Cmyk,
+}
+
+/// Encode pixels as a JPEG, embedding `icc` if given. Returns `None` if
+/// libjpeg-turbo fails.
+pub fn encode(
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+    format: PixelFormat,
+    opts: EncodeOptions,
+    icc: Option<&[u8]>,
+) -> Option<Vec<u8>> {
     let h = Handle::new(tj::TJINIT_TJINIT_COMPRESS)?;
     h.set(tj::TJPARAM_TJPARAM_QUALITY, opts.quality as c_int);
     let samp = match opts.subsampling {
@@ -309,19 +257,31 @@ pub fn encode(img: &Image, opts: EncodeOptions) -> Option<Vec<u8>> {
     }
     h.set(tj::TJPARAM_TJPARAM_PROGRESSIVE, opts.progressive as c_int);
     h.set(tj::TJPARAM_TJPARAM_RESTARTROWS, opts.restart_rows as c_int);
+    let pf = match format {
+        PixelFormat::Rgb => tj::TJPF_TJPF_RGB,
+        PixelFormat::Cmyk => tj::TJPF_TJPF_CMYK,
+    };
+    if let Some(icc) = icc {
+        // SAFETY: TurboJPEG copies the profile into the handle.
+        let rc =
+            unsafe { tj::tj3SetICCProfile(h.0, icc.as_ptr() as *mut u8, icc.len() as tj::size_t) };
+        if rc != 0 {
+            return None;
+        }
+    }
 
     let mut out: *mut u8 = std::ptr::null_mut();
     let mut size: tj::size_t = 0;
-    // SAFETY: the source buffer holds width * height RGBA pixels; TurboJPEG
-    // allocates `out`, which we copy and then free with tj3Free.
+    // SAFETY: the source buffer holds width * height pixels in `pf`;
+    // TurboJPEG allocates `out`, which we copy and then free with tj3Free.
     unsafe {
         let rc = tj::tj3Compress8(
             h.0,
-            img.rgba.as_ptr(),
-            img.width as c_int,
+            pixels.as_ptr(),
+            width as c_int,
             0,
-            img.height as c_int,
-            tj::TJPF_TJPF_RGBA,
+            height as c_int,
+            pf,
             &mut out,
             &mut size,
         );
@@ -337,71 +297,60 @@ pub fn encode(img: &Image, opts: EncodeOptions) -> Option<Vec<u8>> {
     }
 }
 
-/// Encode pixels as PNG (RGB, alpha dropped since decodes are opaque).
-pub fn to_png(img: &Image) -> Vec<u8> {
-    let mut out = Vec::new();
-    {
-        let mut enc = png::Encoder::new(&mut out, img.width, img.height);
-        enc.set_color(png::ColorType::Rgb);
-        enc.set_depth(png::BitDepth::Eight);
-        // Bakes are large (72 MB of pixels at 24 MP); fast compression is ~3x
-        // quicker for files only slightly bigger.
-        enc.set_compression(png::Compression::Fast);
-        let mut w = enc.write_header().expect("writing to a Vec cannot fail");
-        let rgb: Vec<u8> = img
-            .rgba
-            .chunks_exact(4)
-            .flat_map(|p| [p[0], p[1], p[2]])
-            .collect();
-        w.write_image_data(&rgb)
-            .expect("writing to a Vec cannot fail");
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn gradient(w: u32, h: u32) -> Image {
-        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+    fn gradient(w: u32, h: u32) -> Vec<u8> {
+        let mut rgb = Vec::with_capacity((w * h * 3) as usize);
         for y in 0..h {
             for x in 0..w {
-                rgba.extend_from_slice(&[(x * 255 / w) as u8, (y * 255 / h) as u8, 90, 255]);
+                rgb.extend_from_slice(&[(x * 255 / w) as u8, (y * 255 / h) as u8, 90]);
             }
         }
-        Image {
-            width: w,
-            height: h,
-            rgba,
-        }
+        rgb
     }
 
     #[test]
-    fn encode_decode_clean() {
-        let jpg = encode(&gradient(64, 48), EncodeOptions::default()).unwrap();
-        let (img, status) = decode(&jpg, Scale::Full);
-        assert_eq!(status, DecodeStatus::Clean);
-        let img = img.unwrap();
-        assert_eq!((img.width, img.height), (64, 48));
-        let (small, _) = decode(&jpg, Scale::Quarter);
-        assert_eq!(small.unwrap().width, 16);
+    fn encode_decode_with_icc() {
+        let icc = b"fake profile bytes".repeat(10);
+        let jpg = encode(
+            64,
+            48,
+            &gradient(64, 48),
+            PixelFormat::Rgb,
+            EncodeOptions::default(),
+            Some(&icc),
+        )
+        .unwrap();
+        let d = decode(&jpg, Scale::Full).unwrap();
+        assert_eq!((d.width, d.height, d.rgb.len()), (64, 48, 64 * 48 * 3));
+        assert_eq!(d.icc.as_deref(), Some(&icc[..]));
+        let small = decode(&jpg, Scale::Quarter).unwrap();
+        assert_eq!(small.width, 16);
     }
 
     #[test]
-    fn garbage_fails_without_panicking() {
-        let (img, status) = decode(b"definitely not a jpeg", Scale::Full);
-        assert!(img.is_none());
-        assert_eq!(status.word(), "failed");
+    fn cmyk_decodes_to_rgb() {
+        // Adobe-style inverted CMYK: c = m = y = 255, k = 128 is mid gray.
+        let px: Vec<u8> = [255u8, 255, 255, 128].repeat(16 * 16);
+        let opts = EncodeOptions {
+            subsampling: Subsampling::S444,
+            quality: 100,
+            ..Default::default()
+        };
+        let jpg = encode(16, 16, &px, PixelFormat::Cmyk, opts, None).unwrap();
+        let d = decode(&jpg, Scale::Full).unwrap();
+        assert!(
+            d.rgb.iter().all(|&v| v.abs_diff(128) <= 3),
+            "{:?}",
+            &d.rgb[..6]
+        );
     }
 
     #[test]
-    fn truncated_file_is_recovered_or_partial() {
-        let jpg = encode(&gradient(256, 256), EncodeOptions::default()).unwrap();
-        let cut = &jpg[..jpg.len() / 2];
-        let (img, status) = decode(cut, Scale::Full);
-        assert!(img.is_some(), "{status:?}");
-        assert_ne!(status, DecodeStatus::Clean);
+    fn garbage_is_an_error() {
+        assert!(decode(b"definitely not a jpeg", Scale::Full).is_err());
     }
 
     #[test]
@@ -409,25 +358,5 @@ mod tests {
         assert_eq!(Scale::to_fit(6000, 4000, 700, 700), Scale::Eighth);
         assert_eq!(Scale::to_fit(6000, 4000, 1200, 800), Scale::Quarter);
         assert_eq!(Scale::to_fit(640, 480, 1000, 1000), Scale::Full);
-    }
-
-    #[test]
-    fn restarts_are_lossless() {
-        let jpg = encode(&gradient(160, 96), EncodeOptions::default()).unwrap();
-        let with = set_restarts(&jpg, 1, b"TRAILER").unwrap();
-        assert!(with.ends_with(b"TRAILER"));
-        assert!(with.windows(2).any(|w| w == [0xFF, 0xD0]), "no RST0 found");
-        let (a, _) = decode(&jpg, Scale::Full);
-        let (b, sb) = decode(&with, Scale::Full);
-        assert_eq!(sb, DecodeStatus::Clean);
-        assert_eq!(a.unwrap().rgba, b.unwrap().rgba, "pixels changed");
-        // And back to none.
-        let without = set_restarts(&with[..with.len() - 7], 0, b"").unwrap();
-        assert!(!without.windows(2).any(|w| w == [0xFF, 0xD0]));
-    }
-
-    #[test]
-    fn png_has_signature() {
-        assert!(to_png(&gradient(4, 4)).starts_with(b"\x89PNG"));
     }
 }

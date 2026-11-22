@@ -7,22 +7,36 @@
 
 use std::collections::BTreeMap;
 
-use glitchrx_core::effects::{self, REGISTRY, Reversibility};
-use glitchrx_core::formats::jpeg::Info;
+use glitchrx_core::codec::Image;
+use glitchrx_core::effects::{self, REGISTRY};
 use glitchrx_core::params::Kind;
-use glitchrx_core::{Mode, Recipe, Restart, Result, Step};
+use glitchrx_core::{Encoding, Recipe, Result, Step};
 use serde::{Deserialize, Serialize};
 
 /// A recipe as the GUI holds it.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RecipeDto {
+    /// Recipe-wide sample encoding; a step may override it in its params.
     #[serde(default)]
-    pub mode: Mode,
-    /// `"10%"`, `"12"`, `"0"`, or `null` to leave the file's markers alone.
-    #[serde(default)]
-    pub restart: Option<String>,
+    pub encoding: Encoding,
+    #[serde(default = "one")]
+    pub channels: usize,
     #[serde(default)]
     pub steps: Vec<StepDto>,
+}
+
+fn one() -> usize {
+    1
+}
+
+impl Default for RecipeDto {
+    fn default() -> Self {
+        RecipeDto {
+            encoding: Encoding::default(),
+            channels: 1,
+            steps: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -69,37 +83,33 @@ impl<'de> Deserialize<'de> for SeedText {
 impl RecipeDto {
     /// Build and validate a core recipe.
     pub fn to_recipe(&self) -> Result<Recipe> {
-        let restart = match self.restart.as_deref().map(str::trim) {
-            None | Some("") => None,
-            Some(text) => Some(Restart::parse(text)?),
-        };
         let steps = self
             .steps
             .iter()
             .map(|s| {
                 let info = effects::lookup(&s.effect)?;
-                let step = Step {
+                Ok(Step {
                     effect: s.effect.clone(),
                     effect_version: s.effect_version.unwrap_or(info.version),
                     seed: s.seed.0,
                     params: s.params.clone(),
-                };
-                step.prepare()?; // fail fast with a message naming the step
-                Ok(step)
+                })
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(Recipe {
-            mode: self.mode,
-            restart,
+        let r = Recipe {
+            encoding: self.encoding,
+            channels: self.channels,
             steps,
             ..Recipe::default()
-        })
+        };
+        r.validate()?; // fail fast with a message naming the step
+        Ok(r)
     }
 
     pub fn from_recipe(r: &Recipe) -> RecipeDto {
         RecipeDto {
-            mode: r.mode,
-            restart: r.restart.map(|x| x.to_string()),
+            encoding: r.encoding,
+            channels: r.channels,
             steps: r
                 .steps
                 .iter()
@@ -119,10 +129,10 @@ impl RecipeDto {
 pub struct EffectDto {
     pub id: &'static str,
     pub version: u32,
+    /// The Audacity effect this one follows.
+    pub audacity: &'static str,
     pub summary: &'static str,
     pub details: &'static str,
-    /// `"always"`, `"never"`, or an explanation of what it depends on.
-    pub reversible: String,
     pub params: Vec<ParamDto>,
 }
 
@@ -152,13 +162,9 @@ pub fn effects() -> Vec<EffectDto> {
             EffectDto {
                 id: e.id,
                 version: e.version,
+                audacity: e.audacity,
                 summary: e.summary,
                 details: e.details,
-                reversible: match e.reversible {
-                    Reversibility::Always => "always".into(),
-                    Reversibility::Never => "never".into(),
-                    Reversibility::Depends(why) => why.into(),
-                },
                 params: e
                     .all_params()
                     .into_iter()
@@ -190,6 +196,25 @@ pub fn effects() -> Vec<EffectDto> {
         .collect()
 }
 
+/// A sample encoding, for the encoding pickers.
+#[derive(Debug, Serialize)]
+pub struct EncodingDto {
+    pub id: &'static str,
+    pub bytes: usize,
+    pub describe: &'static str,
+}
+
+pub fn encodings() -> Vec<EncodingDto> {
+    Encoding::ALL
+        .iter()
+        .map(|e| EncodingDto {
+            id: e.name(),
+            bytes: e.width(),
+            describe: e.describe(),
+        })
+        .collect()
+}
+
 /// What the GUI shows about an opened photo.
 #[derive(Debug, Serialize)]
 pub struct DocDto {
@@ -197,37 +222,32 @@ pub struct DocDto {
     pub name: String,
     /// Path relative to `--root` when opened from the server.
     pub path: Option<String>,
-    pub width: u16,
-    pub height: u16,
-    pub encoding: String,
-    pub subsampling: String,
+    /// Upright size in pixels.
+    pub width: usize,
+    pub height: usize,
+    /// `jpeg`, `png` or `tiff`.
+    pub format: &'static str,
+    /// The EXIF orientation that was applied (1 = none).
+    pub orientation: u8,
+    pub has_icc: bool,
     pub file_len: usize,
-    pub payload_len: usize,
-    pub restart_interval: u16,
-    pub has_exif_thumbnail: bool,
-    pub trailing_len: usize,
+    /// Raw RGB bytes the effects work on.
+    pub raw_len: usize,
 }
 
 impl DocDto {
-    pub fn new(id: &str, name: &str, path: Option<String>, info: &Info) -> DocDto {
-        let f = &info.frame;
+    pub fn new(id: &str, name: &str, path: Option<String>, file_len: usize, img: &Image) -> DocDto {
         DocDto {
             id: id.into(),
             name: name.into(),
             path,
-            width: f.width,
-            height: f.height,
-            encoding: if f.progressive() {
-                format!("progressive ({} scans)", info.scans)
-            } else {
-                "baseline".into()
-            },
-            subsampling: f.subsampling(),
-            file_len: info.file_len,
-            payload_len: info.payload_len,
-            restart_interval: info.restart_interval,
-            has_exif_thumbnail: info.has_exif_thumbnail,
-            trailing_len: info.trailing_len,
+            width: img.raster.width,
+            height: img.raster.height,
+            format: img.format.name(),
+            orientation: img.orientation,
+            has_icc: img.icc.is_some(),
+            file_len,
+            raw_len: img.raster.bytes.len(),
         }
     }
 }
@@ -259,16 +279,19 @@ mod tests {
 
     #[test]
     fn recipe_round_trip_and_validation() {
-        let json = r#"{"mode":"safe","restart":"10%","steps":[
-            {"effect":"echo","seed":"5","params":{"gain":"0.7"}},
+        let json = r#"{"encoding":"ulaw","channels":2,"steps":[
+            {"effect":"echo","seed":"5","params":{"decay":"0.7","encoding":"s16be"}},
             {"effect":"backwards","seed":"6"}]}"#;
         let dto: RecipeDto = serde_json::from_str(json).unwrap();
         let r = dto.to_recipe().unwrap();
-        assert_eq!(r.restart, Some(Restart::MilliPercent(10_000)));
+        assert_eq!((r.encoding, r.channels), (Encoding::ULaw, 2));
         assert_eq!(r.steps.len(), 2);
         assert_eq!(RecipeDto::from_recipe(&r).to_recipe().unwrap(), r);
+        // Fields from the 2a GUI (mode, restart) are ignored, not errors.
+        let old: RecipeDto = serde_json::from_str(r#"{"mode":"safe","restart":"10%"}"#).unwrap();
+        assert_eq!(old, RecipeDto::default());
 
-        let bad = r#"{"steps":[{"effect":"echo","seed":"1","params":{"gain":"3"}}]}"#;
+        let bad = r#"{"steps":[{"effect":"echo","seed":"1","params":{"decay":"3"}}]}"#;
         let dto: RecipeDto = serde_json::from_str(bad).unwrap();
         assert!(dto.to_recipe().unwrap_err().to_string().contains("echo"));
     }

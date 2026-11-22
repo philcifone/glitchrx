@@ -1,6 +1,6 @@
 [package]
 name = "glitchrx-core"
-description = "Core engine for glitcharaxia: JPEG scan parsing, byte-domain glitch effects, recipes, tolerant decoding."
+description = "Core engine for glitcharaxia: raw-pixel databending with Audacity-style effects, recipes, image decoding and encoding."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,23 +8,23 @@ rust-version.workspace = true
 publish.workspace = true
 
 [features]
-default = ["turbo", "fs"]
-# libjpeg-turbo decoding/encoding (TurboJPEG 3 API), found through pkg-config.
-turbo = ["dep:turbojpeg-sys"]
-# Build libjpeg-turbo from bundled source instead (needs cmake; nasm for SIMD).
-# Intended for macOS/Windows builds where no system library is present.
-vendored = ["turbo", "turbojpeg-sys/cmake"]
+default = ["fs"]
+# libjpeg-turbo (TurboJPEG 3 API) is always used and found through pkg-config.
+# This builds it from bundled source instead (needs cmake; nasm for SIMD),
+# for macOS/Windows builds where no system library is present.
+vendored = ["turbojpeg-sys/cmake"]
 # Filesystem helpers: output naming rules and safe (no-clobber) writes.
 fs = ["dep:tempfile", "dep:same-file"]
 
 [dependencies]
-turbojpeg-sys = { workspace = true, optional = true }
+turbojpeg-sys.workspace = true
 rand_chacha.workspace = true
 rand_core.workspace = true
 serde.workspace = true
 toml.workspace = true
 thiserror.workspace = true
 png.workspace = true
+tiff.workspace = true
 tempfile = { workspace = true, optional = true }
 same-file = { workspace = true, optional = true }
 

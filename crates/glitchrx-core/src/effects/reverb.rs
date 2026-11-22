@@ -1,93 +1,145 @@
-//! Comb-filter reverb: three feedback echoes in series.
+//! `reverb`: Freeverb, the algorithm behind Audacity's Reverb.
 
-use std::ops::Range;
-
-use super::{Effect, EffectInfo, PlacementDefaults, Reversibility};
+use super::{Effect, EffectInfo, Filter, PHASE, PlacementDefaults, Window};
+use crate::dsp::{Allpass, Comb};
 use crate::error::Result;
-use crate::params::{Kind, ParamSpec, Params};
+use crate::params::{Bound, Kind, ParamSpec, Params};
 use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "reverb",
     version: 1,
-    summary: "Comb-filter reverb: three feedback echoes in series, with delays `delay`, 1.37x and 1.71x `delay`.",
-    details: "Each comb computes `y[i] = x[i] + (q * y[i - d]) >> 8` modulo 256, feeding its own output back, \
-              so echoes repeat and decay. A true audio reverb is far more complex; this is a deliberately \
-              simple approximation. Interesting property: the inverse, `x[i] = y[i] - (q * y[i - d]) >> 8`, \
-              only needs output values, so it is exact even though the forward pass is recursive.",
-    reversible: Reversibility::Always,
+    audacity: "Reverb",
+    summary: "Freeverb: eight damped feedback combs in parallel, then four allpass diffusers.",
+    details: "Smears the picture into a haze of overlapping ghosts. `size` is the longest comb \
+              delay; the others keep Freeverb's ratios to it, so the ghosts never line up. \
+              `room` sets how long the tail rings, `damping` how fast fine detail dies out of it.",
     params: &[
         ParamSpec {
-            name: "delay",
-            kind: Kind::Int {
-                min: 1,
-                max: 1 << 24,
-            },
-            default: "512",
-            help: "delay of the first comb in bytes; the others are 1.37x and 1.71x",
+            name: "size",
+            kind: Kind::Size,
+            default: "0.5rows",
+            help: "longest comb delay (rows, px, % or bytes)",
+        },
+        PHASE,
+        ParamSpec {
+            name: "room",
+            kind: Kind::Float { min: 0.0, max: 1.0 },
+            default: "0.7",
+            help: "length of the tail",
         },
         ParamSpec {
-            name: "feedback",
+            name: "damping",
             kind: Kind::Float { min: 0.0, max: 1.0 },
-            default: "0.4",
-            help: "how much of each comb's output is fed back, 0..1",
+            default: "0.5",
+            help: "how fast detail fades from the tail",
+        },
+        ParamSpec {
+            name: "wet",
+            kind: Kind::Float { min: 0.0, max: 1.0 },
+            default: "0.33",
+            help: "level of the reverb",
+        },
+        ParamSpec {
+            name: "dry",
+            kind: Kind::Float { min: 0.0, max: 1.0 },
+            default: "0.5",
+            help: "level of the original (0.5 = unchanged)",
         },
     ],
     placement: PlacementDefaults {
-        region: "5%:100%",
-        hits: "2",
-        len: "1%",
+        region: "0%:100%",
+        hits: "0",
+        len: "10%",
     },
-    example: "glitchrx --reverb delay=800,feedback=0.6 photo.jpg",
+    example: "glitchrx --reverb room=0.9,wet=0.5 photo.jpg",
     build,
 };
 
+/// Freeverb's tuning, in samples at 44.1 kHz.
+const COMBS: [usize; 8] = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
+const ALLPASSES: [usize; 4] = [556, 441, 341, 225];
+/// Freeverb's scaling constants.
+const FIXED_GAIN: f64 = 0.015;
+const SCALE_WET: f64 = 3.0;
+const SCALE_DRY: f64 = 2.0;
+const SCALE_ROOM: f64 = 0.28;
+const OFFSET_ROOM: f64 = 0.7;
+const SCALE_DAMP: f64 = 0.4;
+
 fn build(p: &Params) -> Result<Box<dyn Effect>> {
-    let d = p.int("delay") as u64;
-    // 1.37 and 1.71 in integer math (rounded): roughly coprime ratios so the
-    // three combs do not reinforce each other on the same bytes.
-    let delays = [d, (d * 137 + 50) / 100, (d * 171 + 50) / 100].map(|v| v.max(1) as usize);
     Ok(Box::new(Reverb {
-        delays,
-        q: p.q8("feedback") as u32,
+        size: p.size("size"),
+        phase: p.int("phase") as usize,
+        room: p.float("room"),
+        damping: p.float("damping"),
+        wet: p.float("wet"),
+        dry: p.float("dry"),
     }))
 }
 
 struct Reverb {
-    delays: [usize; 3],
-    q: u32,
+    size: Bound,
+    phase: usize,
+    room: f64,
+    damping: f64,
+    wet: f64,
+    dry: f64,
+}
+
+struct Freeverb {
+    combs: Vec<Comb>,
+    allpasses: Vec<Allpass>,
+    wet: f64,
+    dry: f64,
+}
+
+impl Filter for Freeverb {
+    fn process(&mut self, x: &mut [f64]) {
+        for v in x {
+            let input = *v * FIXED_GAIN;
+            let mut out = 0.0;
+            for c in &mut self.combs {
+                out += c.process(input);
+            }
+            for a in &mut self.allpasses {
+                out = a.process(out);
+            }
+            *v = out * self.wet + *v * self.dry;
+        }
+    }
 }
 
 impl Effect for Reverb {
-    fn apply(&self, buf: &mut [u8], w: Range<usize>, _rng: &mut Rng) {
-        for &d in &self.delays {
-            // Forward, in place: buf[i - d] already holds this comb's output
-            // y[i - d] (or an untouched byte before the window).
-            for i in w.clone() {
-                if i >= d {
-                    let fb = ((self.q * buf[i - d] as u32) >> 8) as u8;
-                    buf[i] = buf[i].wrapping_add(fb);
-                }
-            }
-        }
-    }
-
-    fn invert(&self, buf: &mut [u8], w: Range<usize>, _rng: &mut Rng) -> Result<()> {
-        // Undo the combs in reverse order. Within a comb walk backwards so
-        // that buf[i - d] is still the comb's output y[i - d] when we read it.
-        for &d in self.delays.iter().rev() {
-            for i in w.clone().rev() {
-                if i >= d {
-                    let fb = ((self.q * buf[i - d] as u32) >> 8) as u8;
-                    buf[i] = buf[i].wrapping_sub(fb);
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn reversible(&self) -> bool {
-        true
+    fn run(&self, w: &mut Window<'_>, _rng: &mut Rng) -> Result<()> {
+        // Every delay keeps Freeverb's ratio to the longest comb. They are
+        // worked out in full-resolution bytes and only then mapped into this
+        // raster, so each one rotates the colours the same way in a preview
+        // as in the export. Capped at the window (longer would be silent).
+        let longest = w.units.full_bytes(self.size) + self.phase;
+        let frames = w.frames().max(1);
+        let lens = |bases: &[usize]| -> Vec<usize> {
+            bases
+                .iter()
+                .map(|&b| {
+                    w.samples(w.units.to_raster(b * longest / COMBS[7]))
+                        .min(frames)
+                })
+                .collect()
+        };
+        let (comb_lens, allpass_lens) = (lens(&COMBS), lens(&ALLPASSES));
+        let feedback = self.room * SCALE_ROOM + OFFSET_ROOM;
+        let damp = self.damping * SCALE_DAMP;
+        let (wet, dry) = (self.wet * SCALE_WET, self.dry * SCALE_DRY);
+        w.filter(|| Freeverb {
+            combs: comb_lens
+                .iter()
+                .map(|&n| Comb::new(n, feedback, damp))
+                .collect(),
+            allpasses: allpass_lens.iter().map(|&n| Allpass::new(n)).collect(),
+            wet,
+            dry,
+        })
     }
 }
 
@@ -95,29 +147,27 @@ impl Effect for Reverb {
 mod tests {
     use super::*;
     use crate::effects::testutil::*;
+    use crate::samples::Encoding;
 
     #[test]
-    fn hand_checked_single_comb_behaviour() {
-        // delay=1 gives comb delays 1, 1 and 2 (1.37 and 1.71 rounded). With
-        // a one-byte window at index 1, combs 1 and 2 each add half of the
-        // byte before it; comb 3 would reach index -1, so it does nothing.
-        let e = make(&INFO, "delay=1,feedback=0.5");
-        let mut b = vec![100, 10];
-        e.apply(&mut b, 1..2, &mut Rng::new(0));
-        assert_eq!(b, vec![100, 10 + 50 + 50]);
+    fn dry_only_is_identity() {
+        let e = make(&INFO, "wet=0,dry=0.5");
+        let orig = noise(3000, 2);
+        let mut b = orig.clone();
+        run(e.as_ref(), &mut b, 100, Encoding::U8);
+        assert_eq!(b, orig);
     }
 
     #[test]
-    fn round_trips() {
-        let buf = noise(6000, 2);
-        for params in [
-            "delay=1,feedback=1.0",
-            "delay=50,feedback=0.7",
-            "delay=4000",
-        ] {
-            let e = make(&INFO, params);
-            let g = round_trip(e.as_ref(), &buf, 10..6000);
-            assert_ne!(g, buf, "{params} changed nothing");
-        }
+    fn impulse_spreads_into_a_tail() {
+        let e = make(&INFO, "size=1617,phase=0,wet=1,dry=0");
+        let mut b = vec![128u8; 30_000];
+        b[0] = 255;
+        run(e.as_ref(), &mut b, 10_000, Encoding::U8);
+        // Nothing before the shortest allpass-delayed comb output...
+        assert!(b[..225].iter().all(|&v| v == 128));
+        // ...and many changed samples after it.
+        let touched = b.iter().filter(|&&v| v != 128).count();
+        assert!(touched > 100, "{touched}");
     }
 }

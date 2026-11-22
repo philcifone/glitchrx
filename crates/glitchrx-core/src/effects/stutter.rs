@@ -1,8 +1,6 @@
-//! Stutter: repeat the start of each window over the rest of it.
+//! `stutter`: repeat the start of each window across it.
 
-use std::ops::Range;
-
-use super::{Effect, EffectInfo, PlacementDefaults, Reversibility, not_reversible};
+use super::{Effect, EffectInfo, PlacementDefaults, Window};
 use crate::error::Result;
 use crate::params::{Bound, Kind, ParamSpec, Params};
 use crate::rng::Rng;
@@ -10,23 +8,23 @@ use crate::rng::Rng;
 pub static INFO: EffectInfo = EffectInfo {
     id: "stutter",
     version: 1,
-    summary: "Copy the start of each window (`chunk` bytes, or percent of the window) and repeat it until the window is full.",
-    details: "Like a skipping CD. The bytes that get overwritten are lost, so the effect cannot \
-              be reversed. The file length never changes: the repeats replace data rather than \
-              insert it.",
-    reversible: Reversibility::Never,
+    audacity: "Repeat",
+    summary: "Copy the first `chunk` of each window over the rest of it, again and again.",
+    details: "Whole rows repeat a strip of the picture down the window; part of a row gives a \
+              diagonal smear, since each repeat starts a little further along the row. A \
+              percentage `chunk` is of the window.",
     params: &[ParamSpec {
         name: "chunk",
         kind: Kind::Size,
-        default: "12%",
-        help: "length of the repeated chunk: bytes, or percent of the window",
+        default: "1rows",
+        help: "length of the repeated piece (rows, px, bytes, or % of the window)",
     }],
     placement: PlacementDefaults {
-        region: "5%:100%",
+        region: "0%:100%",
         hits: "3",
-        len: "0.5%",
+        len: "5%",
     },
-    example: "glitchrx --stutter chunk=64,len=8k photo.jpg",
+    example: "glitchrx --stutter chunk=0.9rows,hits=5 photo.jpg",
     build,
 };
 
@@ -41,20 +39,17 @@ struct Stutter {
 }
 
 impl Effect for Stutter {
-    fn apply(&self, buf: &mut [u8], w: Range<usize>, _rng: &mut Rng) {
-        let win = &mut buf[w];
-        let c = self.chunk.resolve(win.len()).max(1);
-        for i in c..win.len() {
-            win[i] = win[i % c];
+    fn run(&self, w: &mut Window<'_>, _rng: &mut Rng) -> Result<()> {
+        let f = w.frame();
+        let len = w.bytes.len();
+        let c = (self.chunk.of_window(len, w.units) / f).max(1) * f;
+        let mut at = c;
+        while at < len {
+            let n = c.min(len - at);
+            w.bytes.copy_within(0..n, at);
+            at += n;
         }
-    }
-
-    fn invert(&self, _: &mut [u8], _: Range<usize>, _: &mut Rng) -> Result<()> {
-        not_reversible("stutter")
-    }
-
-    fn reversible(&self) -> bool {
-        false
+        Ok(())
     }
 }
 
@@ -62,12 +57,21 @@ impl Effect for Stutter {
 mod tests {
     use super::*;
     use crate::effects::testutil::*;
+    use crate::samples::Encoding;
 
     #[test]
-    fn hand_checked() {
-        let e = make(&INFO, "chunk=2");
-        let mut b = vec![9, 1, 2, 3, 4, 5, 6];
-        e.apply(&mut b, 1..6, &mut Rng::new(0));
-        assert_eq!(b, vec![9, 1, 2, 1, 2, 1, 6]);
+    fn repeats_the_first_chunk() {
+        let e = make(&INFO, "chunk=4");
+        let mut b: Vec<u8> = (0..9).collect();
+        run(e.as_ref(), &mut b, 3, Encoding::U8);
+        assert_eq!(b, vec![0, 1, 2, 3, 0, 1, 2, 3, 0]);
+    }
+
+    #[test]
+    fn percent_is_of_the_window() {
+        let e = make(&INFO, "chunk=50%");
+        let mut b: Vec<u8> = (0..6).collect();
+        run(e.as_ref(), &mut b, 2, Encoding::U8);
+        assert_eq!(b, vec![0, 1, 2, 0, 1, 2]);
     }
 }

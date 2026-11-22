@@ -23,13 +23,13 @@ Report the real output. Never assume success.
 
 ## Invariants (tests enforce these)
 
-- **Header-safe.** In safe mode, every byte outside the entropy-coded data is identical to the *prepared input* (the input itself, or its lossless restart-marker rewrite when `restart` is set; SPEC D-15).
-- **Length-preserving.** Byte effects never change the payload length.
 - **Inputs are never written,** even with `--force`. Outputs are never overwritten without `--force`.
-- **Determinism:**
-  - integer math only (gains quantized to Q8)
+- **Dimensions are preserved.** Effects never change the raster's length, and write only inside their windows.
+- **Determinism** (same input, recipe and seed give the same bytes everywhere; SPEC D-25):
+  - effect math in f64 with basic operations only; no platform `exp`/`sin`/`pow` in sample loops (use `dsp.rs`)
+  - libjpeg-turbo pinned to the accurate IDCT
   - our own sampling helpers on ChaCha8
-  - a per-effect `VERSION`, bumped whenever an algorithm's output changes
+  - a per-effect `VERSION`, bumped whenever an algorithm's output changes (the golden hashes catch it)
 - **No network calls** at runtime.
 
 ## Style

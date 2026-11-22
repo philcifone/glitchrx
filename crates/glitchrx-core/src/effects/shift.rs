@@ -1,72 +1,58 @@
-//! Circular shift (rotation) of each window.
+//! `shift`: rotate each window, like cutting its end and pasting it first.
 
-use std::ops::Range;
-
-use super::{Effect, EffectInfo, PlacementDefaults, Reversibility};
+use super::{Effect, EffectInfo, PHASE, PlacementDefaults, Window};
 use crate::error::Result;
-use crate::params::{Kind, ParamSpec, Params};
+use crate::params::{Bound, Kind, ParamSpec, Params};
 use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "shift",
     version: 1,
-    summary: "Rotate each window by `by` bytes; bytes pushed off the end wrap to the start.",
-    details: "Moves a stretch of compressed data sideways. Typically shows up as blocks displaced \
-              horizontally and colour shifts from the point of the hit onwards.",
-    reversible: Reversibility::Always,
-    params: &[ParamSpec {
-        name: "by",
-        kind: Kind::Int {
-            min: -(1 << 24),
-            max: 1 << 24,
+    audacity: "cut and paste",
+    summary: "Rotate each window forward by `by`; what falls off the end wraps to the start.",
+    details: "A fraction of a row slides a band of the picture sideways. `phase` adds bytes \
+              to the distance, which moves the colour channels out of step (red into green, \
+              green into blue). Edits move whole samples, so with multi-byte encodings the \
+              distance is rounded down to a whole sample.",
+    params: &[
+        ParamSpec {
+            name: "by",
+            kind: Kind::Size,
+            default: "0.25rows",
+            help: "distance (rows, px, % or bytes)",
         },
-        default: "37",
-        help: "bytes to rotate by; negative rotates the other way",
-    }],
+        PHASE,
+    ],
     placement: PlacementDefaults {
-        region: "5%:100%",
-        hits: "4",
-        len: "1%",
+        region: "0%:100%",
+        hits: "6",
+        len: "3%",
     },
-    example: "glitchrx --shift by=200,hits=6 photo.jpg",
+    example: "glitchrx --shift by=0.5rows,phase=2,hits=12 photo.jpg",
     build,
 };
 
 fn build(p: &Params) -> Result<Box<dyn Effect>> {
-    Ok(Box::new(Shift { by: p.int("by") }))
+    Ok(Box::new(Shift {
+        by: p.size("by"),
+        phase: p.int("phase") as usize,
+    }))
 }
 
 struct Shift {
-    by: i64,
-}
-
-impl Shift {
-    /// Right-rotation amount for a window of length `n`, in `0..n`.
-    fn amount(&self, n: usize) -> usize {
-        self.by.rem_euclid(n as i64) as usize
-    }
+    by: Bound,
+    phase: usize,
 }
 
 impl Effect for Shift {
-    fn apply(&self, buf: &mut [u8], w: Range<usize>, _rng: &mut Rng) {
-        let win = &mut buf[w];
-        if !win.is_empty() {
-            let k = self.amount(win.len());
-            win.rotate_right(k);
+    fn run(&self, w: &mut Window<'_>, _rng: &mut Rng) -> Result<()> {
+        let (f, n) = (w.frame(), w.frames());
+        if n == 0 {
+            return Ok(());
         }
-    }
-
-    fn invert(&self, buf: &mut [u8], w: Range<usize>, _rng: &mut Rng) -> Result<()> {
-        let win = &mut buf[w];
-        if !win.is_empty() {
-            let k = self.amount(win.len());
-            win.rotate_left(k);
-        }
+        let k = (w.units.offset(self.by, self.phase) / f) % n;
+        w.bytes.rotate_right(k * f);
         Ok(())
-    }
-
-    fn reversible(&self) -> bool {
-        true
     }
 }
 
@@ -74,24 +60,21 @@ impl Effect for Shift {
 mod tests {
     use super::*;
     use crate::effects::testutil::*;
+    use crate::samples::Encoding;
 
     #[test]
-    fn hand_checked() {
-        let e = make(&INFO, "by=1");
-        let mut b = vec![1, 2, 3, 4, 5];
-        e.apply(&mut b, 1..4, &mut Rng::new(0));
-        assert_eq!(b, vec![1, 4, 2, 3, 5]);
-        let e = make(&INFO, "by=-1");
-        let mut b = vec![1, 2, 3, 4, 5];
-        e.apply(&mut b, 1..4, &mut Rng::new(0));
-        assert_eq!(b, vec![1, 3, 4, 2, 5]);
+    fn rotates_by_distance_plus_phase() {
+        let e = make(&INFO, "by=1px,phase=1");
+        let mut b: Vec<u8> = (0..12).collect();
+        run(e.as_ref(), &mut b, 4, Encoding::U8);
+        assert_eq!(b, vec![8, 9, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7]);
     }
 
     #[test]
-    fn round_trips() {
-        let buf = noise(1000, 3);
-        for params in ["by=1", "by=-999", "by=123456"] {
-            round_trip(make(&INFO, params).as_ref(), &buf, 5..990);
-        }
+    fn multi_byte_rounds_to_whole_samples() {
+        let e = make(&INFO, "by=3,phase=0");
+        let mut b: Vec<u8> = (0..6).collect();
+        run(e.as_ref(), &mut b, 2, Encoding::S16Be);
+        assert_eq!(b, vec![4, 5, 0, 1, 2, 3]);
     }
 }

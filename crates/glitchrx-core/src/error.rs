@@ -8,17 +8,16 @@ use thiserror::Error;
 /// variants are grouped by how a user should react to them.
 #[derive(Debug, Error)]
 pub enum Error {
-    /// The input does not start with a JPEG SOI marker.
-    #[error("not a JPEG file (no SOI marker at the start)")]
-    NotJpeg,
+    /// The input is not a JPEG, PNG or TIFF file.
+    #[error("not a JPEG, PNG or TIFF file")]
+    UnknownFormat,
 
-    /// A valid JPEG that uses a coding mode we do not handle.
-    #[error("unsupported JPEG: {0}")]
+    /// A valid file that uses a feature we do not handle.
+    #[error("unsupported image: {0}")]
     Unsupported(String),
 
-    /// The file claims to be a JPEG but its structure is broken before any
-    /// image data was found.
-    #[error("malformed JPEG: {0}")]
+    /// A file that cannot be decoded (or encoded).
+    #[error("cannot read image: {0}")]
     Malformed(String),
 
     /// An effect name that is not in the registry.
@@ -29,14 +28,13 @@ pub enum Error {
     #[error("{effect}: {msg}")]
     Param { effect: String, msg: String },
 
-    /// `invert` was requested for an effect (or configuration) that
-    /// destroys information.
-    #[error("{0} is not reversible")]
-    NotReversible(String),
-
     /// A recipe that cannot be read or does not match this build.
     #[error("recipe: {0}")]
     Recipe(String),
+
+    /// A newer request superseded this render (see [`crate::recipe::Cancel`]).
+    #[error("cancelled")]
+    Cancelled,
 }
 
 /// Convenience alias used throughout the core.

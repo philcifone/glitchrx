@@ -1,265 +1,258 @@
-//! Whole-file tests over the committed fixtures: the header-safe guarantee,
-//! byte stuffing, exact reversal, decoder robustness and determinism.
+//! Whole-image tests over the committed fixtures: decoders, orientation,
+//! colour profiles, robustness, golden hashes and preview fidelity.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use glitchrx_core::codec::{self, Format};
 use glitchrx_core::effects::REGISTRY;
-use glitchrx_core::turbo::{DecodeStatus, Scale, decode};
-use glitchrx_core::{Jpeg, Mode, Recipe, Step};
+use glitchrx_core::{Encoding, Raster, Recipe, Step, Units};
 
 fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
 }
 
-/// Every fixture as `(name, bytes)`.
+fn read(name: &str) -> Vec<u8> {
+    std::fs::read(fixture_dir().join(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
+}
+
+fn decode(name: &str) -> codec::Image {
+    codec::decode(&read(name)).unwrap_or_else(|e| panic!("{name}: {e}"))
+}
+
+/// Every image fixture as `(name, bytes)`.
 fn fixtures() -> Vec<(String, Vec<u8>)> {
     let mut v: Vec<_> = std::fs::read_dir(fixture_dir())
         .expect("tests/fixtures missing; run `just fixtures`")
         .filter_map(|e| {
             let p = e.ok()?.path();
-            (p.extension()? == "jpg").then(|| {
-                let name = p.file_name().unwrap().to_string_lossy().into_owned();
-                (name, std::fs::read(&p).unwrap())
-            })
+            let ext = p.extension()?.to_str()?;
+            Format::parse(ext)?;
+            let name = p.file_name().unwrap().to_string_lossy().into_owned();
+            Some((name, std::fs::read(&p).unwrap()))
         })
         .collect();
     v.sort();
-    assert!(v.len() >= 9, "expected the full fixture set");
+    assert!(
+        v.len() >= 25,
+        "expected the full fixture set, got {}",
+        v.len()
+    );
     v
 }
 
-/// A recipe with one step of `effect` at its defaults, plus extra params.
-fn recipe(effect: &str, params: &str, seed: u64, mode: Mode) -> Recipe {
+/// Mean absolute difference per byte between two same-sized rasters.
+fn mean_diff(a: &Raster, b: &Raster) -> f64 {
+    assert_eq!((a.width, a.height), (b.width, b.height));
+    let sum: u64 = a
+        .bytes
+        .iter()
+        .zip(&b.bytes)
+        .map(|(x, y)| x.abs_diff(*y) as u64)
+        .sum();
+    sum as f64 / a.bytes.len() as f64
+}
+
+fn recipe(effect: &str, params: &str, seed: u64, encoding: Encoding) -> Recipe {
     Recipe {
-        mode,
+        encoding,
         steps: vec![Step::new(effect, params, seed).unwrap()],
         ..Recipe::default()
     }
 }
 
-/// Heavier settings than the defaults so every effect visibly changes the
-/// payload even on small fixtures.
-fn strong(effect: &str) -> &'static str {
-    match effect {
-        "amplify" => "hits=8,len=2%",
-        "shuffle" => "hits=4,len=10%,block=64",
-        _ => "hits=8,len=2%",
-    }
-}
-
 #[test]
-fn parse_and_finish_is_identity() {
+fn every_fixture_decodes_at_its_size() {
     for (name, bytes) in fixtures() {
-        for mode in [Mode::Safe, Mode::Raw] {
-            let j = Jpeg::parse(bytes.clone(), mode).unwrap();
-            assert_eq!(
-                j.finish(),
-                bytes,
-                "{name} ({mode:?}) changed without any effect"
-            );
-        }
+        let img = codec::decode(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let want = if name.ends_with(".tif") {
+            (240, 160)
+        } else {
+            (480, 320)
+        };
+        assert_eq!((img.raster.width, img.raster.height), want, "{name}");
+        assert_eq!(img.raster.bytes.len(), want.0 * want.1 * 3, "{name}");
     }
 }
 
 #[test]
-fn fixture_layouts_are_detected() {
-    let all: BTreeMap<_, _> = fixtures().into_iter().collect();
-    let info = |n: &str| {
-        Jpeg::parse(all[n].clone(), Mode::Safe)
-            .unwrap()
-            .info()
-            .clone()
-    };
-    assert_eq!(info("baseline-420.jpg").frame.subsampling(), "4:2:0");
-    assert_eq!(info("baseline-422.jpg").frame.subsampling(), "4:2:2");
-    assert_eq!(info("baseline-444.jpg").frame.subsampling(), "4:4:4");
-    assert_eq!(info("grayscale.jpg").frame.subsampling(), "grayscale");
-    assert!(info("progressive-420.jpg").scans > 1);
-    assert!(info("restart-420.jpg").restart_markers > 0);
-    assert!(info("exif-thumbnail.jpg").has_exif_thumbnail);
-    assert!(info("trailing-data.jpg").trailing_len > 0);
-    let b = info("baseline-420.jpg");
-    assert_eq!((b.frame.width, b.frame.height), (480, 320));
-    assert!(!b.missing_eoi);
-}
-
-#[test]
-fn header_is_byte_identical_after_every_effect() {
-    for (name, bytes) in fixtures() {
-        let original = Jpeg::parse(bytes.clone(), Mode::Safe).unwrap();
-        for e in REGISTRY {
-            let out = recipe(e.id, strong(e.id), 7, Mode::Safe)
-                .apply(bytes.clone())
-                .unwrap();
-            assert_ne!(out, bytes, "{name}/{}: nothing changed", e.id);
-            let glitched = Jpeg::parse(out, Mode::Safe).unwrap();
-            assert_eq!(
-                glitched.structure(),
-                original.structure(),
-                "{name}/{}: structure changed",
-                e.id
-            );
-            assert_eq!(glitched.payload().len(), original.payload().len());
-        }
+fn orientations_come_out_upright() {
+    let upright = decode("orient-1.jpg").raster;
+    for o in 2..=8 {
+        let name = format!("orient-{o}.jpg");
+        let img = decode(&name);
+        assert_eq!(img.orientation, o, "{name}");
+        // JPEG blocks fall differently once turned, so allow a little noise.
+        let d = mean_diff(&upright, &img.raster);
+        assert!(d < 2.0, "{name}: mean difference {d:.2}");
     }
+    // TIFF is lossless, so its turned copy must match exactly.
+    let tif = decode("orient-6.tif");
+    assert_eq!(tif.orientation, 6);
+    assert_eq!(tif.raster, decode("rgb8.tif").raster);
 }
 
 #[test]
-fn safe_mode_never_leaves_unstuffed_ff() {
-    for (name, bytes) in fixtures() {
-        for e in REGISTRY {
-            let out = recipe(e.id, strong(e.id), 11, Mode::Safe)
-                .apply(bytes.clone())
-                .unwrap();
-            let j = Jpeg::parse(out.clone(), Mode::Safe).unwrap();
-            for run in j.run_ranges() {
-                let data = &out[run];
-                for (i, w) in data.windows(2).enumerate() {
-                    if w[0] == 0xFF {
-                        assert_eq!(w[1], 0x00, "{name}/{}: bare FF at run offset {i}", e.id);
-                    }
-                }
-                if let Some(&last) = data.last() {
-                    assert_ne!(last, 0xFF, "{name}/{}: run ends in a bare FF", e.id);
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn reversible_effects_restore_the_exact_file() {
-    for (name, bytes) in fixtures() {
-        for e in REGISTRY {
-            let r = recipe(e.id, strong(e.id), 3, Mode::Safe);
-            if !r.irreversible_parts().unwrap().is_empty() {
-                continue;
-            }
-            let glitched = r.apply(bytes.clone()).unwrap();
-            let restored = r.invert(glitched).unwrap();
-            assert!(
-                restored == bytes,
-                "{name}/{}: reverse did not restore",
-                e.id
-            );
-        }
-    }
-}
-
-#[test]
-fn chained_recipe_round_trips() {
-    let bytes = std::fs::read(fixture_dir().join("restart-420.jpg")).unwrap();
-    let mut r = Recipe::default();
-    for (e, p) in [
-        ("echo", "taps=3"),
-        ("shift", "by=-500"),
-        ("shuffle", ""),
-        ("amplify", "factor=-3"),
-        ("reverb", ""),
-        ("backwards", ""),
-    ] {
-        r.steps.push(Step::new(e, p, 0).unwrap());
-    }
-    r.reseed(99);
-    let glitched = r.apply(bytes.clone()).unwrap();
-    assert_ne!(glitched, bytes);
-    assert!(r.invert(glitched).unwrap() == bytes);
-}
-
-#[test]
-fn irreversible_recipes_are_refused() {
-    let bytes = std::fs::read(fixture_dir().join("baseline-420.jpg")).unwrap();
+fn lossless_variants_agree_exactly() {
+    let png = decode("rgb8.png").raster;
+    // 16-bit values v * 257 round back to v.
+    assert_eq!(decode("rgb16.png").raster, png);
+    // Alpha is dropped, colour kept.
+    assert_eq!(decode("rgba8.png").raster, png);
+    let tif = decode("rgb8.tif").raster;
+    assert_eq!(decode("lzw.tif").raster, tif);
+    assert_eq!(decode("rgb16.tif").raster, tif);
+    // Grayscale and palette images come out as RGB.
+    let g = decode("gray8.png").raster;
     assert!(
-        recipe("bitcrush", "", 1, Mode::Safe)
-            .invert(bytes.clone())
-            .is_err()
+        g.bytes
+            .chunks_exact(3)
+            .all(|p| p[0] == p[1] && p[1] == p[2])
     );
-    assert!(recipe("echo", "", 1, Mode::Raw).invert(bytes).is_err());
+    assert!(mean_diff(&decode("palette.png").raster, &png) < 40.0);
 }
 
 #[test]
-fn decoder_never_panics_on_glitched_corpus() {
-    // Raw and safe mode, every effect, extreme settings, several seeds.
-    let mut statuses: BTreeMap<&str, u32> = BTreeMap::new();
+fn colour_profiles_are_read() {
+    let icc = b"glitcharaxia test profile; not a real ICC profile.";
+    for name in ["icc-profile.jpg", "rgb8.png", "rgb8.tif"] {
+        assert_eq!(decode(name).icc.as_deref(), Some(&icc[..]), "{name}");
+    }
+    assert!(decode("baseline-420.jpg").icc.is_none());
+}
+
+#[test]
+fn cmyk_and_grayscale_jpegs_look_right() {
+    let reference = decode("baseline-444.jpg").raster;
+    let cmyk = decode("cmyk.jpg").raster;
+    let d = mean_diff(&reference, &cmyk);
+    assert!(d < 3.0, "cmyk differs by {d:.2}");
+    let g = decode("grayscale.jpg").raster;
+    assert!(
+        g.bytes
+            .chunks_exact(3)
+            .all(|p| p[0] == p[1] && p[1] == p[2])
+    );
+}
+
+/// Damaged files either decode (viewers would show them) or fail with an
+/// error. They must never panic.
+#[test]
+fn damaged_files_never_panic() {
     for (name, bytes) in fixtures() {
-        let (_, clean) = decode(&bytes, Scale::Full);
-        assert_eq!(clean, DecodeStatus::Clean, "{name} should decode cleanly");
-        for e in REGISTRY {
-            for (mode, seed) in [(Mode::Safe, 1), (Mode::Raw, 2), (Mode::Raw, 3)] {
-                let r = recipe(e.id, "hits=0,region=1%:100%", seed, mode);
-                let Ok(out) = r.apply(bytes.clone()) else {
-                    continue; // e.g. amplify defaults are fine; nothing should fail
-                };
-                for scale in [Scale::Full, Scale::Eighth] {
-                    let (img, status) = decode(&out, scale);
-                    if let Some(img) = &img {
-                        assert_eq!(img.rgba.len(), (img.width * img.height * 4) as usize);
-                    }
-                    *statuses.entry(status.word()).or_default() += 1;
-                }
+        for cut in [8, 64, bytes.len() / 3, bytes.len() * 9 / 10] {
+            let _ = codec::decode(&bytes[..cut.min(bytes.len())]);
+        }
+        let mut flipped = bytes.clone();
+        for i in (20..flipped.len()).step_by(97) {
+            flipped[i] ^= 0x5A;
+        }
+        let _ = codec::decode(&flipped);
+        let _ = name;
+    }
+}
+
+#[test]
+fn every_effect_keeps_dimensions_and_stays_in_its_windows() {
+    let base = decode("baseline-444.jpg").raster;
+    let units = Units::full(base.width, base.height);
+    for e in REGISTRY {
+        for enc in [Encoding::U8, Encoding::S16Be, Encoding::S24Le] {
+            let r = recipe(e.id, "hits=5,len=3%", 7, enc);
+            let step = &r.prepare_all().unwrap()[0];
+            let mut out = base.clone();
+            r.apply(&mut out).unwrap();
+            assert_eq!(out.bytes.len(), base.bytes.len());
+            let mut inside = vec![false; base.bytes.len()];
+            for w in step.placement.windows(&units, step.frame(), step.seed) {
+                inside[w].iter_mut().for_each(|b| *b = true);
             }
-        }
-    }
-    // Printed with --nocapture; useful when revisiting the decoder decision.
-    println!("decode statuses over glitched corpus: {statuses:?}");
-}
-
-#[test]
-fn every_effect_changes_the_image_at_its_defaults() {
-    // Guards against defaults that are no-ops on small images (for example
-    // a block size larger than the hit window).
-    for (name, bytes) in fixtures() {
-        for e in REGISTRY {
-            let out = recipe(e.id, "", 42, Mode::Safe)
-                .apply(bytes.clone())
-                .unwrap();
-            assert_ne!(out, bytes, "{name}: `{}` at defaults changed nothing", e.id);
+            for (i, (a, b)) in base.bytes.iter().zip(&out.bytes).enumerate() {
+                assert!(
+                    inside[i] || a == b,
+                    "{} ({enc}) wrote byte {i} outside its windows",
+                    e.id
+                );
+            }
+            assert_ne!(out, base, "{} ({enc}) changed nothing", e.id);
         }
     }
 }
 
+/// BLAKE3 of decode-then-bend for every effect at its defaults in every
+/// encoding (and stereo `u8`). Any change here means the output for an
+/// existing recipe changed: bump that effect's `version`.
 #[test]
 fn golden_hashes() {
-    // Determinism: these bytes must never change for a given effect version.
-    // Snapshot updates need an effect VERSION bump or a written justification.
-    let bytes = std::fs::read(fixture_dir().join("baseline-420.jpg")).unwrap();
+    let base = decode("baseline-420.jpg").raster;
     let mut hashes = BTreeMap::new();
+    hashes.insert(
+        "decoded".to_string(),
+        blake3::hash(&base.bytes).to_hex().to_string(),
+    );
     for e in REGISTRY {
-        let out = recipe(e.id, "", 42, Mode::Safe)
-            .apply(bytes.clone())
-            .unwrap();
-        hashes.insert(e.id, blake3::hash(&out).to_hex().to_string());
+        for enc in Encoding::ALL {
+            let mut out = base.clone();
+            recipe(e.id, "", 0xC0FFEE, enc).apply(&mut out).unwrap();
+            hashes.insert(
+                format!("{}/{enc}", e.id),
+                blake3::hash(&out.bytes).to_hex().to_string(),
+            );
+        }
+        let mut out = base.clone();
+        let mut r = recipe(e.id, "", 0xC0FFEE, Encoding::U8);
+        r.channels = 2;
+        r.apply(&mut out).unwrap();
+        hashes.insert(
+            format!("{}/u8-stereo", e.id),
+            blake3::hash(&out.bytes).to_hex().to_string(),
+        );
     }
     insta::assert_yaml_snapshot!(hashes);
 }
 
-/// Adding restart markers is lossless on every fixture: same pixels, same
-/// thumbnail and trailing data, and the markers are really there. Then a
-/// glitch on the prepared file reverses back to the prepared file exactly.
+/// A step run on a quarter-size preview should look like the full-size
+/// result scaled down (SPEC D-26). The bound is loose on purpose: previews
+/// are "close, not identical". The measured differences are printed so the
+/// threshold can be tightened (`cargo test -- --nocapture`).
+///
+/// Two limits are inherent to scaled previews. A delay that wraps past the
+/// end of a row moves its ghost down one row, and a preview row stands for
+/// several full rows, so long feedback chains (`reverb`) drift. And sizes
+/// below a preview row (`shuffle` blocks of half a row) leave fewer pieces
+/// in the preview, so a seeded permutation of them cannot match.
 #[test]
-fn restart_markers_are_lossless_and_round_trip() {
-    use glitchrx_core::Restart;
-    for (name, bytes) in fixtures() {
-        let before = Jpeg::parse(bytes.clone(), Mode::Safe).unwrap();
-        let r = Recipe {
-            restart: Some(Restart::MilliPercent(10_000)),
-            ..recipe("echo", "", 9, Mode::Safe)
-        };
-        let prepared = r.prepare_input(bytes.clone()).unwrap();
-        let after = Jpeg::parse(prepared.clone(), Mode::Safe).unwrap();
-        let (bi, ai) = (before.info(), after.info());
-        assert!(ai.restart_interval > 0 && ai.restart_markers > 0, "{name}");
-        assert_eq!(ai.has_exif_thumbnail, bi.has_exif_thumbnail, "{name}");
-        assert_eq!(ai.trailing_len, bi.trailing_len, "{name}");
-        assert!(
-            prepared.ends_with(&bytes[bytes.len() - bi.trailing_len..]),
-            "{name}: trailing data changed"
+fn previews_resemble_the_export() {
+    let full = decode("baseline-444.jpg").raster;
+    let (pw, ph) = (full.width / 4, full.height / 4);
+    let small = full.downscale(pw, ph);
+    let units = Units {
+        full_width: full.width,
+        full_height: full.height,
+        width: small.width,
+        height: small.height,
+    };
+    for e in REGISTRY {
+        let r = recipe(e.id, "", 11, Encoding::U8);
+        let mut export = full.clone();
+        r.apply(&mut export).unwrap();
+        let export = export.downscale(pw, ph);
+        let mut preview = small.clone();
+        r.apply_with(&mut preview.bytes, &units, glitchrx_core::recipe::NEVER)
+            .unwrap();
+        // How far the effect moves the picture, and how far the preview is
+        // from the truth. A useful preview is much closer than the effect
+        // is strong.
+        let strength = mean_diff(&small, &export);
+        let error = mean_diff(&preview, &export);
+        println!(
+            "{:>10}: strength {strength:6.2}  preview error {error:6.2}",
+            e.id
         );
-        let px = |b: &[u8]| decode(b, Scale::Full).0.unwrap().rgba;
-        assert!(px(&prepared) == px(&bytes), "{name}: pixels changed");
-
-        let glitched = r.apply(bytes.clone()).unwrap();
-        assert_eq!(r.invert(glitched).unwrap(), prepared, "{name}");
+        assert!(
+            error < 12.0,
+            "{}: preview error {error:.2} vs strength {strength:.2}",
+            e.id
+        );
     }
 }

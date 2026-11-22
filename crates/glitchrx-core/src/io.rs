@@ -27,24 +27,8 @@ pub enum WriteError {
     Io { path: PathBuf, source: io::Error },
 }
 
-/// Which family of automatic names to use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Suffix {
-    Glitch,
-    Restored,
-}
-
-impl Suffix {
-    fn as_str(self) -> &'static str {
-        match self {
-            Suffix::Glitch => "glitch",
-            Suffix::Restored => "restored",
-        }
-    }
-}
-
-/// Strip trailing `-glitch`, `-glitch-N`, `-restored`, `-restored-N` (any
-/// number of times) so that re-glitching `photo-glitch-1.jpg` continues the
+/// Strip trailing `-glitch`, `-glitch-N` (and the `-restored` names the
+/// archived JPEG engine wrote), any number of times, so that re-glitching `photo-glitch-1.jpg` continues the
 /// `photo-glitch-*` sequence instead of starting `photo-glitch-1-glitch`.
 pub fn base_stem(stem: &str) -> &str {
     let mut s = stem;
@@ -87,11 +71,11 @@ fn sequence_number(stem: &str, base: &str, suffix: &str) -> Option<u64> {
 
 /// Pick the next free automatic output name for `input`.
 ///
-/// `photo.jpg` gives `photo-glitch.jpg`, then `photo-glitch-1.jpg`,
-/// `photo-glitch-2.jpg`, ... The number is one past the highest existing one
-/// (any extension counts, so baked PNGs and JPEGs never collide). The input's
-/// extension is kept.
-pub fn auto_output(input: &Path, suffix: Suffix) -> io::Result<PathBuf> {
+/// `photo.jpg` with extension `tif` gives `photo-glitch.tif`, then
+/// `photo-glitch-1.tif`, `photo-glitch-2.tif`, ... The number is one past
+/// the highest existing one (any extension counts, so TIFF, PNG and JPEG
+/// outputs of the same photo never share a number).
+pub fn auto_output(input: &Path, extension: &str) -> io::Result<PathBuf> {
     let dir = match input.parent() {
         Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
         _ => PathBuf::from("."),
@@ -101,7 +85,7 @@ pub fn auto_output(input: &Path, suffix: Suffix) -> io::Result<PathBuf> {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
     let base = base_stem(&stem).to_string();
-    let tag = suffix.as_str();
+    let tag = "glitch";
 
     let mut highest: Option<u64> = None;
     for entry in fs::read_dir(&dir)? {
@@ -117,11 +101,7 @@ pub fn auto_output(input: &Path, suffix: Suffix) -> io::Result<PathBuf> {
         None => format!("{base}-{tag}"),
         Some(n) => format!("{base}-{tag}-{}", n + 1),
     };
-    let mut name = file_stem;
-    if let Some(ext) = input.extension() {
-        name.push('.');
-        name.push_str(&ext.to_string_lossy());
-    }
+    let name = format!("{file_stem}.{extension}");
     // with_file_name keeps the input's own directory spelling (no "./").
     Ok(input.with_file_name(name))
 }

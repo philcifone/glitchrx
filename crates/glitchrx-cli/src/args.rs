@@ -12,7 +12,9 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use clap::{ArgAction, Parser, ValueEnum};
-use glitchrx_core::effects::{REGISTRY, Reversibility};
+use glitchrx_core::Encoding;
+use glitchrx_core::codec::Format;
+use glitchrx_core::effects::REGISTRY;
 
 /// One effect flag from the command line, in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,12 +70,25 @@ fn looks_like_params(s: &str) -> bool {
     s.contains('=') && !s.starts_with('-') && !Path::new(s).exists()
 }
 
+/// Output formats for `--format`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum ModeArg {
-    /// Effects see de-stuffed data; the output is always structurally valid.
-    Safe,
-    /// Effects see the bytes as stored (Audacity-style); may truncate the image.
-    Raw,
+pub enum FormatArg {
+    /// Uncompressed 8-bit RGB TIFF, for Photoshop (the default).
+    Tiff,
+    /// Lossless PNG.
+    Png,
+    /// JPEG, quality 95, full chroma.
+    Jpeg,
+}
+
+impl From<FormatArg> for Format {
+    fn from(f: FormatArg) -> Format {
+        match f {
+            FormatArg::Tiff => Format::Tiff,
+            FormatArg::Png => Format::Png,
+            FormatArg::Jpeg => Format::Jpeg,
+        }
+    }
 }
 
 /// Everything except the effect flags.
@@ -81,7 +96,7 @@ pub enum ModeArg {
 #[command(
     name = "glitchrx",
     version,
-    about = "Glitch art from JPEG files: audio-style effects applied to the compressed image data.",
+    about = "Databending: glitch art from photos, by running Audacity-style audio effects over their raw pixels.",
     long_about = None,
     override_usage = "glitchrx [--EFFECT [k=v,...]]... [OPTIONS] INPUT [OUTPUT]\n       \
                       glitchrx [--EFFECT [k=v,...]]... [OPTIONS] --batch INPUT...\n       \
@@ -103,10 +118,6 @@ pub struct Cli {
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(0..=i64::MAX as u64))]
     pub seed: Option<u64>,
 
-    /// Undo the given effects (exactly the same flags and --seed) on a glitched file.
-    #[arg(long)]
-    pub reverse: bool,
-
     /// Apply a saved recipe instead of effect flags.
     #[arg(long, value_name = "FILE")]
     pub recipe: Option<PathBuf>,
@@ -115,19 +126,19 @@ pub struct Cli {
     #[arg(long, value_name = "FILE", num_args = 0..=1, require_equals = true)]
     pub save_recipe: Option<Option<PathBuf>>,
 
-    /// How effects see the image data.
-    #[arg(long, value_enum, default_value = "safe")]
-    pub mode: ModeArg,
+    /// Output format when no output file is named [default: tiff].
+    /// A named output's extension decides its format.
+    #[arg(long, value_enum, value_name = "FORMAT")]
+    pub format: Option<FormatArg>,
 
-    /// Before glitching, losslessly add restart markers every ROWS MCU rows or
-    /// every PERCENT% of the image height, so each glitch stays in a band of
-    /// that height. `0` removes them, `keep` leaves the file as it is.
-    #[arg(long, value_name = "ROWS|PERCENT%|keep", value_parser = parse_restart)]
-    pub restart: Option<RestartArg>,
+    /// How steps read the pixels as audio samples [default: u8]. A step can
+    /// override it with encoding=... in its parameters.
+    #[arg(long, value_name = "ENC", value_parser = parse_encoding)]
+    pub encoding: Option<Encoding>,
 
-    /// Also write the decoded result as PNG [default: OUTPUT-STEM.png]
-    #[arg(long, value_name = "FILE", num_args = 0..=1, require_equals = true)]
-    pub bake: Option<Option<PathBuf>>,
+    /// 1 (mono) or 2 (stereo: alternate samples are left and right) [default: 1].
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u8).range(1..=2))]
+    pub channels: Option<u8>,
 
     /// Allow overwriting an existing output file (never the input).
     #[arg(long)]
@@ -137,7 +148,7 @@ pub struct Cli {
     #[arg(long)]
     pub batch: bool,
 
-    /// Show the structure of the input JPEG(s) and exit.
+    /// Show format, size, orientation and colour profile of the input(s), then exit.
     #[arg(long)]
     pub info: bool,
 
@@ -149,31 +160,34 @@ pub struct Cli {
     #[arg(short, long, conflicts_with = "verbose")]
     pub quiet: bool,
 
-    /// Print more detail (decoder messages, step seeds).
+    /// Print more detail (step seeds and encodings).
     #[arg(short, long, action = ArgAction::SetTrue)]
     pub verbose: bool,
 }
 
-/// Text appended to `--help`: the effect list and examples.
+fn parse_encoding(s: &str) -> Result<Encoding, String> {
+    Encoding::parse(s).map_err(|e| e.to_string())
+}
+
+/// Text appended to `--help`: the effect list, encodings and examples.
 pub fn after_help() -> String {
     let mut s = String::from("Effects (chainable; applied in command-line order):\n");
     for e in REGISTRY {
-        let rev = match e.reversible {
-            Reversibility::Always => "reversible",
-            Reversibility::Never => "not reversible",
-            Reversibility::Depends(_) => "reversible in wrap mode",
-        };
-        s.push_str(&format!("  --{:<10} {} [{rev}]\n", e.id, e.summary));
+        s.push_str(&format!("  --{:<10} {}\n", e.id, e.summary));
+    }
+    s.push_str("\nEncodings (--encoding, or encoding=... per effect):\n");
+    for e in Encoding::ALL {
+        s.push_str(&format!("  {:<7} {}\n", e.name(), e.describe()));
     }
     s.push_str(
-        "\nEffect parameters follow the flag as key=value pairs, e.g. --echo delay=4096,gain=0.7\n\
-         Run `glitchrx --list` for every parameter and its default.\n\
+        "\nEffect parameters follow the flag as key=value pairs, e.g. --echo delay=0.33rows,decay=0.6\n\
+         Sizes take rows, px, % or bytes. Run `glitchrx --list` for every parameter.\n\
          \nExamples:\n  \
-         glitchrx --echo photo.jpg                      writes photo-glitch.jpg\n  \
-         glitchrx --echo photo.jpg out.jpg              writes out.jpg\n  \
-         glitchrx --echo delay=4096 --shift by=200 photo.jpg\n  \
-         glitchrx --reverse --echo delay=4096 --seed 81723 photo-glitch.jpg\n  \
-         glitchrx --shuffle --batch *.jpg\n  \
+         glitchrx --echo photo.jpg                      writes photo-glitch.tif\n  \
+         glitchrx --echo photo.jpg out.png              writes out.png\n  \
+         glitchrx --reverb --echo phase=2 --encoding ulaw photo.jpg\n  \
+         glitchrx --shift by=0.5rows,hits=12 --format jpeg photo.jpg\n  \
+         glitchrx --recipe moody.toml --batch *.jpg\n  \
          glitchrx --info photo.jpg\n  \
          glitchrx serve --root ~/Pictures               web GUI (see glitchrx serve --help)\n\
          \nOriginals are never modified, and existing files are never overwritten without --force.",
@@ -185,14 +199,9 @@ pub fn after_help() -> String {
 pub fn list_text() -> String {
     let mut s = String::new();
     for e in REGISTRY {
-        let rev = match e.reversible {
-            Reversibility::Always => "yes".to_string(),
-            Reversibility::Never => "no".to_string(),
-            Reversibility::Depends(why) => why.to_string(),
-        };
         s.push_str(&format!(
-            "--{}\n  {}\n  reversible: {rev}\n",
-            e.id, e.summary
+            "--{}\n  {}\n  follows Audacity's {}\n",
+            e.id, e.summary, e.audacity
         ));
         for p in e.all_params() {
             s.push_str(&format!(
@@ -202,7 +211,10 @@ pub fn list_text() -> String {
         }
         s.push_str(&format!("  example: {}\n\n", e.example));
     }
-    s.push_str("Columns: parameter, default, meaning.\n");
+    s.push_str(
+        "Every effect also takes encoding=ENC and channels=1|2 to override the recipe's.\n\
+         Columns: parameter, default, meaning.\n",
+    );
     s
 }
 
@@ -234,7 +246,7 @@ mod tests {
             "by=5",
             "--seed",
             "3",
-            "--echo=delay=9,gain=0.1",
+            "--echo=delay=9,decay=0.1",
             "in.jpg",
         ]));
         assert_eq!(
@@ -248,17 +260,17 @@ mod tests {
             e[1],
             EffectArg {
                 id: "echo",
-                params: "delay=9,gain=0.1".into()
+                params: "delay=9,decay=0.1".into()
             }
         );
         assert_eq!(rest, os(&["--seed", "3", "in.jpg"]));
     }
 
     #[test]
-    fn reverse_flag_is_not_an_effect() {
-        let (e, rest) = split_effects(os(&["--reverse", "--echo", "x.jpg"]));
+    fn other_flags_are_not_effects() {
+        let (e, rest) = split_effects(os(&["--format", "png", "--echo", "x.jpg"]));
         assert_eq!(e.len(), 1);
-        assert_eq!(rest, os(&["--reverse", "x.jpg"]));
+        assert_eq!(rest, os(&["--format", "png", "x.jpg"]));
     }
 
     #[test]
@@ -267,20 +279,4 @@ mod tests {
         assert!(e.is_empty());
         assert_eq!(rest, os(&["--", "--echo"]));
     }
-}
-
-/// `--restart` value: an interval, or `keep` to leave the file as it is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RestartArg {
-    Keep,
-    Set(glitchrx_core::Restart),
-}
-
-fn parse_restart(s: &str) -> Result<RestartArg, String> {
-    if s == "keep" {
-        return Ok(RestartArg::Keep);
-    }
-    glitchrx_core::Restart::parse(s)
-        .map(RestartArg::Set)
-        .map_err(|e| e.to_string())
 }

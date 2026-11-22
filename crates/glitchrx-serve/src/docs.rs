@@ -1,33 +1,32 @@
 //! Open documents and their render cache.
 //!
-//! A *document* is one photo opened in the GUI: its original bytes, where it
+//! A *document* is one photo opened in the GUI: the decoded image, where it
 //! came from, and a cache that makes re-rendering cheap while a slider moves.
 //!
-//! The cache follows SPEC 10.2. Rendering a recipe means:
+//! Previews run the recipe on a screen-sized copy of the image (SPEC D-26):
+//! a 26 MP photo shrunk to a phone screen is about 1/20 of the samples, so
+//! even heavy steps answer quickly. Sizes in the recipe are mapped to the
+//! smaller raster ([`Units`]), so the preview looks like the export without
+//! being byte-identical to it.
 //!
-//! 1. *Prepare* the input (add restart markers) and parse it. This is the
-//!    slow part (a lossless transform of the whole file), so its result is
-//!    kept until `restart` or `mode` changes.
-//! 2. Run the steps over the payload. The payload after each step is cached,
-//!    keyed by the step itself, so when only step 3 of 4 changes, steps 1 and
-//!    2 are not re-run. Because a step carries its own seed, "the same step"
-//!    really does mean "the same bytes out".
-//! 3. Re-stuff and reassemble the file.
+//! The cache keeps the preview-sized base and the raster after each step,
+//! keyed by the step itself (with its encoding), so when only step 3 of 4
+//! changes, steps 1 and 2 are not re-run. A step carries its own seed, so
+//! "the same step" really does mean "the same bytes out".
 //!
-//! The result is byte-identical to [`Recipe::apply`] on the original (a test
-//! checks this), so what the GUI previews is exactly what the CLI would write.
+//! Exports run the recipe on the full raster, exactly as the CLI does.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use glitchrx_core::formats::jpeg::Info;
-use glitchrx_core::recipe::with_restarts;
-use glitchrx_core::{Jpeg, Mode, Recipe, Restart, Result, Step};
+use glitchrx_core::codec::{self, Image};
+use glitchrx_core::recipe::Cancel;
+use glitchrx_core::{Encoding, Raster, Recipe, Result, Step, Units};
 
-/// Upper bound on cached per-step payloads, in bytes, per document. A 24 MP
-/// photo has roughly a 10 MB payload, so this keeps about nine steps.
+/// Upper bound on cached per-step preview rasters, in bytes, per document.
+/// A 4096-pixel preview is about 50 MB, a phone-sized one about 5 MB.
 const STEP_CACHE_BYTES: usize = 96 << 20;
 
 /// One open photo.
@@ -38,9 +37,10 @@ pub struct Doc {
     /// Absolute path when the photo was opened from the server's `--root`
     /// (so results can be saved next to it); `None` for uploads.
     pub source: Option<PathBuf>,
-    pub original: Arc<Vec<u8>>,
-    /// Layout of the original file.
-    pub info: Info,
+    /// Size of the original file.
+    pub file_len: usize,
+    /// The decoded, upright image.
+    pub image: Arc<Image>,
     /// Bumped by every preview request; a request that finds it changed by
     /// the time it gets to run has been superseded and is dropped.
     generation: AtomicU64,
@@ -52,28 +52,26 @@ struct RenderCache {
     base: Option<Base>,
 }
 
-/// The prepared, parsed input plus per-step payload snapshots.
+/// A step as it ran: the step and the sample format it ran with.
+type StepKey = (Step, Encoding, usize);
+
+/// The preview-sized original plus per-step snapshots.
 struct Base {
-    restart: Option<Restart>,
-    mode: Mode,
-    /// Parsed prepared input; its payload is overwritten for every render.
-    jpeg: Jpeg,
-    /// The payload before any step ran.
-    pristine: Vec<u8>,
-    /// `steps[i]` holds step `i` and the payload after steps `0..=i`.
-    steps: Vec<(Step, Vec<u8>)>,
+    raster: Raster,
+    /// `steps[i]` holds step `i` and the raster after steps `0..=i`.
+    steps: Vec<(StepKey, Vec<u8>)>,
 }
 
 impl Doc {
-    /// Parse `bytes` as a JPEG and wrap it as a document.
-    pub fn new(id: String, name: String, source: Option<PathBuf>, bytes: Vec<u8>) -> Result<Doc> {
-        let info = Jpeg::parse(bytes.clone(), Mode::Safe)?.info().clone();
+    /// Decode `bytes` (JPEG, PNG or TIFF) and wrap it as a document.
+    pub fn new(id: String, name: String, source: Option<PathBuf>, bytes: &[u8]) -> Result<Doc> {
+        let image = codec::decode(bytes)?;
         Ok(Doc {
             id,
             name,
             source,
-            original: Arc::new(bytes),
-            info,
+            file_len: bytes.len(),
+            image: Arc::new(image),
             generation: AtomicU64::new(0),
             cache: Mutex::new(RenderCache::default()),
         })
@@ -94,56 +92,79 @@ impl Doc {
         self.cache.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    /// Glitch the original with `recipe`, reusing cached work.
-    pub fn glitch(&self, recipe: &Recipe) -> Result<Vec<u8>> {
+    /// Units for a raster of `w` x `h` standing in for this image.
+    fn units(&self, w: usize, h: usize) -> Units {
+        Units {
+            full_width: self.image.raster.width,
+            full_height: self.image.raster.height,
+            width: w,
+            height: h,
+        }
+    }
+
+    /// The untouched image, fitted to `max_w` x `max_h`.
+    pub fn original(&self, max_w: usize, max_h: usize) -> Raster {
+        self.image.raster.downscale(max_w, max_h)
+    }
+
+    /// Bend a preview-sized copy with `recipe`, reusing cached work. Stops
+    /// with [`glitchrx_core::Error::Cancelled`] when `cancel` says so; the
+    /// steps finished so far stay cached.
+    pub fn preview(
+        &self,
+        recipe: &Recipe,
+        max_w: usize,
+        max_h: usize,
+        cancel: Cancel<'_>,
+    ) -> Result<Raster> {
         // Validate every step before touching the cache.
-        let prepared = recipe
-            .steps
-            .iter()
-            .map(Step::prepare)
-            .collect::<Result<Vec<_>>>()?;
+        let prepared = recipe.prepare_all()?;
+        let size = self.image.raster.fit(max_w, max_h);
 
         let mut cache = self.lock();
-        let reuse =
-            matches!(&cache.base, Some(b) if b.restart == recipe.restart && b.mode == recipe.mode);
-        if !reuse {
-            let input = match recipe.restart {
-                Some(r) => with_restarts(self.original.to_vec(), r)?,
-                None => self.original.to_vec(),
-            };
-            let jpeg = Jpeg::parse(input, recipe.mode)?;
+        if !matches!(&cache.base, Some(b) if (b.raster.width, b.raster.height) == size) {
             cache.base = Some(Base {
-                restart: recipe.restart,
-                mode: recipe.mode,
-                pristine: jpeg.payload().to_vec(),
-                jpeg,
+                raster: self.image.raster.resize(size.0, size.1),
                 steps: Vec::new(),
             });
         }
         let base = cache.base.as_mut().expect("base was just set");
+        let keys: Vec<StepKey> = recipe
+            .steps
+            .iter()
+            .zip(&prepared)
+            .map(|(s, p)| (s.clone(), p.encoding, p.channels))
+            .collect();
 
         // Longest prefix of steps that is already cached.
         let keep = base
             .steps
             .iter()
-            .zip(&recipe.steps)
-            .take_while(|((cached, _), step)| cached == *step)
+            .zip(&keys)
+            .take_while(|((cached, _), key)| cached == *key)
             .count();
         base.steps.truncate(keep);
 
-        let mut payload = match keep {
-            0 => base.pristine.clone(),
+        let mut bytes = match keep {
+            0 => base.raster.bytes.clone(),
             n => base.steps[n - 1].1.clone(),
         };
-        let max_cached = (STEP_CACHE_BYTES / payload.len().max(1)).max(1);
-        for (step, p) in recipe.steps[keep..].iter().zip(&prepared[keep..]) {
-            p.apply(&mut payload);
+        let units = self.units(size.0, size.1);
+        let max_cached = (STEP_CACHE_BYTES / bytes.len().max(1)).max(1);
+        for (key, p) in keys.into_iter().zip(&prepared).skip(keep) {
+            p.apply(&mut bytes, &units, cancel)?;
             if base.steps.len() < max_cached {
-                base.steps.push((step.clone(), payload.clone()));
+                base.steps.push((key, bytes.clone()));
             }
         }
-        base.jpeg.payload_mut().copy_from_slice(&payload);
-        Ok(base.jpeg.finish())
+        Ok(Raster::new(size.0, size.1, bytes))
+    }
+
+    /// Bend the full-resolution image, exactly as the CLI would.
+    pub fn render_full(&self, recipe: &Recipe) -> Result<Raster> {
+        let mut raster = self.image.raster.clone();
+        recipe.apply(&mut raster)?;
+        Ok(raster)
     }
 }
 
@@ -208,15 +229,20 @@ pub fn random_hex(bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glitchrx_core::recipe::NEVER;
 
     fn fixture(name: &str) -> Vec<u8> {
         let path = format!("{}/../../tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
         std::fs::read(path).unwrap()
     }
 
-    fn recipe(steps: &[(&str, &str, u64)], restart: Option<Restart>) -> Recipe {
+    fn doc(name: &str) -> Doc {
+        Doc::new("t".into(), name.into(), None, &fixture(name)).unwrap()
+    }
+
+    fn recipe(steps: &[(&str, &str, u64)], encoding: Encoding) -> Recipe {
         Recipe {
-            restart,
+            encoding,
             steps: steps
                 .iter()
                 .map(|(e, p, s)| Step::new(e, p, *s).unwrap())
@@ -225,48 +251,74 @@ mod tests {
         }
     }
 
-    /// Whatever order edits arrive in, the cached render equals a fresh
-    /// `Recipe::apply`. This is the "preview is the export" guarantee.
+    /// Whatever order edits arrive in, the cached preview equals a fresh
+    /// run of the recipe on the same preview-sized raster.
     #[test]
-    fn cached_render_matches_apply() {
-        let bytes = fixture("baseline-420.jpg");
-        let doc = Doc::new("t".into(), "t.jpg".into(), None, bytes.clone()).unwrap();
-        let pct = Some(Restart::MilliPercent(10_000));
+    fn cached_preview_matches_a_fresh_run() {
+        let d = doc("baseline-420.jpg");
         let sequence = [
-            recipe(&[("echo", "", 1)], pct),
-            recipe(&[("echo", "", 1), ("shift", "", 2)], pct),
-            recipe(&[("echo", "", 1), ("shift", "by=50", 2)], pct),
+            recipe(&[("echo", "", 1)], Encoding::U8),
+            recipe(&[("echo", "", 1), ("shift", "", 2)], Encoding::U8),
+            recipe(&[("echo", "", 1), ("shift", "by=50", 2)], Encoding::U8),
             recipe(
                 &[("echo", "", 1), ("shift", "by=50", 2), ("stutter", "", 3)],
-                pct,
+                Encoding::U8,
             ),
-            recipe(&[("echo", "gain=0.9", 1), ("shift", "by=50", 2)], pct),
-            recipe(&[("echo", "gain=0.9", 1), ("shift", "by=50", 2)], None),
-            recipe(&[], None),
-            recipe(&[("backwards", "", 4)], Some(Restart::Rows(2))),
+            recipe(
+                &[("echo", "decay=0.9", 1), ("shift", "by=50", 2)],
+                Encoding::U8,
+            ),
+            // Same steps, different recipe-wide encoding: must not reuse.
+            recipe(
+                &[("echo", "decay=0.9", 1), ("shift", "by=50", 2)],
+                Encoding::ULaw,
+            ),
+            recipe(&[], Encoding::U8),
+            recipe(&[("backwards", "", 4)], Encoding::S16Le),
         ];
-        for r in &sequence {
-            assert_eq!(
-                doc.glitch(r).unwrap(),
-                r.apply(bytes.clone()).unwrap(),
-                "{r:?}"
-            );
+        for (w, h) in [(120, 120), (480, 480), (120, 120)] {
+            for r in &sequence {
+                let got = d.preview(r, w, h, NEVER).unwrap();
+                let mut want = d.original(w, h);
+                let units = d.units(want.width, want.height);
+                r.apply_with(&mut want.bytes, &units, NEVER).unwrap();
+                assert_eq!(got, want, "{r:?} at {w}x{h}");
+            }
         }
     }
 
     #[test]
+    fn full_render_matches_apply() {
+        let d = doc("rgb8.png");
+        let r = recipe(&[("reverb", "", 9)], Encoding::S8);
+        let mut want = d.image.raster.clone();
+        r.apply(&mut want).unwrap();
+        assert_eq!(d.render_full(&r).unwrap(), want);
+    }
+
+    #[test]
+    fn cancelled_preview_is_an_error_and_cache_survives() {
+        let d = doc("baseline-420.jpg");
+        let r = recipe(&[("echo", "", 1)], Encoding::U8);
+        let err = d.preview(&r, 200, 200, &|| true);
+        assert!(matches!(err, Err(glitchrx_core::Error::Cancelled)));
+        assert!(d.preview(&r, 200, 200, NEVER).is_ok());
+    }
+
+    #[test]
     fn bad_step_is_an_error_not_a_panic() {
-        let doc = Doc::new("t".into(), "t.jpg".into(), None, fixture("grayscale.jpg")).unwrap();
-        let mut r = recipe(&[("echo", "", 1)], None);
-        r.steps[0].params.insert("gain".into(), "7".into());
-        assert!(doc.glitch(&r).is_err());
+        let d = doc("grayscale.jpg");
+        let mut r = recipe(&[("echo", "", 1)], Encoding::U8);
+        r.steps[0].params.insert("decay".into(), "7".into());
+        assert!(d.preview(&r, 100, 100, NEVER).is_err());
     }
 
     #[test]
     fn store_evicts_least_recently_used() {
         let store = Store::new(2);
-        let make =
-            |id: &str| Doc::new(id.into(), "x.jpg".into(), None, fixture("grayscale.jpg")).unwrap();
+        let make = |id: &str| {
+            Doc::new(id.into(), "x.jpg".into(), None, &fixture("grayscale.jpg")).unwrap()
+        };
         store.insert(make("a"));
         store.insert(make("b"));
         assert!(store.get("a").is_some()); // a is now most recent
@@ -278,11 +330,11 @@ mod tests {
 
     #[test]
     fn generations_supersede() {
-        let doc = Doc::new("t".into(), "t.jpg".into(), None, fixture("grayscale.jpg")).unwrap();
-        let first = doc.begin();
-        let second = doc.begin();
-        assert!(!doc.is_current(first));
-        assert!(doc.is_current(second));
+        let d = doc("grayscale.jpg");
+        let first = d.begin();
+        let second = d.begin();
+        assert!(!d.is_current(first));
+        assert!(d.is_current(second));
     }
 
     #[test]
