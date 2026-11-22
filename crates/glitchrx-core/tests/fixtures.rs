@@ -179,6 +179,28 @@ fn every_effect_keeps_dimensions_and_stays_in_its_windows() {
     }
 }
 
+/// A new seed changes the result exactly when there is something random:
+/// scattered hits, or an effect that draws inside its windows (shuffle).
+/// With `hits=0` the GUI's dice button is disabled, so this must hold.
+#[test]
+fn seeds_matter_exactly_when_something_is_random() {
+    let base = decode("baseline-444.jpg").raster;
+    let render = |id: &str, params: &str, seed: u64| {
+        let mut out = base.clone();
+        recipe(id, params, seed, Encoding::U8)
+            .apply(&mut out)
+            .unwrap();
+        out
+    };
+    for e in REGISTRY {
+        for params in ["hits=0", "hits=4,len=5%"] {
+            let random = e.random_within || params != "hits=0";
+            let differs = render(e.id, params, 1) != render(e.id, params, 2);
+            assert_eq!(differs, random, "{} with {params}", e.id);
+        }
+    }
+}
+
 /// BLAKE3 of decode-then-bend for every effect at its defaults in every
 /// encoding (and stereo `u8`). Any change here means the output for an
 /// existing recipe changed: bump that effect's `version`.

@@ -9,6 +9,7 @@ import * as api from './api';
 import { ApiError } from './api';
 import { History } from './history';
 import { LatestOnly } from './latest';
+import { usesSeed } from './seed';
 import type {
   DecodeWord,
   DocInfo,
@@ -125,6 +126,16 @@ export class App {
 
   effect(id: string): EffectInfo | undefined {
     return this.effects.find((e) => e.id === id);
+  }
+
+  /** Whether a new seed would change this step's result. */
+  seeded(step: StepState): boolean {
+    return usesSeed(step.params, this.effect(step.effect));
+  }
+
+  /** Whether "re-roll all" would change anything. */
+  get anySeeded(): boolean {
+    return this.recipe.steps.some((s) => s.enabled && this.seeded(s));
   }
 
   // -------------------------------------------------------------------------
@@ -259,7 +270,9 @@ export class App {
   }
 
   rerollAll(): void {
-    for (const s of this.recipe.steps) s.seed = randomSeed();
+    // Only steps where the seed matters, so the others keep their seeds
+    // (and the recipe does not change for nothing).
+    for (const s of this.recipe.steps) if (this.seeded(s)) s.seed = randomSeed();
     this.changed();
   }
 

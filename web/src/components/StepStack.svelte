@@ -61,7 +61,7 @@
 
   <div class="head">
     <h2>Steps</h2>
-    <button class="icon" onclick={() => app.rerollAll()} disabled={app.recipe.steps.length === 0} title="New seeds for every step" aria-label="Re-roll all seeds">
+    <button class="icon" onclick={() => app.rerollAll()} disabled={!app.anySeeded} title="New seeds for every step that has something random" aria-label="Re-roll all seeds">
       <Dices size={18} strokeWidth={2.25} />
     </button>
     <button onclick={() => app.clearSteps()} disabled={app.recipe.steps.length === 0}>Clear</button>
@@ -87,7 +87,7 @@
       </button>
     </div>
     {#if picked}
-      <p class="dim note">{picked.summary}{picked.reversible === 'never' ? ' (lossy)' : ''}</p>
+      <p class="dim note">{picked.summary} (Audacity: {picked.audacity})</p>
     {/if}
   </section>
 </div>
