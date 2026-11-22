@@ -29,6 +29,7 @@ pub static INFO: EffectInfo = EffectInfo {
         len: "3%",
     },
     random_within: false,
+    exact_preview: false,
     example: "glitchrx --shift by=0.5rows,phase=2,hits=12 photo.jpg",
     build,
 };

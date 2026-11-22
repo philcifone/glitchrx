@@ -136,8 +136,9 @@ pub struct Cli {
     #[arg(long, value_name = "ENC", value_parser = parse_encoding)]
     pub encoding: Option<Encoding>,
 
-    /// 1 (mono) or 2 (stereo: alternate samples are left and right) [default: 1].
-    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u8).range(1..=2))]
+    /// 1 (mono), 2 (stereo: alternate samples are left and right) or 3 (one
+    /// channel per colour, like importing raw data with 3 channels) [default: 1].
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u8).range(1..=3))]
     pub channels: Option<u8>,
 
     /// Allow overwriting an existing output file (never the input).
@@ -212,7 +213,7 @@ pub fn list_text() -> String {
         s.push_str(&format!("  example: {}\n\n", e.example));
     }
     s.push_str(
-        "Every effect also takes encoding=ENC and channels=1|2 to override the recipe's.\n\
+        "Every effect also takes encoding=ENC and channels=1|2|3 to override the recipe's.\n\
          Columns: parameter, default, meaning.\n",
     );
     s

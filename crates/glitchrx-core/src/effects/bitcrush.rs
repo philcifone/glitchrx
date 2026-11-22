@@ -25,6 +25,7 @@ pub static INFO: EffectInfo = EffectInfo {
         len: "10%",
     },
     random_within: false,
+    exact_preview: false,
     example: "glitchrx --bitcrush bits=2,encoding=s16be photo.jpg",
     build,
 };

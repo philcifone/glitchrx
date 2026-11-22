@@ -135,6 +135,8 @@ pub struct EffectDto {
     pub details: &'static str,
     /// Draws random numbers inside each window (see `EffectInfo`).
     pub random_within: bool,
+    /// A scaled preview cannot match; render exactly when idle.
+    pub exact_preview: bool,
     pub params: Vec<ParamDto>,
 }
 
@@ -168,6 +170,7 @@ pub fn effects() -> Vec<EffectDto> {
                 summary: e.summary,
                 details: e.details,
                 random_within: e.random_within,
+                exact_preview: e.exact_preview,
                 params: e
                     .all_params()
                     .into_iter()

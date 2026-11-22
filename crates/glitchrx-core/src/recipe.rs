@@ -54,8 +54,9 @@ fn parse_channels(s: &str) -> Result<usize> {
     match s.trim() {
         "1" => Ok(1),
         "2" => Ok(2),
+        "3" => Ok(3),
         other => Err(Error::Recipe(format!(
-            "channels must be 1 (mono) or 2 (stereo), not `{other}`"
+            "channels must be 1 (mono), 2 (stereo) or 3 (one per colour), not `{other}`"
         ))),
     }
 }
@@ -408,7 +409,7 @@ mod tests {
                 .to_string()
                 .contains("version")
         );
-        let bad_ch = "format = \"glitcharaxia-recipe\"\nversion = 2\nchannels = 3\n";
+        let bad_ch = "format = \"glitcharaxia-recipe\"\nversion = 2\nchannels = 4\n";
         assert!(Recipe::from_toml(bad_ch).is_err());
     }
 

@@ -29,6 +29,7 @@ pub static INFO: EffectInfo = EffectInfo {
         len: "5%",
     },
     random_within: false,
+    exact_preview: false,
     example: "glitchrx --amplify gain=12,hits=6 photo.jpg",
     build,
 };
