@@ -61,6 +61,23 @@ impl Raster {
         Raster::new(ow, oh, out)
     }
 
+    /// A copy of the `w` x `h` rectangle whose top-left pixel is `(x, y)`.
+    /// The rectangle is clipped to the raster, and is at least 1 x 1. Used
+    /// for zoomed previews, which show part of a full-resolution render.
+    pub fn crop(&self, x: usize, y: usize, w: usize, h: usize) -> Raster {
+        let x = x.min(self.width.saturating_sub(1));
+        let y = y.min(self.height.saturating_sub(1));
+        let w = w.clamp(1, self.width - x);
+        let h = h.clamp(1, self.height - y);
+        let row = self.row_bytes();
+        let mut bytes = Vec::with_capacity(w * h * 3);
+        for r in y..y + h {
+            let start = r * row + x * 3;
+            bytes.extend_from_slice(&self.bytes[start..start + w * 3]);
+        }
+        Raster::new(w, h, bytes)
+    }
+
     /// The size that fits inside `max_w` x `max_h` keeping the aspect ratio
     /// (never larger than the raster itself).
     pub fn fit(&self, max_w: usize, max_h: usize) -> (usize, usize) {
@@ -149,6 +166,19 @@ mod tests {
 
     fn reds(r: &Raster) -> Vec<u8> {
         r.bytes.chunks_exact(3).map(|p| p[0]).collect()
+    }
+
+    #[test]
+    fn crop_takes_a_rectangle_and_clips_it() {
+        let r = numbered();
+        assert_eq!(reds(&r.crop(1, 0, 2, 2)), [1, 2, 4, 5]);
+        assert_eq!(reds(&r.crop(0, 1, 3, 1)), [3, 4, 5]);
+        // Past the edges: clipped, never empty.
+        let c = r.crop(2, 1, 9, 9);
+        assert_eq!((c.width, c.height, reds(&c)), (1, 1, vec![5]));
+        let c = r.crop(7, 7, 0, 0);
+        assert_eq!((c.width, c.height, reds(&c)), (1, 1, vec![5]));
+        assert_eq!(r.crop(0, 0, 3, 2), r);
     }
 
     /// Stored:   0 1 2

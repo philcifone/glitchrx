@@ -189,6 +189,76 @@ async fn upload_preview_export() {
     }
 }
 
+/// A zoomed view asks for part of the picture: cut from the full-resolution
+/// render (or the original), shrunk only if it is bigger than the box, with
+/// its pixel rectangle in `X-Crop`.
+#[tokio::test]
+async fn zoomed_crops() {
+    let bytes = fixture("baseline-420.jpg"); // 480 x 320
+    let app = app(None, None);
+    let id = upload(&app, "a.jpg", bytes.clone()).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let crop = json!({"x": 0.25, "y": 0.5, "w": 0.5, "h": 0.25});
+    let mut want = codec::decode(&bytes).unwrap().raster;
+    let original = want.crop(120, 160, 240, 80);
+    core_recipe().apply(&mut want).unwrap();
+    let bent = want.crop(120, 160, 240, 80);
+    let mean_error = |got: &[u8], want: &[u8]| {
+        got.iter()
+            .zip(want)
+            .map(|(a, b)| a.abs_diff(*b) as u64)
+            .sum::<u64>()
+            / got.len() as u64
+    };
+    for (body, want) in [
+        (
+            json!({"recipe": sample_recipe(), "max_w": 4096, "max_h": 4096, "crop": crop}),
+            &bent,
+        ),
+        (
+            json!({"original": true, "max_w": 4096, "max_h": 4096, "crop": crop}),
+            &original,
+        ),
+    ] {
+        let (s, h, b) = send(&app, post_json(&format!("/api/docs/{id}/preview"), body)).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(h["x-crop"], "120,160,240,80");
+        assert_eq!(
+            (&h["x-width"], &h["x-height"]),
+            (&"240".parse().unwrap(), &"80".parse().unwrap())
+        );
+        let got = codec::decode(&b).unwrap().raster;
+        // After the preview's own JPEG encoding, so only roughly. A busy patch suffers more from JPEG than a whole picture: the
+        // right crop measures about 5, one 2 px off about 31.
+        let err = mean_error(&got.bytes, &want.bytes);
+        assert!(err < 8, "mean error {err}");
+    }
+
+    // Bigger than the box: shrunk to fit, same rectangle.
+    let small = json!({"recipe": sample_recipe(), "max_w": 60, "max_h": 60, "crop": crop});
+    let (s, h, _) = send(&app, post_json(&format!("/api/docs/{id}/preview"), small)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        (
+            h["x-width"].to_str().unwrap(),
+            h["x-height"].to_str().unwrap()
+        ),
+        ("60", "20")
+    );
+    assert_eq!(h["x-crop"], "120,160,240,80");
+
+    // Partial pixels round outward; nonsense is refused.
+    let edge = json!({"original": true, "max_w": 4096, "max_h": 4096,
+        "crop": {"x": 0.001, "y": 0.0, "w": 0.002, "h": 2.0}});
+    let (_, h, _) = send(&app, post_json(&format!("/api/docs/{id}/preview"), edge)).await;
+    assert_eq!(h["x-crop"], "0,0,2,320");
+    let bad = json!({"original": true, "max_w": 99, "max_h": 99, "crop": {"x": 0, "y": 0, "w": 0, "h": 1}});
+    let (s, _, _) = send(&app, post_json(&format!("/api/docs/{id}/preview"), bad)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}
+
 #[tokio::test]
 async fn exact_preview_and_budget() {
     let bytes = fixture("baseline-420.jpg");
