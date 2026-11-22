@@ -113,14 +113,15 @@ glitchrx serve --host 0.0.0.0 --token --root ~/Pictures   # from a phone over LA
 
 In the GUI:
 - **Open** a photo from your device (it is sent to your own server, nowhere else) or, with `--root`, from the server's folders.
-- **Add steps** from the effect list. Steps run top to bottom. Each one can be switched off, re-rolled (new seed), moved, duplicated or removed. Shared placement settings (`region`, `hits`, `len`) are under "Placement".
+- **Pick the encoding** for the whole recipe (and mono or stereo) at the top. Any step can override both.
+- **Add steps** by tapping an effect in the palette. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
+- **Placement** (`region`, `hits`, `len`) is always shown on each step. Dragging the region's two handles shades the preview outside the band it covers.
+- **Shake** (the wand) rolls a step's own settings at random, within the useful range; placement and encoding stay. **Re-roll** (the dice) picks a new seed, which moves where hits land; it is greyed out when a step has nothing random (`hits=0`, except for `shuffle`).
 - **Hold "original"** (or the `\` key) to compare with the untouched photo.
 - **Undo and redo** with the buttons or Ctrl+Z / Ctrl+Shift+Z. History holds recipes, not images.
 - **Export** at full resolution as TIFF, PNG or JPEG. With `--root`, results can be saved next to the original using the CLI's `-glitch`, `-glitch-1` naming. Nothing is overwritten. The recipe can be downloaded, then loaded again later or replayed with `glitchrx --recipe`.
 
-The preview runs the recipe on a copy of the photo shrunk to your screen, with every size scaled to match, so even a 26 MP photo previews quickly. It is close to the full-resolution export but not identical: long reverb tails and very fine shuffles differ most. A newer slider position cancels a render that is still running.
-
-The GUI is being reworked for the pixel engine (Phase 2c): encoding pickers and the new export formats are coming, and the "Bands" and "Mode" controls left over from the JPEG engine have no effect.
+The preview runs the recipe on a copy of the photo shrunk to your screen, with every size scaled to match, so even a 26 MP photo previews quickly. It is close to the full-resolution export but not identical: long reverb tails and very fine shuffles differ most. **Make exact** renders the current recipe at full resolution and shrinks the result, which is exactly what export will give; it takes about a second on a 26 MP photo. A newer slider position cancels a render that is still running, and a live preview that runs over 3 s stops with a "too heavy to preview live" notice (export, and usually Make exact, still work).
 
 ## How it works
 

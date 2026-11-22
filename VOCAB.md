@@ -10,6 +10,8 @@ Shared terms for glitcharaxia, so we can name things precisely. Grouped by topic
 - **Clipping.** Clamping samples to the encoding's range after an effect. It loses information, which is why effects can no longer be reversed exactly, and it gives the bright, saturated look.
 - **Databending.** Opening a file as the wrong kind of data (here: an image as audio), editing it with that kind of tool, and opening it as an image again.
 - **Encoding (sample encoding).** How bytes are read as audio samples: `u8`, `s8`, `s16le`, `s16be`, `s24le`, `s24be`, `ulaw`, `alaw`. The choice from Audacity's Import Raw Data dialog.
+- **Effect palette.** The GUI's grid of effect buttons; one tap adds a step. Each effect has an icon picked for feel rather than literally (a mountain for echo, a drum for stutter).
+- **Exact preview.** A preview bent at full resolution and then shrunk, so it is exactly the export. Slower than the scaled preview; the "Make exact" button.
 - **Filter vs edit.** The two kinds of effect. **Filters** (echo, delay, reverb, amplify, invert, bitcrush) turn bytes into samples, process them, and clip them back. **Edits** (backwards, shift, shuffle, stutter) only move whole samples, like cut and paste.
 - **Fit / resize.** `fit` picks the largest size inside a box that keeps the aspect ratio; `resize` shrinks to an exact size. They differ because fitting twice can round differently (480x320 into 200x200 is 200x133, but into 200x133 is 199x133).
 - **Frame.** One sample for every channel: `encoding width x channels` bytes. Windows start and end on whole frames, so samples line up with the start of the raster.
@@ -17,6 +19,8 @@ Shared terms for glitcharaxia, so we can name things precisely. Grouped by topic
 - **LFO.** Low-frequency oscillator: a slow wave that sweeps a filter, as in phaser and wahwah.
 - **Raster.** The decoded image as raw bytes: R, G, B for each pixel, row after row, top to bottom. What an uncompressed TIFF stores, and what every effect now edits.
 - **Full-resolution mapping (Units).** How a preview stays faithful: every size and position is worked out at full resolution first, then mapped into the smaller raster, with whole rows scaled by height, the rest of a row by width, and the 0-2 byte channel phase kept.
+- **Preview budget / too heavy.** A live preview that runs over 3 s (an exact one, 30 s) stops, and the GUI says it is too heavy to preview live instead of showing an error. Export has no limit.
+- **Region band.** The shading drawn on the preview while a region's handles are dragged: the band of rows where hits may land.
 - **Scaled preview.** Running the steps on a screen-sized copy of the raster, with sizes mapped to match, so previews are fast. Close to the export, not identical: long feedback tails drift, because a delay that wraps past a row moves its ghost down by one row, and one preview row stands for several full rows.
 - **Units (rows, px, %).** Sizes in a recipe: `rows` (a fractional row is that share of the width), `px`, `%` of the image (top to bottom) or plain bytes.
 
@@ -55,6 +59,7 @@ Background, mostly from the archived JPEG byte engine (`archive/jpeg-bytes`). JP
 - **Golden test.** A test that checks the output's hash matches a stored value. It proves that the same input, recipe and seed always give the same bytes.
 - **Hit.** One window where an effect is applied. `hits=3` means three windows at seeded random places inside the region.
 - **Mask.** A grayscale image saying where an effect shows (Phase 3).
+- **Re-roll vs shake.** Re-roll (dice) gives a step a new seed, which moves where its hits land. Shake (wand) gives it new random settings for its own parameters, leaving placement and encoding alone. Both write into the recipe, so results stay replayable.
 - **Recipe.** A TOML file (version 2) that lists the effects, parameters and seeds, plus the recipe-wide encoding and channels. Replaying it on the same input gives the same output.
 - **Region.** The part of the raster where hits may land, for example `40%:60%`. In the raster, percent of the data is percent of the image height, so that really is the middle band.
 - **Seed.** The number that drives all randomness. The same seed always gives the same result.
