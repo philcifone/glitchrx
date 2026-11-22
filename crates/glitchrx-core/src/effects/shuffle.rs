@@ -1,8 +1,7 @@
-//! Shuffle blocks of bytes within each window.
+//! `shuffle`: cut blocks out of each window and paste them back in a
+//! random order.
 
-use std::ops::Range;
-
-use super::{Effect, EffectInfo, PlacementDefaults, Reversibility};
+use super::{Effect, EffectInfo, PlacementDefaults, Window};
 use crate::error::Result;
 use crate::params::{Bound, Kind, ParamSpec, Params};
 use crate::rng::Rng;
@@ -10,97 +9,78 @@ use crate::rng::Rng;
 pub static INFO: EffectInfo = EffectInfo {
     id: "shuffle",
     version: 1,
-    summary: "Cut each window into blocks of `block` bytes (or percent of the window) and swap a `fraction` of them around.",
-    details: "Blocks are chosen and permuted with the seeded RNG, so the inverse simply \
-              regenerates the same permutation and moves every block back. A percent block \
-              size scales with the window, so the default behaves alike on small and large \
-              images. Any partial block at the end of a window is left in place.",
-    reversible: Reversibility::Always,
+    audacity: "cut and paste",
+    summary: "Split each window into blocks and swap a share of them at random.",
+    details: "Blocks of whole rows rearrange bands of the picture; blocks of part of a row \
+              tear it into sideways-displaced strips. A percentage `block` is of the window, \
+              not the image. Seeded, so the same seed picks the same blocks.",
     params: &[
         ParamSpec {
             name: "block",
             kind: Kind::Size,
-            default: "5%",
-            help: "block size: bytes, or percent of the window",
+            default: "0.5rows",
+            help: "block size (rows, px, bytes, or % of the window)",
         },
         ParamSpec {
             name: "fraction",
             kind: Kind::Float { min: 0.0, max: 1.0 },
             default: "0.5",
-            help: "share of blocks that move, 0..1",
+            help: "share of the blocks that move",
         },
     ],
     placement: PlacementDefaults {
-        region: "5%:100%",
-        hits: "2",
-        len: "2%",
+        region: "0%:100%",
+        hits: "4",
+        len: "10%",
     },
-    example: "glitchrx --shuffle block=1k,fraction=0.8 photo.jpg",
+    example: "glitchrx --shuffle block=2rows,fraction=1 photo.jpg",
     build,
 };
 
 fn build(p: &Params) -> Result<Box<dyn Effect>> {
     Ok(Box::new(Shuffle {
         block: p.size("block"),
-        fraction_q8: p.q8("fraction") as u64,
+        fraction: p.float("fraction"),
     }))
 }
 
 struct Shuffle {
     block: Bound,
-    fraction_q8: u64,
+    fraction: f64,
 }
 
-impl Shuffle {
-    /// Block size in bytes for a window of `window_len` bytes.
-    fn block_len(&self, window_len: usize) -> usize {
-        self.block.resolve(window_len).max(1)
-    }
-
-    /// Returns `(from, to)` block indices: block `from[t]` moves to `to[t]`.
-    fn plan(&self, window_len: usize, rng: &mut Rng) -> (Vec<usize>, Vec<usize>) {
-        let n = window_len / self.block_len(window_len);
-        let mut m = ((n as u64 * self.fraction_q8 + 128) >> 8).min(n as u64) as usize;
+impl Effect for Shuffle {
+    fn run(&self, w: &mut Window<'_>, rng: &mut Rng) -> Result<()> {
+        let f = w.frame();
+        // Block length in bytes, a whole number of frames.
+        let b = (self.block.of_window(w.bytes.len(), w.units) / f).max(1) * f;
+        let n = w.bytes.len() / b;
+        let mut m = ((n as f64 * self.fraction).round() as usize).min(n);
         // Moving a single block is a no-op; if anything should move, move two.
         if m == 1 && n >= 2 {
             m = 2;
         }
+        if m < 2 {
+            return Ok(());
+        }
         // Partial Fisher-Yates: the first m entries become a uniform random
-        // selection of m distinct blocks.
+        // selection of m distinct blocks; then deal them to a shuffled order.
         let mut idx: Vec<usize> = (0..n).collect();
         for i in 0..m {
             let j = i + rng.below((n - i) as u64) as usize;
             idx.swap(i, j);
         }
-        let from: Vec<usize> = idx[..m].to_vec();
-        let mut to = from.clone();
+        let from = &idx[..m];
+        let mut to = from.to_vec();
         rng.shuffle(&mut to);
-        (from, to)
-    }
-
-    fn move_blocks(&self, win: &mut [u8], src: &[usize], dst: &[usize]) {
-        let copy = win.to_vec();
-        let b = self.block_len(win.len());
-        for (&s, &d) in src.iter().zip(dst) {
-            win[d * b..(d + 1) * b].copy_from_slice(&copy[s * b..(s + 1) * b]);
+        let copy: Vec<u8> = from
+            .iter()
+            .flat_map(|&s| w.bytes[s * b..(s + 1) * b].iter().copied())
+            .collect();
+        for (t, &d) in to.iter().enumerate() {
+            w.bytes[d * b..(d + 1) * b].copy_from_slice(&copy[t * b..(t + 1) * b]);
         }
-    }
-}
-
-impl Effect for Shuffle {
-    fn apply(&self, buf: &mut [u8], w: Range<usize>, rng: &mut Rng) {
-        let (from, to) = self.plan(w.len(), rng);
-        self.move_blocks(&mut buf[w], &from, &to);
-    }
-
-    fn invert(&self, buf: &mut [u8], w: Range<usize>, rng: &mut Rng) -> Result<()> {
-        let (from, to) = self.plan(w.len(), rng);
-        self.move_blocks(&mut buf[w], &to, &from);
         Ok(())
-    }
-
-    fn reversible(&self) -> bool {
-        true
     }
 }
 
@@ -108,31 +88,26 @@ impl Effect for Shuffle {
 mod tests {
     use super::*;
     use crate::effects::testutil::*;
+    use crate::samples::Encoding;
 
     #[test]
-    fn moves_whole_blocks_only() {
-        let e = make(&INFO, "block=4,fraction=1.0");
-        let orig: Vec<u8> = (0..18).collect(); // 4 blocks + 2 tail bytes
+    fn full_shuffle_is_a_permutation_of_blocks() {
+        let e = make(&INFO, "block=3,fraction=1");
+        let orig: Vec<u8> = (0..30).collect();
         let mut b = orig.clone();
-        e.apply(&mut b, 0..18, &mut Rng::new(5));
-        assert_eq!(&b[16..], &orig[16..], "tail must not move");
-        let mut blocks: Vec<&[u8]> = b[..16].chunks(4).collect();
+        run(e.as_ref(), &mut b, 10, Encoding::U8);
+        assert_ne!(b, orig);
+        let mut blocks: Vec<&[u8]> = b.chunks(3).collect();
         blocks.sort();
-        let expect: Vec<&[u8]> = orig[..16].chunks(4).collect();
-        assert_eq!(blocks, expect, "same blocks, possibly reordered");
+        assert_eq!(blocks.concat(), orig, "blocks stay intact");
     }
 
     #[test]
-    fn round_trips() {
-        let buf = noise(10_000, 5);
-        for params in [
-            "block=1,fraction=1.0",
-            "block=256",
-            "block=7,fraction=0.3",
-            "",
-        ] {
-            let g = round_trip(make(&INFO, params).as_ref(), &buf, 33..9_900);
-            assert_ne!(g, buf, "{params} changed nothing");
-        }
+    fn zero_fraction_is_identity() {
+        let e = make(&INFO, "fraction=0");
+        let orig = noise(300, 1);
+        let mut b = orig.clone();
+        run(e.as_ref(), &mut b, 10, Encoding::U8);
+        assert_eq!(b, orig);
     }
 }
