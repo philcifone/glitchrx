@@ -14,8 +14,12 @@ export interface ParamInfo {
   placement: boolean;
 }
 
+/** Picker section. Pixel effects work on whole pixels: no encoding or channels. */
+export type EffectGroup = 'audio' | 'data' | 'pixel';
+
 export interface EffectInfo {
   id: string;
+  group: EffectGroup;
   version: number;
   summary: string;
   details: string;

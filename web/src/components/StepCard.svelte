@@ -11,6 +11,7 @@
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import { app, CHANNELS_KEY, ENCODING_KEY } from '../lib/app.svelte';
   import { iconFor } from '../lib/icons';
+  import { usesSamples } from '../lib/palette';
   import { CHANNEL_CHOICES, channelName } from '../lib/channels';
   import type { Channels, StepState } from '../lib/types';
   import ParamField from './ParamField.svelte';
@@ -72,6 +73,7 @@
             <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
           {/each}
         </section>
+        {#if usesSamples(info)}
         <div class="sample">
           <label>
             <span>Encoding</span>
@@ -98,6 +100,7 @@
             </select>
           </label>
         </div>
+        {/if}
         <section class="group" aria-label="Placement">
           <h3 class="section-label">Placement</h3>
           {#each placement as spec (spec.name)}
