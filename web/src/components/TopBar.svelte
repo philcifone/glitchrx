@@ -62,7 +62,7 @@
   }
 
   h1 {
-    font-size: 1.06rem;
+    font-size: 1.3rem;
   }
 
   .actions {

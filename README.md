@@ -160,7 +160,7 @@ Layout:
 
 ## Privacy
 
-`glitchrx` makes no outgoing network connections. `glitchrx serve` only answers the browser that connects to it. Every script and icon of the GUI is built into the binary (text uses the device's own system font), and a Content-Security-Policy stops the page from loading anything from elsewhere. Test images in this repository are generated procedurally. Personal sample photos belong in `samples/`, which is ignored by git.
+`glitchrx` makes no outgoing network connections. `glitchrx serve` only answers the browser that connects to it. Every font, script and icon of the GUI is built into the binary (body text uses the device's own system font), and a Content-Security-Policy stops the page from loading anything from elsewhere. Test images in this repository are generated procedurally. Personal sample photos belong in `samples/`, which is ignored by git.
 
 ## License
 

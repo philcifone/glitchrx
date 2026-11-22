@@ -72,6 +72,7 @@
 }
 
 :root {
+  --font-head: 'Young Serif', Georgia, serif;
   --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
   --hairline: 1px solid var(--line);
   --radius: 10px; /* controls */
@@ -109,6 +110,17 @@ h3 {
   margin: 0;
   line-height: 1.2;
   letter-spacing: -0.01em;
+}
+
+/* Headings in Young Serif. It has a single weight, so no bold (browsers
+   would fake one by smearing the outlines). Small section labels stay in
+   the system font. */
+h1,
+h2:not(.section-label),
+.serif {
+  font-family: var(--font-head);
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 /* iOS-style section header: small, upper case, grey. */

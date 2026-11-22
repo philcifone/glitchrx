@@ -118,7 +118,7 @@
   }
 
   .head h2 {
-    font-size: 1.06rem;
+    font-size: 1.2rem;
   }
 
   .body {

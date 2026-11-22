@@ -40,7 +40,7 @@
     <span class="n">{index + 1}</span>
     <button class="name" onclick={() => (open = !open)} aria-expanded={open} title={info?.summary}>
       <span class="glyph"><Icon size={18} strokeWidth={1.75} /></span>
-      <span class="label">{step.effect}</span>
+      <span class="label serif">{step.effect}</span>
       {#if stepEncoding}<span class="enc">{stepEncoding}</span>{/if}
     </button>
     <label class="toggle" title={step.enabled ? 'Turn this step off' : 'Turn this step on'}>
@@ -170,8 +170,7 @@
     gap: 8px;
     background: none;
     padding: 4px 2px;
-    font-size: 1rem;
-    font-weight: 600;
+    font-size: 1.05rem;
   }
 
   .name:hover:not(:disabled) {
