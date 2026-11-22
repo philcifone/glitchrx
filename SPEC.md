@@ -1,426 +1,324 @@
 # glitcharaxia: Specification
 
-Status: v0.2, 2026-11-21. It incorporates Phil's review of v0.1; his annotated copy of v0.1 lives in his Obsidian vault. The source documents are `pre-brief.md` and `BRIEF.md`, and `VOCAB.md` defines the terms used here.
+Status: **v0.3 draft, 2026-11-21, for Phil's review.** v0.3 changes what the effects work on. v0.2 glitched the *compressed* data inside a JPEG. Phil's reference work (`samples/examples/`, uncompressed TIFFs bent in Audacity) shows that the look he wants comes from bending *raw pixels*. v0.3 makes the raw-pixel domain the whole engine and removes JPEG byte glitching from the live project. The source documents are `pre-brief.md` and `BRIEF.md`, and `VOCAB.md` defines the terms used here.
 
 Keywords: **must** means required for the phase to be done. **Should** means expected, but logged and deferred if it proves hard. **Later** means out of scope for the phase.
 
-## Decision log (from Phil's review of v0.1)
+## What changed from v0.2, in one paragraph
+
+A JPEG stores Huffman-coded frequency data, not pixels. Changing a byte there derails the decoder, which then paints flat colour until it recovers: the bands Phil saw on every effect. An uncompressed image stores the pixels themselves, row by row, R G B. Run Audacity's echo over those bytes and you get ghosted copies of the picture, colours rotating through the channels, and smears: the look of Phil's examples. A prototype on his photos confirmed it (2026-11-21, contact sheets in the session). So glitchrx now decodes any input to a raw pixel buffer, bends that buffer the way Audacity would, and saves the result as a normal image. The recipe model, seeds, CLI, web GUI, undo, export and file safety all carry over.
+
+## Decision log
+
+Decisions from earlier versions keep their numbers. Superseded ones say so.
 
 | # | Topic | Decision |
 | --- | --- | --- |
-| D-1 | Binary name | `glitchrx`. Project name `glitcharaxia`. Crates `glitchrx-core`, `glitchrx-cli`. |
+| D-1 | Binary name | `glitchrx`. Project name `glitcharaxia`. Crates `glitchrx-core`, `glitchrx-cli`, `glitchrx-serve`. |
 | D-2 | License | GPL-3.0-or-later for everything. |
-| D-3 | `--save-recipe` default | Off. The CLI prints the replay/reverse command instead. |
-| D-4 | `--reverse` priority | The core `invert` is built in Phase 1 because the round-trip tests need it. The CLI flag is a **should** and must not block early testing. Section 7.4 lists the use cases. |
-| D-5 | LAN/web GUI | Yes, and it is the **primary** GUI. Phil works remotely over WireGuard, often from iOS Firefox. `glitchrx serve` comes first in Phase 2, and the Tauri desktop window becomes a later, optional wrapper around the same web UI (section 10). |
-| D-6 | Frontend | Svelte 5 + TypeScript + Vite (section 10.1 gives the reasoning). |
-| D-7 | Region default | Claude chooses it during tuning and tells Phil explicitly when there is a visible difference to judge. |
-| D-8 | CLI output | The CLI is a normal terminal tool: it writes files and prints a summary line, and never displays images. "WYSIWYG" applies only to the GUI preview. `--bake` is an optional extra output file. |
-| D-9 | DNG | In scope as input in Phase 2 (section 9, 2d). |
-| D-10 | Icons | Lucide icons in the GUI, used sparingly (toolbox, save, export). No emojis anywhere. |
-| D-11 | Test photos | Phil supplies them in `samples/`, which is git-ignored and never committed (section 11.5). |
-| D-12 | 16-bit sample view | Deferred from Phase 1 to **later**. It adds a generic layer to every effect for little visual payoff before the GUI exists. |
-| D-13 | `reverse` effect renamed `backwards` | Found during implementation: an effect flag `--reverse` would collide with the `--reverse` (undo) option. |
-| D-14 | Window-relative sizes | `shuffle` `block` and `stutter` `chunk` accept a percent of the hit window (defaults `5%` and `12%`). The byte-count defaults were larger than the hit window on small images, which made both effects do nothing. A test now fails if any effect's defaults leave an image unchanged. |
-| D-15 | Restart markers by default (Phase 2 start) | Phil's first real photos (6240x4160, no restart markers) showed the Phase 1 defaults turning everything below the first hit into a flat wash. Fix: before glitching, the file is losslessly rewritten with a restart marker every `--restart` interval (MCU rows, or a percent of the image height). Each glitch then stays in a band. CLI default `10%`; `--restart keep` restores the old behaviour. Consequences: the output's header differs from the *input* (a DRI segment is added) but stays byte-identical to the *prepared* file, and `--reverse` restores the original pixels exactly, not the original bytes (exact bytes still come back with `--restart keep`). Recipes carry `restart`; the core default is still "keep". |
-| D-16 | `glitchrx serve` shape (2a) | `serve` is a word-subcommand of the one binary (a photo named `serve` is `./serve`). The server lives in its own crate, `glitchrx-serve`, so a Tauri wrapper (2b) can reuse it. Default port 7878. The built frontend is embedded by `build.rs`; without Node a placeholder page is embedded, so the Rust gate never needs npm. |
-| D-17 | Access token (open item 2) | Built: `--token` (generated) or `--token=SECRET`. The printed URL carries `?token=`, which sets an HttpOnly, SameSite=Strict cookie and redirects to the clean URL. A Content-Security-Policy keeps the page from loading anything from elsewhere. Over plain HTTP the token can be sniffed on the network; over WireGuard the tunnel encrypts it. |
-| D-18 | Preview pipeline (2a) | The server decodes with libjpeg-turbo and sends a clean JPEG (quality 88, 4:4:4) sized to the preview box, so every browser shows the same pixels. Per-document cache of the prepared input plus the payload after each step; tested byte-identical to `Recipe::apply`. Seeds travel as JSON strings, because JavaScript numbers lose precision above 2^53. |
-| D-19 | Preview speed (deviation) | Measured on a 26 MP, 25 MB JPEG: about 180-220 ms per preview, against the 100 ms target. The cost is libjpeg-turbo's single-threaded Huffman decode (about 125-140 ms at any scale); the cached glitch is about 37 ms. Candidate fix, not built: decode the restart bands in parallel, since each band is independently decodable. It needs a test proving the result matches a whole-file decode. |
-| D-20 | GUI-only step switch | Steps can be switched off in the GUI. Switched-off steps are left out of previews, exports and saved recipes, so recipes stay plain. |
-| D-21 | Gate and the web GUI | `scripts/check.sh` also runs `svelte-check` and `vitest` when `web/node_modules` exists. |
-
-## 0. Review of the brief (v0.1, kept for reference)
-
-1. **Byte stuffing and spurious markers.**
-   - Inside a JPEG scan, every `0xFF` data byte is followed by a stuffed `0x00`. A `0xFF` followed by anything else is a marker.
-   - If an effect writes `FF D9` (EOI) into the scan, the decoder stops there and the rest of the image goes flat gray.
-   - **Decision:** effects operate on the *de-stuffed* scan payload, and the core re-stuffs it on output, so no spurious markers can appear.
-   - A `raw` mode (advanced, off by default) skips de-stuffing to reproduce the Audacity behaviour faithfully, truncations included.
-2. **"After the SOS marker" is not enough for real files.**
-   - Phone JPEGs carry an EXIF thumbnail (a complete JPEG inside APP1) and often MPF or Ultra HDR gain-map images after the primary EOI. Progressive JPEGs have many scans.
-   - The parser walks segments by their length fields, finds every scan of the primary image, and leaves everything else alone.
-3. **The decoder defines the look.** Browsers and most viewers use libjpeg-turbo, so a GUI preview decoded with libjpeg-turbo shows what other people will see (section 5).
-4. **Byte glitches are not local.** Huffman desync and DC drift spread a single changed byte across the rest of the image. This shapes the effect defaults and the masking design.
-5. **WebP and AVIF** decoders reject almost any corrupt bitstream. They are handled by transcoding (section 9).
-6. **CLI syntax:** `glitchrx --echo in.jpg out.jpg` works as written (section 7).
-7. **Naming:** `-glitch`, `-glitch-1`, `-glitch-2`.
+| D-3 | `--save-recipe` default | Off. The CLI prints the replay command instead. |
+| D-4 | `--reverse` | **Superseded by D-24.** |
+| D-5 | LAN/web GUI | Yes, and it is the **primary** GUI (`glitchrx serve`). Tauri is a later, optional wrapper. |
+| D-6 | Frontend | Svelte 5 + TypeScript + Vite. |
+| D-7 | Region default | Claude chooses it during tuning and tells Phil when there is a visible difference to judge. |
+| D-8 | CLI output | A normal terminal tool: writes files, prints a summary line, never displays images. |
+| D-9 | DNG | In scope as input. With a raw-pixel engine, every input format is "decode to pixels" (section 4). |
+| D-10 | Icons | Lucide, sparingly. No emojis anywhere. |
+| D-11 | Test photos | Phil's photos live in `samples/` (git-ignored). Reference work in `samples/examples/`. |
+| D-12 | 16-bit sample view | **Superseded by D-23**: sample encodings, 16-bit included, are now central. |
+| D-13 | `backwards`, not `reverse` | Kept. |
+| D-14 | Window-relative sizes | Kept in spirit: sizes can be relative (section 6.2). |
+| D-15 | Restart markers | **Superseded by D-22** (JPEG-only concept). |
+| D-16 | `glitchrx serve` shape | Kept. |
+| D-17 | Access token | Kept. |
+| D-18 | Preview pipeline | **Revised by D-26.** Seeds still travel as JSON strings. |
+| D-19 | Preview speed | **Revised by D-26 and D-27.** |
+| D-20 | GUI step switch | Kept. |
+| D-21 | Gate and the web GUI | Kept. |
+| D-22 | **Raw pixels only** | Effects operate on the decoded image as a raw buffer of interleaved RGB bytes, like an uncompressed TIFF. JPEG byte glitching (scan parser, safe/raw mode, restart markers, header-safe tests) is removed from the live code and kept at git tag `archive/jpeg-bytes`. Phil's call, 2026-11-21. |
+| D-23 | **Audacity sample encodings** | Each step reads the bytes as audio samples in a chosen encoding, as Audacity's Import Raw Data does: 8-bit unsigned (default), 8-bit signed, 16-bit and 24-bit signed (little or big endian), U-law, A-law, with 1 or 2 channels (section 5). All four tested encodings looked useful (Phil, 2026-11-21). |
+| D-24 | **Audacity math, no `--reverse`** | Effects work like Audacity's: samples become floating-point audio, the effect runs, and the result is clipped back to the encoding. This gives the saturated look but loses information, so exact inversion and `--reverse` are dropped. Undo in the GUI works from recipes as before. Phil: "whatever it takes". |
+| D-25 | **Deterministic floating point** | Same input, recipe and seed still give the same bytes on every machine. Effect math uses IEEE f64 with basic operations only (`+ - * /`, `sqrt`, comparisons). No `sin`, `exp` or `pow` from the platform math library in sample loops, since those can differ by a last bit between systems; oscillators use our own polynomial sine. Per-effect `VERSION` and golden-hash tests stay. This replaces "integer math only (Q8)". |
+| D-26 | **Preview at screen resolution** | Live previews bend a screen-sized copy of the image, with sizes and delays scaled to match (section 9.2). Close to the export, not byte-identical. Exports always run at full resolution. This trades exact WYSIWYG for about 10-20 times less work per preview. |
+| D-27 | **CPU limits, no GPU** | No GPU: Audacity's echo and reverb feed back on themselves, so each sample depends on the previous one, which GPUs cannot speed up; GPU float results also vary by hardware, which would break D-25. Instead: screen-resolution previews (D-26), cancelling stale renders mid-way, capped slider ranges, and a preview time budget (section 9.2). |
+| D-28 | **Output is a normal image** | The glitched pixels are saved as PNG (default), uncompressed TIFF (for Photoshop masking), or JPEG (quality 95). There is no "glitched file itself" any more: the pixels *are* the result. |
 
 ## 1. Goals and non-goals
 
 Goals:
+- Reproduce the look of Audacity databending on photographs, with live preview.
 - Local only. No network calls at runtime. Fonts and assets are bundled.
-- Non-destructive, deterministic, header-safe by default.
+- Non-destructive and deterministic: originals are never written, and a recipe plus seed always gives the same image.
 - A CLI and a web GUI as thin front ends over one core crate.
-- Linux first-class. macOS and Windows supported.
 - The GUI is usable from a phone browser over the LAN or VPN.
+- Linux first-class. macOS and Windows supported.
 
 Non-goals:
 - General photo editing.
-- Cloud anything.
-- Telemetry.
-- Plugin ABI.
+- Bit-exact reproduction of Audacity's own output. The goal is the same character, from the same kinds of math.
+- Cloud anything. Telemetry. Plugin ABI.
 
 ## 2. Name and license
 
-- Project `glitcharaxia`, binary `glitchrx`.
-- GPL-3.0-or-later. libjpeg-turbo (BSD/IJG/zlib) and rawler (LGPL-2.1) are compatible.
+Project `glitcharaxia`, binary `glitchrx`. GPL-3.0-or-later. libjpeg-turbo (BSD/IJG/zlib), the `png` and `tiff` crates (MIT/Apache) and rawler (LGPL-2.1, later) are compatible.
 
 ## 3. Architecture
 
-### 3.1 Stack
+### 3.1 Pipeline
 
-- Rust stable, edition 2024, Cargo workspace.
-- The web GUI is served by the `glitchrx` binary itself (axum), with an optional Tauri v2 wrapper later.
-- The algorithmic modules of the core have no UI, async or filesystem dependencies, so a WASM build stays possible.
+```
+input file --decode--> raster --steps--> raster --encode--> PNG / TIFF / JPEG
+                      (RGB bytes)  (each step: bytes -> samples -> effect -> clip -> bytes)
+```
+
+1. **Decode** the input to a *raster*: 8-bit RGB, interleaved, rows top to bottom, no padding. EXIF orientation is applied, so the raster is upright. The colour profile (ICC) is kept aside and written into the output (should).
+2. **Steps** run in order. Each step views a stretch of the raster as audio samples in its encoding (section 5), applies its effect within its windows, and clips the result back to bytes.
+3. **Encode** the raster in the output format.
+
+Effects never change the raster's length, so the image keeps its dimensions.
 
 ### 3.2 Layout
 
 ```
-glitcharaxia/
-  Cargo.toml                 workspace
-  crates/
-    glitchrx-core/           library: formats, effects, recipe, rng, decode, io
-      src/
-        lib.rs
-        rng.rs               seeded deterministic RNG + sampling helpers
-        recipe.rs            Recipe, Step, TOML (de)serialization
-        params.rs            parameter specs, parsing, validation
-        placement.rs         region / hits / len -> windows
-        effects/             one file per effect + mod.rs registry
-        formats/jpeg/        parse.rs, scan.rs (destuff/restuff), info
-        decode.rs            (feature "turbo") tolerant decoder, scaled decode
-        io.rs                (feature "fs") naming rules, safe writes
-    glitchrx-cli/            front end: argument parsing, summary output
-  web/                       Phase 2: Svelte UI, served by `glitchrx serve`
-  tools/
-    gen-fixtures/            generates tests/fixtures (committed output)
-    contact-sheet/           parameter-sweep grids for visual tuning
-  tests/fixtures/            generated CC0 test images
-  samples/                   Phil's photos, git-ignored
-  docs/effects.md            effect reference
-  docs/decisions/            ADRs (0001-decoder.md, ...)
-  SPEC.md VOCAB.md README.md CLAUDE.md LICENSE justfile
+crates/
+  glitchrx-core/
+    src/
+      raster.rs           Raster { width, height, bytes }, scaling for previews
+      decode/             jpeg.rs (libjpeg-turbo), png.rs, tiff.rs, orient.rs, icc.rs
+      encode.rs           PNG, TIFF, JPEG output
+      samples.rs          encodings: bytes <-> f64 samples, clipping
+      effects/            one file per effect + mod.rs registry
+      dsp.rs              shared building blocks: delay lines, combs, allpass, LFO, sine
+      params.rs placement.rs recipe.rs rng.rs io.rs
+  glitchrx-cli/
+  glitchrx-serve/
+web/
+tools/ gen-fixtures/ contact-sheet/
 ```
 
-### 3.3 Core model
+Removed from the live tree (tag `archive/jpeg-bytes`): `formats/jpeg.rs`, `restart.rs`, the scan-level tests and the restart transform in `turbo.rs`. libjpeg-turbo stays, as the JPEG decoder and encoder.
 
-- **JPEG container.** The parser produces an ordered list of chunks: *structure* chunks (bytes copied verbatim) and *entropy runs* (the de-stuffed bytes between markers). Restart markers and fill bytes are structure. All runs of the primary image, concatenated, form the **payload**, which is what effects edit. `finish()` re-stuffs every run and reassembles the file.
-- **Length-preserving rule.** Every byte effect preserves payload length. Re-stuffing can change the file size by a few bytes, but structure outside the scans is never touched.
-- **Effects** implement `apply` and `invert` on a window of the payload. Non-reversible effects return `NotReversible` from `invert`.
-- **Decode result:** `Clean`, `Recovered(message)` (libjpeg-turbo warned but produced a full image), `Partial(message)` (a fatal error mid-image; the rows decoded so far are kept), or `Failed(message)`.
+### 3.3 Determinism
 
-### 3.4 Determinism
+- RNG: ChaCha8 keyed from SplitMix64 expansion of the `u64` step seed, with our own sampling helpers (unchanged).
+- Effect math: f64, basic operations only (D-25). Constants that need transcendental functions (for example a decay curve) are computed once with our own deterministic routines, never in a per-sample loop with the platform's `libm`.
+- Decoding is part of the output: the same input must decode to the same raster. libjpeg-turbo is pinned to its accurate integer IDCT (`TJPARAM_FASTDCT=0`) with default upsampling; golden tests cover decode-then-bend.
+- Every effect has a `VERSION`, every step stores its seed, and per-hit randomness derives from `(step seed, hit index)`.
 
-- RNG is ChaCha8, keyed by a 32-byte seed that the core expands from the `u64` step seed with SplitMix64. The core does not rely on `seed_from_u64`, whose expansion is not promised stable across crate versions.
-- The core uses its own sampling helpers (rejection-sampled bounded integers, Fisher-Yates).
-- Integer-only effect math. Float parameters are quantized once to Q8 (`round(x * 256)`).
-- Every effect has a `VERSION`. Every recipe step stores its own seed.
-- Per-hit randomness is derived from `(step seed, hit index)`, so inversion can process hits in reverse order and still draw the same values.
+## 4. Inputs and outputs
 
-## 4. JPEG handling
+| Format | In | Out | Notes |
+| --- | --- | --- | --- |
+| JPEG | must | must | libjpeg-turbo. Output quality 95, 4:4:4. |
+| PNG | must | must (default) | 8- and 16-bit in; 16-bit is reduced to 8-bit (should: round, not truncate). Alpha is dropped. |
+| TIFF | must | must | Uncompressed, LZW and Deflate in; uncompressed RGB out, for Photoshop. 16-bit in is reduced to 8-bit. |
+| WebP, AVIF | later | later | Decode to raster; AVIF behind a feature flag (dav1d). |
+| DNG / camera RAW | later | no | rawler, demosaiced to 8-bit RGB. iPhone ProRAW (JPEG XL inside) to be verified. |
 
-- **Supported:**
-  - SOF0, SOF1, SOF2 (baseline, extended, progressive) with Huffman coding
-  - any subsampling, grayscale, CMYK
-  - restart intervals
-- **Refused clearly:** arithmetic coding, lossless, hierarchical.
-- **Parser:**
-  - walks segments by length
-  - treats `FF FF` fill as structure
-  - stops at the primary EOI, preserving trailing bytes verbatim
-- **Lenient re-parsing.** Once at least one scan has been found, any later structural surprise turns the rest of the file into trailing data instead of failing. Files glitched in raw mode can therefore be glitched again.
-- **`--info`:**
-  - dimensions, components, subsampling, progressive or baseline
-  - scans, payload size, restart interval
-  - thumbnail and trailing-data presence
-- **Header-safe guarantee (tested):** every non-entropy byte is identical to the original in safe mode.
+- Grayscale and CMYK inputs are converted to RGB.
+- **Orientation:** must. A portrait photo shot sideways is bent upright, so "rows" are what Phil sees.
+- **ICC profile:** should be carried from input to output, so colours match the original in Photoshop.
+- **Later:** a 16-bit raster, where 16-bit samples line up with 16-bit pixel channels.
+- **Later:** a BMP-style layout (BGR, rows bottom to top), which gives the mirrored look of bending BMP files.
 
-## 5. Decoding
+## 5. Sample encodings (Audacity "Import Raw Data")
 
-- libjpeg-turbo through its TurboJPEG 3 API (`turbojpeg-sys`), linked to the system library through pkg-config on Linux.
-- The decoder is told not to stop on warnings, and decodes scaled (1/2, 1/4, 1/8) for previews.
-- The decoder is used in Phase 1 for `--bake`, the post-write decode check, and the contact sheets.
-- Decision record: `docs/decisions/0001-decoder.md`.
-- Contract: the decode wrapper never panics, and an undecodable file is a normal, reported state.
+Each step has an `encoding` and `channels` parameter (D-23):
+
+| `encoding` | Bytes per sample | Character (from the 2026-11-21 contact sheets) |
+| --- | --- | --- |
+| `u8` (default) | 1 | Clean ghosts; colours rotate through channels. Closest to Phil's examples. |
+| `s8` | 1 | Like `u8`, but the clipping point sits mid-brightness, which inverts highlights. |
+| `s16le`, `s16be` | 2 | Ghosts under heavy rainbow grain. Byte order changes the palette. |
+| `s24le`, `s24be` | 3 | One sample per pixel: the whole pixel becomes one number. |
+| `ulaw`, `alaw` | 1 | Posterized neon blocks with hard edges. |
+
+- **Channels:** `1` (mono) or `2` (stereo). In stereo, samples alternate left/right, and effects process each channel separately, as Audacity does.
+- **Clipping:** after the effect, samples are clamped to the encoding's range and converted back to bytes. For `ulaw`/`alaw`, the companding curve is applied on the way back.
+- **Byte order** only exists for multi-byte samples. It decides which byte the effect treats as the loud part, which is why it mattered in Audacity.
+- **Channel phase.** A delay of a whole number of pixels keeps colours; one or two extra bytes rotate red into green into blue. Delays are therefore given as a size plus a `phase` of 0, 1 or 2 bytes (section 6.2).
 
 ## 6. Effects
 
-### 6.1 Placement (shared by all byte effects)
+### 6.1 Character, not bit-exactness
 
-- **`region=START:END`** sets where hits may land, as percent or byte offsets. The default skips the start of the payload (value set by tuning, D-7).
-- **`hits=N`** is the number of seeded windows. `hits=0` means one window covering the whole region.
-- **`len=BYTES`** is the window length. The `k` and `m` suffixes are accepted.
-- Hits are applied in order and inverted in reverse order. An effect writes only inside its window.
+Effects follow Audacity's built-ins in structure and parameters, computed in f64 and clipped at the end. They are not guaranteed to match Audacity's output to the byte; contact sheets judge them against Phil's examples.
 
-### 6.2 Phase 1 effects
+### 6.2 Placement and units (all effects)
 
-Arithmetic is mod 256 and `q` is a Q8 gain.
+- **`region=START:END`**: where hits may land, in percent of the raster. In the raster, percent of the data *is* percent of the image height, so `40%:60%` really is the middle band. Rows (`120rows`) are also accepted.
+- **`hits=N`**: seeded windows inside the region; `hits=0` means one window covering the whole region.
+- **`len`**: window length, in `%` (of the image), `rows`, `px`, or bytes.
+- **Delays and block sizes** take the same units plus **`phase`** (0-2 extra bytes) for channel rotation. Relative units are what make screen-resolution previews possible (section 9.2).
 
-| Effect | Definition | Reversible |
+### 6.3 First batch (must)
+
+| Effect | Audacity counterpart | Definition |
 | --- | --- | --- |
-| `echo` | Feed-forward taps: `y[i] = x[i] + sum_k (q_k * x[i - k*d]) >> 8` with `q_k = Q8(gain^k)` | Yes |
-| `reverb` | Three feedback combs in series, delays `d`, `1.37d`, `1.71d`: `y[i] = x[i] + (q * y[i-d]) >> 8` | Yes |
-| `shift` | Circular rotate of each window by `by` | Yes |
-| `backwards` | Reverse each window (renamed, D-13) | Yes |
-| `shuffle` | Permute a `fraction` of the `block`-sized blocks (block: bytes or % of window) | Yes |
-| `amplify` | `wrap` mode: `(x-128)*m + 128` with odd `m`. `clip` mode: gain with clamping | wrap yes, clip no |
-| `bitcrush` | Keep the top `bits` bits | No |
-| `stutter` | Repeat the first `chunk` (bytes or % of window) over the window | No |
+| `echo` | Echo | Feedback delay: `y[n] = x[n] + decay * y[n - d]`. |
+| `delay` | Delay (Nyquist) | Feed-forward taps at `d, 2d, ...`, each `decay^k` loud (the v0.2 `echo`). |
+| `reverb` | Reverb | Freeverb-style: parallel damped feedback combs into series allpasses, with `room`, `damping`, `wet`, `dry`, `width`. |
+| `amplify` | Amplify | Gain in dB with clipping. |
+| `invert` | Invert | `y = -x`. |
+| `backwards` | Reverse | Reverse each window. |
+| `shift` | (cut and paste) | Rotate each window. |
+| `shuffle` | (cut and paste) | Permute blocks inside each window. |
+| `stutter` | Repeat | Repeat the start of each window across it. |
+| `bitcrush` | Bitcrush-style | Keep the top bits of each sample. |
 
-All eight are **must** for Phase 1. Defaults are tuned visually with the contact-sheet tool. The final parameters and defaults are documented in `docs/effects.md`, generated from the effect registry.
+### 6.4 Second batch (should, after tuning the first)
 
-### 6.3 Later: sample views and Audacity-faithful mode
+| Effect | Audacity counterpart | Notes |
+| --- | --- | --- |
+| `phaser` | Phaser | All-pass stages swept by an LFO (our own sine). Likely source of the wavy look in `Glitchpicturecool-notmine.jpg`. |
+| `wahwah` | Wahwah | Resonant band-pass swept by an LFO. |
+| `distort` | Distortion | Waveshaping curves (hard clip, soft clip, fold). |
+| `speed` | Change Speed | Resample a window to a new rate, then fit it back to length. Shears and stretches the picture. |
 
-- 16-bit little-endian and big-endian sample views (D-12).
-- A mu-law and float mode, built only if the integer effects turn out to lack the Audacity look.
+### 6.5 Later
 
-## 7. CLI (Phase 1)
+- Pixel sorting and pixel-space effects (Phase 3).
+- Strength sliders (a 0-100 macro per effect).
+- Defaults tuned with contact sheets; Phil judges where the choice is aesthetic (D-7).
 
-### 7.1 Syntax
+## 7. CLI
 
 ```
 glitchrx [--EFFECT [k=v,...]]... [OPTIONS] INPUT [OUTPUT]
-glitchrx [--EFFECT [k=v,...]]... [OPTIONS] INPUT INPUT INPUT...
+glitchrx [--EFFECT [k=v,...]]... [OPTIONS] --batch INPUT...
+glitchrx --info INPUT...     glitchrx --list     glitchrx serve ...
 ```
-
-- An effect flag may be followed by a parameter token. That token is any argument containing `=` that is not an existing file; `--echo=delay=4096` also works.
-- Effect flags run in command-line order.
-- **Positional arguments:**
-  - With exactly two positionals, the second is the output, matching the brief's form. It is refused if it already exists, unless `--force` is given.
-  - With three or more positionals, or with `--batch`, all of them are inputs and output names are generated automatically.
 
 Examples:
 
 ```
-glitchrx --echo photo.jpg
-glitchrx --echo photo.jpg photo-echo.jpg
-glitchrx --echo delay=4096,gain=0.7 --shift by=200,hits=5 photo.jpg
-glitchrx --reverse --echo delay=4096,gain=0.7 --seed 81723 photo-glitch.jpg
-glitchrx --recipe moody.toml --batch a.jpg b.jpg
-glitchrx --info photo.jpg
-glitchrx --list
+glitchrx --echo photo.jpg                                writes photo-glitch.png
+glitchrx --echo delay=0.33rows,decay=0.5,encoding=ulaw photo.jpg
+glitchrx --reverb --echo phase=1 photo.tif photo-bent.tif
+glitchrx --recipe moody.toml --batch *.jpg
 ```
-
-### 7.2 Options
 
 | Option | Behaviour |
 | --- | --- |
 | `--seed N` | Master seed. The default is random and is always printed. |
-| `--reverse` | Invert the chain. Refused if any step is lossy or the mode is raw. Default suffix `-restored`. |
 | `--recipe FILE` | Apply a saved recipe instead of effect flags. |
 | `--save-recipe[=FILE]` | Write the recipe used. Default `<output-stem>.recipe.toml`. |
-| `--mode safe\|raw` | `raw` skips de-stuffing (Audacity-faithful, may truncate, not reversible). |
-| `--restart ROWS\|PCT%\|keep` | Before glitching, losslessly add restart markers every ROWS MCU rows or PCT% of the image height, which caps how tall each glitch band grows. `0` removes markers. Default `10%`; `keep` leaves the file as is (D-15). |
-| `--bake[=FILE.png]` | Also write the decoded result as PNG. Default `<output-stem>.png`. |
+| `--format png\|tiff\|jpeg` | Output format when OUTPUT is not given (default `png`); otherwise taken from OUTPUT's extension. |
 | `--force` | Allow overwriting an existing output. Never the input. |
-| `--batch` | Treat every positional as an input. |
-| `--info`, `--list`, `--help`, `-q`, `-v` | Structure report, effect reference, help, quiet, verbose. |
+| `--batch`, `--info`, `--list`, `-q`, `-v`, `--help` | As before. `--info` reports the format, size, orientation and colour profile. |
 
-After each write, one summary line: the output path, the decode status, the seed, and (when the chain is reversible) the exact reverse command.
+Removed: `--reverse`, `--mode`, `--restart`, `--bake` (every output is already a normal image).
 
-### 7.3 File safety and naming
-
-- The input is never written, even with `--force`. Checks use the canonical path and same-file identity, which covers symlinks and hardlinks.
-- Writes go to a temp file in the target directory and are then persisted with no-clobber (or with overwrite under `--force`).
-- **Auto naming:**
-  - Strip `-glitch`, `-glitch-N` or `-restored(-N)` from the stem to get the base.
-  - Take the highest existing `base-glitch[-N]` with any extension, plus 1. Bare `-glitch` counts as 0.
-  - Keep the input's extension.
-- **Exit codes:**
-  - 0: ok
-  - 1: runtime error
-  - 2: usage error
-  - 3: refused (overwrite, irreversible)
-  - 4: unsupported format
-
-### 7.4 Why `--reverse` exists (D-4)
-
-Originals are never modified, and the GUI's undo works from the recipe, so `--reverse` is rarely needed to recover a photo. Its real uses:
-
-1. **Proof of correctness.** The round-trip tests prove the effects are exact. They need the core `invert`, not the CLI flag.
-2. **Recovery without the original.** Useful if you only kept a glitched file and its printed command, for example after sharing or moving files around.
-3. **Creative mis-reversal.** Reversing with *different* parameters than were applied, for example `--reverse --echo delay=4000` on a file glitched with `delay=4096`, produces new artifacts that layer on top of the old ones. This is a distinct look and the most practical creative use.
-4. **Peeling one layer.** After a stacked chain, reversing only the last step's parameters removes that layer while keeping the earlier ones.
-
-The flag itself is small once the core `invert` exists, so it is planned for Phase 1 as a should.
+File safety, auto naming (`-glitch`, `-glitch-1`, ...) and exit codes are unchanged, except that exit code 3 no longer covers irreversible chains.
 
 ## 8. Recipe format
 
-TOML. Both the CLI and the GUI accept it.
+TOML, recipe `version = 2`. Version 1 recipes (JPEG byte mode) are refused with a message naming `archive/jpeg-bytes`.
 
 ```toml
 format = "glitcharaxia-recipe"
-version = 1
-mode = "safe"
-restart = "10%"          # optional; absent = leave the file's markers as they are
+version = 2
 
 [[step]]
 effect = "echo"
 effect_version = 1
 seed = 81723
-delay = 4096
-gain = 0.7
-region = "5%:100%"
-hits = 3
-len = "4k"
+encoding = "u8"
+delay = "0.33rows"
+phase = 1
+decay = 0.5
+region = "30%:100%"
 ```
 
-## 9. Phases
+## 9. GUI
 
-Each phase ends in a working, tested tool on its own branch, followed by a stop-and-summarize.
+### 9.1 Changes from 2a
 
-### Phase 1: CLI, JPEG (branch `phase-1-cli`)
+- Remove the Bands and Mode controls and the decode status.
+- Each step gets `encoding` and `channels` pickers; the effect list shows the Audacity counterpart.
+- Export offers PNG, TIFF and JPEG; "Save next to original" keeps the CLI naming.
+- Everything else (open, step stack, undo/redo, compare, recipes, browsing, token, layout, look) stays.
 
-1. Bootstrap: repo, workspace, docs, fixture generator and fixtures.
-2. Decoder decision record.
-3. JPEG parser, scan view, `--info`, header-preservation tests.
-4. Effect framework: RNG, placement, params, registry, recipes.
-5. All eight effects, with unit, round-trip and golden tests.
-6. CLI: syntax, naming, safe writes, `--bake`, `--recipe`, `--reverse`.
-7. Tuning and docs: contact sheets, defaults, `docs/effects.md`, README.
+### 9.2 Preview performance
 
-**Exit:**
-- `just check` is green.
-- A 24 MP JPEG is processed in under 1 s.
-- Phil tests on his own photos.
+- **Cached per document:** the decoded full raster, a preview raster sized to the screen, and the raster after each step (both resolutions, within a memory budget).
+- **Scaled preview (D-26).** Steps run on the preview raster. Relative sizes (`%`, `rows`, `px`) are scaled with it; byte sizes are scaled too, keeping their `phase`. Hit positions are percentages, so they land in the same places. The result should match the export closely; a contact-sheet test compares preview and export at matching scale and fails on large differences.
+- **Cancellation.** A render checks between hits and every few hundred thousand samples whether a newer request arrived, and stops if so.
+- **Budget.** A preview that runs over 3 s stops and the GUI says it is too heavy to preview live; export still works and shows progress.
+- **Slider caps.** Sliders cover the useful range; the number field accepts the full range.
+- **Target:** under 100 ms per preview for a typical step on a phone-sized screen, any source size.
 
-### Phase 2: web GUI, then formats (branch `phase-2-gui`)
+### 9.3 Masking (Phase 3)
 
-- **2a `glitchrx serve` (primary GUI).** Svelte UI served by the binary:
-  - open, step stack, parameters, live preview, before/after, export
-  - undo and redo over recipe states, seed re-roll
-  - export as native glitched bytes or baked PNG/JPEG
-  - mobile-first layout that also works on desktop
-- **2b Tauri wrapper (optional).** The same UI in a desktop window, for local use without a browser.
-- **2c PNG and TIFF.** Inflate, glitch the filtered stream, deflate, and fix CRCs. Uncompressed TIFF directly.
-- **2d WebP, AVIF, RAW and DNG (input).** Decode to a working format, glitch, then bake to the target on export. RAW and DNG go through `rawler`.
-  - Note: iPhone ProRAW DNGs may use JPEG XL compression. rawler support for these must be verified with Phil's samples.
-  - AVIF decoding needs dav1d, so it sits behind a feature flag.
+Pixel-domain glitches stay close to where they are applied, so masking can work like Phil's Photoshop workflow: the bent raster composited over the original through a mask (brush, shape, vector), with the mask sources stored in the recipe.
 
-### Phase 3: depth (branch `phase-3-depth`)
+## 10. Phases
 
-- Strength sliders: a 0-100 macro per effect, mapped along tuned curves.
-- Pixel effects: pixel sort, channel offset, scanline displacement.
-- Pipeline: byte steps, then decode, then pixel steps, with an explicit `reencode` step for generation-loss loops.
-- Masking (section 10.3). Presets.
+### Phase 1: CLI, JPEG byte effects (done, archived)
 
-## 10. GUI design
+Built and tested on `phase-1-cli`; the byte engine is now at `archive/jpeg-bytes` (D-22).
 
-### 10.1 Stack and look
+### Phase 2: web GUI and pixel engine (branch `phase-2-gui`)
 
-- **Serving.** `glitchrx serve` runs an axum HTTP server in the same binary, using the same core. It serves the Svelte frontend, which is compiled at build time and embedded in the binary, so there are no external requests.
-- **Binding.** It binds `127.0.0.1` by default. `--host 0.0.0.0` (or a specific WireGuard or LAN address) is opt-in, prints the LAN URL, and warns that there is no authentication. An optional shared token is a **should**.
-- **Images stay on your machine:**
-  - From the phone, the browser file picker sends the photo to *your own* server.
-  - On the server, a browser restricted to a configured directory (for example `~/Pictures`) opens files where they already are.
-- **Why Svelte:**
-  - The UI has real state: a step stack, sliders, undo history, and later masks and brush strokes.
-  - Svelte compiles that state handling away into small vanilla JavaScript, which keeps the bundle light on a phone.
-  - Vanilla TypeScript would mean hand-writing the same reactivity (DOM updates on every state change), which gets messy by Phase 3.
-  - React would work but is heavier for no gain here.
-- **Look (Phil's defaults):**
-  - Young Serif for headings, Courier New for body
-  - sharp corners, bold lines
-  - Gruvbox dark and light with a toggle, green accent
-  - Lucide icons used sparingly
-  - fonts bundled
-- **Layout:**
-  - Desktop: canvas in the centre, step stack on the right, status bar along the bottom.
-  - Phone: the canvas on top and the step stack as a bottom sheet, with touch-sized controls.
+- **2a `glitchrx serve`:** done (D-16..D-21).
+- **2b Pixel core.** Raster, decoders (JPEG with orientation, PNG, TIFF), encoders, sample encodings, the f64 effect framework, the first-batch effects, recipe v2, CLI changes, removal of the JPEG byte engine. Tests per section 11.
+- **2c GUI on the pixel core.** Section 9.1 and 9.2: scaled previews, cancellation, budget, TIFF export.
+- **2d Second-batch effects and tuning.** Phaser, wahwah, distort, speed; contact sheets against `samples/examples/`; defaults chosen with Phil.
+- **2e Tauri wrapper (optional).**
 
-### 10.2 Preview performance
+### Phase 3: depth
 
-- **Cached per document:**
-  - original bytes
-  - parsed container
-  - per-step outputs, keyed by a hash of the recipe prefix
-- **While dragging:**
-  - Re-apply the byte effects (milliseconds).
-  - Decode with libjpeg-turbo scaling to the smallest size that covers the viewport.
-  - Target under 100 ms per frame for a 24 MP source.
-- **After release (250 ms idle):** a higher-resolution decode up to the viewport size.
-- **Full resolution** is only produced on export, on the server.
-- **Phone constraint:** iOS browsers cap canvas size (roughly 16 MP total). Previews are always sized to the screen, never to the source.
-- **Rendering:** latest-wins job scheduling, so stale renders are dropped. Previews travel to the browser as compressed images (JPEG or PNG at preview size), which keeps traffic small over WireGuard.
+- Masking (9.3), pixel sorting, strength sliders, presets.
+- More inputs: WebP, AVIF, DNG/RAW.
+- 16-bit raster and BMP layout (section 4).
 
-### 10.3 Masking
-
-1. **Mask (exact, pixel-space).** The glitched render is composited over the original through an alpha mask, which can come from brush strokes, shapes or vectors. The vector sources are stored in the recipe.
-2. **Target (approximate, byte-space).** MCU-row offsets are recorded during decode, so a byte region can be chosen as "rows 40-60%". The damage starts there and may bleed downward.
+Each phase ends in a working, tested tool, followed by a stop-and-summarize.
 
 ## 11. Testing and quality
 
 ### 11.1 Gate
 
-`just check`, which runs `scripts/check.sh` underneath:
-- `cargo fmt --check`
-- `cargo clippy --workspace --all-targets -- -D warnings`
-- `cargo test --workspace`
-
-Claude runs it and reports real output.
+`just check` (`scripts/check.sh`): `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, plus `svelte-check` and `vitest` when `web/node_modules` exists.
 
 ### 11.2 Required tests
 
-- **Per-effect unit tests.**
-- **Round trips:** proptest round trips for the reversible effects, plus whole-file glitch-then-reverse yielding the identical file.
-- **Header preservation:** across every fixture and effect.
-- **Stuffing:** no unstuffed `0xFF` in safe-mode scans except the original RST markers.
-- **Decoder:** no panics across a glitched corpus.
-- **File safety:**
-  - the input is never modified
-  - an existing output is refused without `--force`
-  - the input is refused even with `--force`, including through symlinks and hardlinks
-- **Naming:** all the suffix cases.
-- **Determinism:** BLAKE3 golden hashes for fixed seeds, via insta snapshots.
+- **Per-effect unit tests** on small sample buffers, including clipping at the range edges.
+- **Encodings:** round trip bytes -> samples -> bytes is the identity for every encoding (no effect applied); U-law and A-law match the G.711 tables.
+- **Length and dimensions** never change.
+- **Window confinement:** an effect writes only inside its windows.
+- **Determinism:** golden BLAKE3 hashes of decode-then-bend for fixed seeds, every effect and encoding, via insta.
+- **Decoders:** every fixture decodes; orientation 1-8 fixtures come out upright; malformed files are errors, never panics.
+- **Preview fidelity:** scaled preview vs. downscaled export, mean difference under a threshold for each effect at defaults.
+- **File safety and naming:** unchanged from v0.2.
+- **API tests** (serve): preview, export in each format, cancellation.
 
 ### 11.3 Fixtures
 
-Generated procedurally, CC0, and committed. Variants:
-- 4:2:0, 4:2:2, 4:4:4
-- grayscale
-- progressive
-- restart intervals
-- EXIF thumbnail
-- trailing data
-- `FF FF` fill
+Procedural, CC0, committed: JPEG (4:2:0, 4:4:4, grayscale, progressive, CMYK, EXIF orientation 1-8, ICC profile), PNG (8- and 16-bit, alpha, palette), TIFF (uncompressed, LZW, 16-bit).
 
 ### 11.4 Contact sheets
 
-`tools/contact-sheet` writes grid PNGs of parameter sweeps. Claude reads them to tune the defaults and shows Phil the ones where a choice is his.
-
-### 11.5 Phil's sample photos
-
-- Location: `samples/` at the repo root, git-ignored.
-- Suggested contents:
-  - Ten to fifteen images: portraits or skin, sky gradients, foliage or fine detail, night or low light, high contrast, signage or text.
-  - Sizes: at least one full-resolution camera JPEG and one phone JPEG.
-- File types:
-  - JPEG matters now.
-  - A few PNG, TIFF, DNG, WebP and AVIF files can wait in `samples/` for Phase 2.
-- **iPhone:** photos default to HEIC, which is not in scope. Use "Most Compatible" in the camera settings, or export as JPEG.
-- **Organization:** subfolders by type (`samples/jpeg`, `samples/dng`, ...). Descriptive file names help, for example `night-street.jpg`.
+`tools/contact-sheet` sweeps one parameter or encoding per sheet. Claude reads them to tune and shows Phil the ones where the choice is his.
 
 ## 12. Repository and agent harness
 
-- **Branches:**
-  - `main` holds the bootstrap only.
-  - Each phase gets its own branch.
-  - Feature branches are cut from the phase branch and merged back by Claude once the gate is green.
-  - Claude never pushes and never merges into `main`.
-  - Conventional commits, with no AI attribution lines.
-- **Phase boundary:** Claude stops and summarizes. Each summary covers:
-  - what was built
-  - real test output
-  - deviations from the spec
-  - open questions
-  - next step
-  - a heads-up on effort level for the next phase
-- **CLAUDE.md** holds the operational rules. **VOCAB.md** holds the shared vocabulary and grows with the project.
-- **CI** is deferred until a remote exists.
+- `main` holds the bootstrap only; each phase has a branch; feature branches merge back once the gate is green; Claude never pushes or merges into `main`.
+- Conventional commits, no AI attribution lines.
+- At each phase boundary, stop and summarize: what was built, real test output, deviations, open questions, next step, effort outlook.
+- `CLAUDE.md` holds the operational rules; its invariants change with v0.3 (section 13). `VOCAB.md` grows with the project.
 
-## 13. Open items
+## 13. Invariants (replacing v0.2's)
 
-1. The default region skip and the per-effect defaults. Claude will report what tuning shows and ask where the choice is aesthetic.
-2. ~~An optional auth token for `serve`~~: built (D-17).
-3. Preview speed on 24 MP and larger files (D-19): parallel band decoding is the candidate fix.
+- **Inputs are never written**, even with `--force`; outputs are never overwritten without `--force`.
+- **Dimensions are preserved:** effects never change the raster's length.
+- **Determinism:** same input, recipe and seed give the same output bytes on every supported platform (D-25).
+- **No network calls** at runtime.
+
+Dropped: header-safe (no compressed data is edited) and exact reversibility (D-24).
+
+## 14. Open items
+
+1. Default output format: PNG (smaller, lossless) or TIFF (matches the Photoshop workflow)? Draft says PNG.
+2. Default encoding: `u8`, unless the second round of contact sheets says otherwise.
+3. Whether a step's `encoding` should also be settable once for the whole recipe (as Audacity's import was), with per-step override.
+4. Preview fidelity threshold (9.2), to be set from measurements.

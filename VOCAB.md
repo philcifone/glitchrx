@@ -2,7 +2,23 @@
 
 Shared terms for glitcharaxia, so we can name things precisely. Grouped by topic, alphabetical within each group. It grows as the project does.
 
+## Pixel engine (SPEC v0.3)
+
+- **A-law / U-law.** Two telephone audio encodings that squeeze a 16-bit sample into one byte along a curve. Reading pixel bytes this way and back gives posterized, neon colour blocks.
+- **Channel phase.** How many extra bytes (0, 1 or 2) a delay adds beyond whole pixels. Phase 0 keeps a ghost's colours; 1 or 2 rotates red into green into blue.
+- **Channels (mono / stereo).** In stereo, samples alternate left and right, and effects treat each side separately, as Audacity does.
+- **Clipping.** Clamping samples to the encoding's range after an effect. It loses information, which is why effects can no longer be reversed exactly, and it gives the bright, saturated look.
+- **Databending.** Opening a file as the wrong kind of data (here: an image as audio), editing it with that kind of tool, and opening it as an image again.
+- **Encoding (sample encoding).** How bytes are read as audio samples: `u8`, `s8`, `s16le`, `s16be`, `s24le`, `s24be`, `ulaw`, `alaw`. The choice from Audacity's Import Raw Data dialog.
+- **Freeverb.** A classic open reverb design (damped feedback combs plus allpass filters) that Audacity's Reverb is based on.
+- **LFO.** Low-frequency oscillator: a slow wave that sweeps a filter, as in phaser and wahwah.
+- **Raster.** The decoded image as raw bytes: R, G, B for each pixel, row after row, top to bottom. What an uncompressed TIFF stores, and what every effect now edits.
+- **Scaled preview.** Running the steps on a screen-sized copy of the raster, with sizes scaled to match, so previews are fast. Close to the export, not identical.
+
 ## JPEG anatomy
+
+Background, mostly from the archived JPEG byte engine (`archive/jpeg-bytes`). JPEG is still read and written as a file format.
+
 
 - **Byte stuffing.** Inside scan data, a real `0xFF` byte is always written as `FF 00`, so it cannot be mistaken for a marker. "De-stuffing" removes the `00`s. "Re-stuffing" puts them back.
 - **DC drift.** Each block's average brightness (its DC value) is stored as a difference from the previous block. Corrupt one, and every later block in that component is shifted. This causes the color and brightness bands that run to the end of the image.
