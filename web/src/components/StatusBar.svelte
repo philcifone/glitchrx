@@ -38,15 +38,21 @@
     gap: 14px;
     padding: 6px var(--pad);
     padding-bottom: max(6px, env(safe-area-inset-bottom));
-    border-top: var(--border);
-    font-size: 0.85em;
-    min-height: 34px;
+    border-top: var(--hairline);
+    background: var(--bar);
+    color: var(--fg-dim);
+    font-size: 0.78rem;
+    font-variant-numeric: tabular-nums;
+    min-height: 30px;
+    position: relative;
+    z-index: 2;
     white-space: nowrap;
     overflow: hidden;
   }
 
   .name {
-    font-weight: 700;
+    font-weight: 600;
+    color: var(--fg);
     overflow: hidden;
     text-overflow: ellipsis;
     min-width: 0;
@@ -70,8 +76,9 @@
   }
 
   .dismiss {
-    min-height: 26px;
-    padding: 0 8px;
+    min-height: 24px;
+    padding: 0 10px;
+    border-radius: 999px;
   }
 
   @media (max-width: 760px) {

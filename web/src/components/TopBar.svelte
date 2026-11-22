@@ -18,18 +18,18 @@
 <header>
   <h1>glitchrx</h1>
   <div class="actions">
-    <button onclick={onopen} title="Open a photo">
-      <FolderOpen size={18} strokeWidth={2.25} />
+    <button class="plain" onclick={onopen} title="Open a photo">
+      <FolderOpen size={18} strokeWidth={1.75} />
       <span class="label">Open</span>
     </button>
     <button class="icon" onclick={() => app.undo()} disabled={!app.canUndo} title="Undo (Ctrl+Z)" aria-label="Undo">
-      <Undo2 size={18} strokeWidth={2.25} />
+      <Undo2 size={18} strokeWidth={1.75} />
     </button>
     <button class="icon" onclick={() => app.redo()} disabled={!app.canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
-      <Redo2 size={18} strokeWidth={2.25} />
+      <Redo2 size={18} strokeWidth={1.75} />
     </button>
     <button class="primary" onclick={onexport} disabled={!app.doc} title="Export">
-      <Download size={18} strokeWidth={2.5} />
+      <Download size={18} strokeWidth={2} />
       <span class="label">Export</span>
     </button>
     <button
@@ -38,39 +38,51 @@
       title="Switch to {theme === 'dark' ? 'light' : 'dark'} theme"
       aria-label="Toggle theme"
     >
-      {#if theme === 'dark'}<Sun size={18} strokeWidth={2.25} />{:else}<Moon size={18} strokeWidth={2.25} />{/if}
+      {#if theme === 'dark'}<Sun size={18} strokeWidth={1.75} />{:else}<Moon size={18} strokeWidth={1.75} />{/if}
     </button>
   </div>
 </header>
 
 <style>
+  /* A translucent navigation bar, as on iOS. */
   header {
     grid-area: top;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--pad);
-    padding: 8px var(--pad);
-    padding-top: max(8px, env(safe-area-inset-top));
-    border-bottom: var(--border);
+    padding: 6px 12px 6px var(--pad);
+    padding-top: max(6px, env(safe-area-inset-top));
+    border-bottom: var(--hairline);
+    background: var(--bar);
+    backdrop-filter: saturate(180%) blur(20px);
+    -webkit-backdrop-filter: saturate(180%) blur(20px);
+    position: relative;
+    z-index: 2;
   }
 
   h1 {
-    font-size: 1.6rem;
-    letter-spacing: 0.01em;
+    font-size: 1.06rem;
   }
 
   .actions {
     display: flex;
-    gap: 6px;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .actions .primary {
+    margin: 0 6px;
+    border-radius: 999px;
+    padding: 6px 16px;
   }
 
   @media (max-width: 420px) {
     .label {
       display: none;
     }
-    h1 {
-      font-size: 1.3rem;
+    .actions .primary {
+      padding: 6px 12px;
     }
   }
 </style>

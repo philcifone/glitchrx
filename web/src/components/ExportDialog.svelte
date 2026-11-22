@@ -3,7 +3,6 @@
   // save or load the recipe.
   import Download from '@lucide/svelte/icons/download';
   import Save from '@lucide/svelte/icons/save';
-  import X from '@lucide/svelte/icons/x';
   import { app } from '../lib/app.svelte';
   import type { ExportFormat } from '../lib/types';
 
@@ -51,41 +50,43 @@
 <dialog bind:this={dialog} aria-labelledby="export-title">
   <div class="head">
     <h2 id="export-title">Export</h2>
-    <button class="icon" onclick={() => dialog.close()} aria-label="Close"><X size={18} strokeWidth={2.5} /></button>
+    <button class="plain" onclick={() => dialog.close()}>Done</button>
   </div>
 
   <div class="body">
-    <fieldset>
-      <legend>Image</legend>
-      {#each formats as f (f.id)}
-        <label class="opt">
-          <input type="radio" name="format" value={f.id} bind:group={format} />
-          <span><strong>{f.label}</strong><br /><span class="dim">{f.note}</span></span>
-        </label>
-      {/each}
+    <h3 class="section-label">Image</h3>
+    <section class="group">
+      <div class="segmented" role="radiogroup" aria-label="Format">
+        {#each formats as f (f.id)}
+          <button role="radio" aria-checked={format === f.id} class:on={format === f.id} onclick={() => (format = f.id)}>
+            {f.label}
+          </button>
+        {/each}
+      </div>
+      <p class="dim small">{formats.find((f) => f.id === format)?.note}</p>
       <div class="buttons">
         <button class="primary" onclick={() => run(() => app.download(format))} disabled={!app.doc}>
-          <Download size={18} strokeWidth={2.5} /> Download
+          <Download size={18} strokeWidth={2} /> Download
         </button>
         {#if app.doc?.path}
           <button onclick={() => run(() => app.saveOnServer(format, withRecipe))}>
-            <Save size={18} strokeWidth={2.25} /> Save next to original
+            <Save size={18} strokeWidth={1.75} /> Save next to original
           </button>
         {/if}
       </div>
       {#if app.doc?.path}
-        <label class="opt small">
-          <input type="checkbox" bind:checked={withRecipe} />
-          <span>Also save the recipe there (.recipe.toml)</span>
+        <label class="opt">
+          <span>Also save the recipe there</span>
+          <input class="switch" type="checkbox" bind:checked={withRecipe} />
         </label>
         <p class="dim small">Saved as {app.doc.name.replace(/\.[^.]*$/, '')}-glitch, -glitch-1, ... Nothing is overwritten.</p>
       {/if}
-    </fieldset>
+    </section>
 
-    <fieldset>
-      <legend>Recipe</legend>
+    <h3 class="section-label">Recipe</h3>
+    <section class="group">
       <p class="dim small">
-        The recipe lists every step, parameter and seed. Replay it with
+        Every step, parameter and seed. Replay it with
         <code>glitchrx --recipe FILE photo.jpg</code> or load it here.
       </p>
       <div class="buttons">
@@ -93,7 +94,7 @@
         <button onclick={() => recipeInput.click()}>Load recipe</button>
         <input bind:this={recipeInput} type="file" accept=".toml,text/plain,application/toml" class="visually-hidden" onchange={loadRecipe} tabindex="-1" />
       </div>
-    </fieldset>
+    </section>
   </div>
 </dialog>
 
@@ -102,44 +103,45 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px var(--pad);
-    border-bottom: var(--border);
+    padding: 10px 10px 10px var(--pad);
+    border-bottom: var(--hairline);
+  }
+
+  .head h2 {
+    font-size: 1.06rem;
   }
 
   .body {
-    padding: var(--pad);
+    padding: 8px var(--pad) var(--pad);
     display: flex;
     flex-direction: column;
-    gap: var(--pad);
+    gap: 8px;
     overflow-y: auto;
     max-height: calc(100dvh - 120px);
+    background: var(--bg);
   }
 
-  fieldset {
-    border: var(--border);
-    margin: 0;
-    padding: 10px var(--pad) var(--pad);
+  .section-label {
+    margin: 10px 4px 0;
+  }
+
+  .group {
+    background: var(--card);
+    border-radius: 12px;
+    padding: 14px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-  }
-
-  legend {
-    font-family: var(--font-head);
-    font-size: 1.1rem;
-    padding: 0 6px;
+    gap: 12px;
   }
 
   .opt {
     display: flex;
+    align-items: center;
+    justify-content: space-between;
     gap: 10px;
-    align-items: flex-start;
+    border-top: var(--hairline);
+    padding-top: 12px;
     cursor: pointer;
-  }
-
-  .opt input {
-    margin-top: 3px;
-    flex: none;
   }
 
   .buttons {
@@ -149,7 +151,7 @@
   }
 
   .small {
-    font-size: 0.85em;
+    font-size: 0.85rem;
     margin: 0;
   }
 </style>

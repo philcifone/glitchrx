@@ -103,7 +103,7 @@
       oncontextmenu={(e) => e.preventDefault()}
       title="Hold to see the original (or hold the \ key)"
     >
-      {app.comparing ? 'Original' : 'Hold: original'}
+      {app.comparing ? 'Original' : 'Hold for original'}
     </button>
   {/if}
 </div>
@@ -145,7 +145,7 @@
     position: absolute;
     top: 0;
     left: 0;
-    height: 3px;
+    height: 2px;
     width: 30%;
     background: var(--accent);
     animation: slide 0.9s linear infinite;
@@ -168,17 +168,28 @@
     }
   }
 
+  /* Floating "glass" elements over the photo: blurred, rounded pills. */
+  .working,
+  .exact,
+  .compare {
+    background: var(--glass);
+    backdrop-filter: saturate(180%) blur(16px);
+    -webkit-backdrop-filter: saturate(180%) blur(16px);
+    box-shadow: var(--shadow);
+    border-radius: 999px;
+  }
+
   .working {
     position: absolute;
     top: 12px;
     left: 50%;
     transform: translateX(-50%);
-    background: var(--bg);
-    border: var(--border);
-    padding: 4px 10px;
+    padding: 6px 14px;
+    font-size: 0.9rem;
+    white-space: nowrap;
   }
 
-  /* Region band: shade outside it, bold edges along it. */
+  /* Region band: shade outside it, thin accent edges along it. */
   .band {
     position: absolute;
     pointer-events: none;
@@ -188,52 +199,66 @@
     position: absolute;
     left: 0;
     right: 0;
-    background: rgb(0 0 0 / 0.55);
+    background: rgb(0 0 0 / 0.5);
   }
 
   .edge {
     position: absolute;
     left: 0;
     right: 0;
-    border-top: 3px solid var(--accent);
-    border-bottom: 3px solid var(--accent);
+    border-top: 2px solid var(--accent);
+    border-bottom: 2px solid var(--accent);
   }
 
   .heavy {
-    border-color: var(--warn);
     display: flex;
     align-items: center;
     gap: 10px;
+    padding: 4px 4px 4px 14px;
     max-width: calc(100% - 24px);
+    white-space: normal;
+    color: var(--warn);
+  }
+
+  .heavy button {
+    border-radius: 999px;
+    min-height: 30px;
+    flex: none;
+  }
+
+  .exact,
+  .compare {
+    position: absolute;
+    bottom: 12px;
+    min-height: 34px;
+    padding: 6px 16px;
+    font-size: 0.9rem;
   }
 
   .exact {
-    position: absolute;
     left: 12px;
-    bottom: 12px;
-    background: var(--bg);
   }
 
   .exact.on {
     opacity: 1;
     color: var(--accent);
-    border-color: var(--accent);
   }
 
   .compare {
-    position: absolute;
     right: 12px;
-    bottom: 12px;
-    background: var(--bg);
     touch-action: none;
     user-select: none;
     -webkit-user-select: none;
     -webkit-touch-callout: none;
   }
 
+  .exact:hover:not(:disabled),
+  .compare:hover:not(:disabled) {
+    background: var(--glass);
+  }
+
   .compare.on {
     background: var(--accent);
     color: var(--accent-fg);
-    border-color: var(--accent);
   }
 </style>
