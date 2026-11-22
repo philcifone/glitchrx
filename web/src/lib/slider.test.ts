@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SLIDER_STEPS, percentScale, sliderScale } from './slider';
+import { SLIDER_STEPS, percentScale, rowsScale, sliderScale } from './slider';
 
 describe('sliderScale', () => {
   it('is linear for small integer ranges', () => {
@@ -50,5 +50,22 @@ describe('percentScale', () => {
     expect(percentScale.fromSlider(0)).toBe(0.01);
     expect(percentScale.fromSlider(SLIDER_STEPS)).toBe(100);
     expect(percentScale.fromSlider(percentScale.toSlider(0.5))).toBeCloseTo(0.5, 2);
+  });
+});
+
+describe('rowsScale', () => {
+  it('covers fractions of a row and many rows', () => {
+    expect(rowsScale.fromSlider(0)).toBe(0.01);
+    expect(rowsScale.fromSlider(SLIDER_STEPS)).toBe(64);
+    // One row sits a bit past the middle: fractions get their share.
+    const one = rowsScale.toSlider(1);
+    expect(one).toBeGreaterThan(SLIDER_STEPS * 0.4);
+    expect(one).toBeLessThan(SLIDER_STEPS * 0.7);
+  });
+
+  it('round-trips the defaults', () => {
+    for (const v of [0.25, 0.33, 0.5, 1, 6.5]) {
+      expect(rowsScale.fromSlider(rowsScale.toSlider(v))).toBeCloseTo(v, 1);
+    }
   });
 });

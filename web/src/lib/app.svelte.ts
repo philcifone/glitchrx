@@ -6,24 +6,29 @@
 // place that schedules a re-render and records history.
 
 import * as api from './api';
-import { ApiError } from './api';
+import { ApiError, TooHeavyError } from './api';
 import { History } from './history';
 import { LatestOnly } from './latest';
 import { usesSeed } from './seed';
+import { shakeParams } from './shake';
 import type {
-  DecodeWord,
+  Channels,
   DocInfo,
   EffectInfo,
   ExportFormat,
-  Mode,
   RecipeDto,
   RecipeState,
   ServerConfig,
   StepState,
 } from './types';
 
-/** Restart interval for new recipes, matching the CLI default (SPEC D-15). */
-export const DEFAULT_RESTART = '10%';
+/** Recipe-wide encoding for new recipes, matching the CLI default. */
+export const DEFAULT_ENCODING = 'u8';
+/** Step parameter keys that override the recipe's encoding and channels. */
+export const ENCODING_KEY = 'encoding';
+export const CHANNELS_KEY = 'channels';
+/** How long the region band stays on the preview after a drag ends. */
+const REGION_LINGER_MS = 900;
 /** After the last change, wait this long before a sharper render (SPEC 10.2). */
 const IDLE_MS = 250;
 const RECIPE_KEY = 'glitchrx.recipe';
@@ -38,7 +43,20 @@ const newUid = () => `s${Date.now().toString(36)}${(uidCounter++).toString(36)}`
 /** A short, typeable seed, like the CLI's. */
 export const randomSeed = () => String(Math.floor(Math.random() * 1_000_000));
 
-const emptyRecipe = (): RecipeState => ({ mode: 'safe', restart: DEFAULT_RESTART, steps: [] });
+const emptyRecipe = (): RecipeState => ({ encoding: DEFAULT_ENCODING, channels: 1, steps: [] });
+
+/**
+ * A recipe from storage or a file, in the current shape. Recipes saved by
+ * the 2a GUI carry `mode` and `restart` and no encoding; those fields are
+ * dropped and the defaults filled in.
+ */
+function normalize(r: Partial<RecipeState>, known: (effect: string) => boolean): RecipeState {
+  return {
+    encoding: typeof r.encoding === 'string' ? r.encoding : DEFAULT_ENCODING,
+    channels: r.channels === 2 ? 2 : 1,
+    steps: (r.steps ?? []).filter((s) => known(s.effect)),
+  };
+}
 
 /** localStorage can throw (private mode, blocked storage); never let it break the app. */
 function storageGet(key: string): string | null {
@@ -77,8 +95,13 @@ export class App {
   busy = $state(false);
   /** A long-running action (upload, export) in progress, for the UI to show. */
   working = $state<string | null>(null);
-  decode = $state<{ word: DecodeWord; message: string | null } | null>(null);
   renderMs = $state<number | null>(null);
+  /** The shown preview is an exact (full-resolution) render. */
+  exact = $state(false);
+  /** Set when the last preview ran over the time budget: the message. */
+  heavy = $state<string | null>(null);
+  /** A region being dragged, in percent, for the preview to draw. */
+  regionHint = $state<{ s: number; e: number } | null>(null);
   error = $state<string | null>(null);
   notice = $state<string | null>(null);
 
@@ -91,6 +114,7 @@ export class App {
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private originalKey = '';
   private noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  private regionTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** Load server config and the effect registry, and restore the last recipe. */
   async init(): Promise<void> {
@@ -105,9 +129,7 @@ export class App {
     const saved = storageGet(RECIPE_KEY);
     if (saved) {
       try {
-        const r = JSON.parse(saved) as RecipeState;
-        r.steps = r.steps.filter((s) => this.effect(s.effect));
-        this.recipe = r;
+        this.recipe = normalize(JSON.parse(saved), (e) => !!this.effect(e));
         this.history = new History(this.snapshot());
       } catch {
         // A stale or corrupt saved recipe is simply ignored.
@@ -157,7 +179,7 @@ export class App {
       storageSet(DOC_KEY, doc.id);
       this.setImage(null);
       this.setOriginal(null, '');
-      this.decode = null;
+      this.heavy = null;
       this.error = null;
       this.render('full');
     } catch (e) {
@@ -175,8 +197,8 @@ export class App {
   dto(): RecipeDto {
     const r = $state.snapshot(this.recipe);
     return {
-      mode: r.mode,
-      restart: r.restart,
+      encoding: r.encoding,
+      channels: r.channels,
       steps: r.steps
         .filter((s) => s.enabled)
         .map(({ effect, effect_version, seed, params }) => ({
@@ -296,14 +318,45 @@ export class App {
     this.changed(commit);
   }
 
-  setRestart(restart: string | null): void {
-    this.recipe.restart = restart;
+  /** New settings for a step's own parameters; see shake.ts. */
+  shake(uid: string): void {
+    const s = this.step(uid);
+    const info = s && this.effect(s.effect);
+    if (!s || !info) return;
+    s.params = { ...s.params, ...shakeParams(info, Math.random) };
     this.changed();
   }
 
-  setMode(mode: Mode): void {
-    this.recipe.mode = mode;
+  setEncoding(encoding: string): void {
+    this.recipe.encoding = encoding;
     this.changed();
+  }
+
+  setChannels(channels: Channels): void {
+    this.recipe.channels = channels;
+    this.changed();
+  }
+
+  /** Override a step's encoding (null follows the recipe). */
+  setStepEncoding(uid: string, encoding: string | null): void {
+    this.setParam(uid, ENCODING_KEY, encoding);
+  }
+
+  /** Override a step's channels (null follows the recipe). */
+  setStepChannels(uid: string, channels: Channels | null): void {
+    this.setParam(uid, CHANNELS_KEY, channels === null ? null : String(channels));
+  }
+
+  /** Draw a region band on the preview while it is being dragged. */
+  showRegion(s: number, e: number): void {
+    clearTimeout(this.regionTimer);
+    this.regionHint = { s, e };
+  }
+
+  /** Fade the band out a moment after the drag ends. */
+  hideRegion(): void {
+    clearTimeout(this.regionTimer);
+    this.regionTimer = setTimeout(() => (this.regionHint = null), REGION_LINGER_MS);
   }
 
   clearSteps(): void {
@@ -313,11 +366,14 @@ export class App {
 
   /** Replace the recipe with one loaded from a file. */
   loadRecipe(dto: RecipeDto): void {
-    this.recipe = {
-      mode: dto.mode,
-      restart: dto.restart,
-      steps: dto.steps.map((s) => ({ ...s, params: { ...s.params }, uid: newUid(), enabled: true })),
-    };
+    this.recipe = normalize(
+      {
+        encoding: dto.encoding,
+        channels: dto.channels,
+        steps: dto.steps.map((s) => ({ ...s, params: { ...s.params }, uid: newUid(), enabled: true })),
+      },
+      () => true, // the server already checked the effects
+    );
     this.changed();
   }
 
@@ -346,32 +402,45 @@ export class App {
    * Schedule a render. A `fast` render is followed, once things are idle
    * for IDLE_MS, by a `full` one at device resolution (when that differs).
    */
-  render(quality: 'fast' | 'full'): void {
+  render(quality: 'fast' | 'full' | 'exact'): void {
     const doc = this.doc;
     if (!doc) return;
     clearTimeout(this.idleTimer);
     const recipe = this.dto();
-    const { w, h } = this.target(quality);
+    const exact = quality === 'exact';
+    const { w, h } = this.target(exact ? 'full' : quality);
     this.busy = true;
-    this.queue.request(() => this.runPreview(doc.id, recipe, w, h));
+    if (exact) this.working = 'Rendering at full resolution';
+    this.queue.request(() => this.runPreview(doc.id, recipe, w, h, exact));
     if (quality === 'fast' && this.box.dpr > 1) {
       this.idleTimer = setTimeout(() => this.render('full'), IDLE_MS);
     }
     if (this.comparing) void this.loadOriginal();
   }
 
-  private async runPreview(docId: string, recipe: RecipeDto, w: number, h: number): Promise<void> {
+  private async runPreview(
+    docId: string,
+    recipe: RecipeDto,
+    w: number,
+    h: number,
+    exact: boolean,
+  ): Promise<void> {
     try {
-      const res = await api.preview(docId, recipe, w, h);
+      const res = await api.preview(docId, recipe, w, h, exact);
       if (!res || this.doc?.id !== docId) return; // superseded or switched photo
       const url = URL.createObjectURL(res.blob);
       await preload(url);
       this.setImage(url);
-      this.decode = { word: res.decode, message: res.message };
       this.renderMs = res.ms;
+      this.exact = exact;
+      this.heavy = null;
       this.error = null;
     } catch (e) {
-      this.fail(e);
+      // Too heavy is not an error: keep the last image and say so.
+      if (e instanceof TooHeavyError) this.heavy = e.message;
+      else this.fail(e);
+    } finally {
+      if (exact) this.working = null;
     }
   }
 

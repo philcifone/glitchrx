@@ -55,11 +55,11 @@
 
   <div class="body">
     <section>
-      <input bind:this={fileInput} type="file" accept="image/jpeg,.jpg,.jpeg" class="visually-hidden" onchange={pickFile} tabindex="-1" />
+      <input bind:this={fileInput} type="file" accept="image/jpeg,image/png,image/tiff,.jpg,.jpeg,.png,.tif,.tiff" class="visually-hidden" onchange={pickFile} tabindex="-1" />
       <button class="primary wide" onclick={() => fileInput.click()}>
         <Upload size={18} strokeWidth={2.5} /> From this device
       </button>
-      <p class="dim small">The photo is sent to this glitchrx server only. JPEG for now.</p>
+      <p class="dim small">The photo is sent to this glitchrx server only. JPEG, PNG or TIFF.</p>
     </section>
 
     {#if app.config?.browse}
@@ -98,7 +98,7 @@
               {/each}
             </ul>
           {:else}
-            <p class="dim">No JPEGs in this folder.</p>
+            <p class="dim">No photos in this folder.</p>
           {/if}
         {/if}
       </section>

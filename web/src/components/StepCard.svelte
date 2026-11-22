@@ -1,13 +1,17 @@
 <script lang="ts">
-  // One step of the recipe: header (name, on/off, re-roll) and, when open,
-  // its parameters, placement, seed and arrangement buttons.
+  // One step of the recipe: header (icon, name, on/off, shake, re-roll)
+  // and, when open, its parameters, sample settings, placement (always
+  // shown: it is where most of the variety comes from), seed and
+  // arrangement buttons.
   import Dices from '@lucide/svelte/icons/dices';
+  import WandSparkles from '@lucide/svelte/icons/wand-sparkles';
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import Copy from '@lucide/svelte/icons/copy';
   import X from '@lucide/svelte/icons/x';
-  import { app } from '../lib/app.svelte';
-  import type { StepState } from '../lib/types';
+  import { app, CHANNELS_KEY, ENCODING_KEY } from '../lib/app.svelte';
+  import { iconFor } from '../lib/icons';
+  import type { Channels, StepState } from '../lib/types';
   import ParamField from './ParamField.svelte';
 
   let { step, index, count }: { step: StepState; index: number; count: number } = $props();
@@ -15,8 +19,12 @@
   const info = $derived(app.effect(step.effect));
   const own = $derived(info?.params.filter((p) => !p.placement) ?? []);
   const placement = $derived(info?.params.filter((p) => p.placement) ?? []);
-  const changedPlacement = $derived(placement.some((p) => p.name in step.params));
   const seeded = $derived(app.seeded(step));
+  const Icon = $derived(iconFor(step.effect));
+  const encodings = $derived(app.config?.encodings ?? []);
+  // Empty string = follow the recipe.
+  const stepEncoding = $derived(step.params[ENCODING_KEY] ?? '');
+  const stepChannels = $derived(step.params[CHANNELS_KEY] ?? '');
   // Open when first added; collapsing is per card and not part of history.
   let open = $state(true);
 
@@ -31,19 +39,24 @@
   <header>
     <span class="n">{index + 1}</span>
     <button class="name" onclick={() => (open = !open)} aria-expanded={open} title={info?.summary}>
+      <Icon size={18} strokeWidth={2.25} />
       {step.effect}
+      {#if stepEncoding}<span class="enc dim">{stepEncoding}</span>{/if}
     </button>
     <label class="toggle" title={step.enabled ? 'Turn this step off' : 'Turn this step on'}>
       <input type="checkbox" checked={step.enabled} onchange={() => app.toggleStep(step.uid)} />
       <span class="visually-hidden">Enabled</span>
     </label>
+    <button class="icon" onclick={() => app.shake(step.uid)} disabled={!info} title="Shake: random settings for this step (placement stays)" aria-label="Shake settings">
+      <WandSparkles size={18} strokeWidth={2.25} />
+    </button>
     <button
       class="icon"
       onclick={() => app.reroll(step.uid)}
       disabled={!seeded}
       title={seeded
         ? 'New seed for this step'
-        : 'Nothing random here: with hits=0 the step covers its whole region. Set hits above 0 (under Placement) to scatter it.'}
+        : 'Nothing random here: with hits=0 the step covers its whole region. Set hits above 0 to scatter it.'}
       aria-label="Re-roll seed"
     >
       <Dices size={18} strokeWidth={2.25} />
@@ -56,12 +69,37 @@
         {#each own as spec (spec.name)}
           <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
         {/each}
-        <details open={changedPlacement}>
-          <summary>Placement{changedPlacement ? ' (changed)' : ''}</summary>
+        <div class="sample">
+          <label>
+            <span>encoding</span>
+            <select value={stepEncoding} onchange={(e) => app.setStepEncoding(step.uid, e.currentTarget.value || null)}>
+              <option value="">recipe ({app.recipe.encoding})</option>
+              {#each encodings as enc (enc.id)}
+                <option value={enc.id}>{enc.id}</option>
+              {/each}
+            </select>
+          </label>
+          <label>
+            <span>channels</span>
+            <select
+              value={stepChannels}
+              onchange={(e) => {
+                const v = e.currentTarget.value;
+                app.setStepChannels(step.uid, v ? (Number(v) as Channels) : null);
+              }}
+            >
+              <option value="">recipe ({app.recipe.channels === 2 ? 'stereo' : 'mono'})</option>
+              <option value="1">mono</option>
+              <option value="2">stereo</option>
+            </select>
+          </label>
+        </div>
+        <section class="placement" aria-label="Placement">
+          <h3>Placement</h3>
           {#each placement as spec (spec.name)}
             <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
           {/each}
-        </details>
+        </section>
       {:else}
         <p class="err">Unknown effect `{step.effect}`.</p>
       {/if}
@@ -122,6 +160,7 @@
 
   .name {
     flex: 1;
+    min-width: 0;
     justify-content: flex-start;
     border: none;
     background: none;
@@ -151,20 +190,40 @@
     gap: 10px;
   }
 
-  details summary {
-    cursor: pointer;
+  .enc {
+    font-family: var(--font-body);
+    font-size: 0.8rem;
+  }
+
+  .sample {
+    display: flex;
+    gap: 8px;
+  }
+
+  .sample label {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .sample span {
     font-weight: 700;
-    padding: 4px 0;
   }
 
-  details[open] summary {
-    margin-bottom: 8px;
-  }
-
-  details {
+  /* Placement is set off by a bold rule rather than hidden away. */
+  .placement {
     display: flex;
     flex-direction: column;
     gap: 10px;
+    border-top: var(--border);
+    padding-top: 8px;
+  }
+
+  .placement h3 {
+    font-size: 1rem;
+    margin: 0;
   }
 
   .foot {

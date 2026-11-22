@@ -1,62 +1,62 @@
 <script lang="ts">
-  // The step stack: file-wide settings (restart bands, mode), the steps in
-  // order, and the "add step" picker.
-  import Plus from '@lucide/svelte/icons/plus';
+  // The step stack: the recipe-wide sample settings (Audacity's Import Raw
+  // Data choices), the effect palette, and the steps in order.
   import Dices from '@lucide/svelte/icons/dices';
-  import { app, DEFAULT_RESTART } from '../lib/app.svelte';
+  import { tick } from 'svelte';
+  import { app } from '../lib/app.svelte';
+  import { iconFor } from '../lib/icons';
+  import type { Channels } from '../lib/types';
   import StepCard from './StepCard.svelte';
 
-  let pick = $state('echo');
-  const picked = $derived(app.effect(pick));
+  const encodings = $derived(app.config?.encodings ?? []);
+  const current = $derived(encodings.find((e) => e.id === app.recipe.encoding));
 
-  // Restart presets; anything else typed in the field is kept as is.
-  const presets = ['keep', '5%', '10%', '20%', '0'];
-  let restartText = $state('');
-  $effect(() => {
-    restartText = app.recipe.restart ?? 'keep';
-  });
+  let list: HTMLOListElement;
 
-  function setRestart(v: string) {
-    const t = v.trim();
-    app.setRestart(t === '' || t === 'keep' ? null : t);
+  /** Add a step and bring its card into view (the palette sits above). */
+  async function add(effect: string) {
+    app.addStep(effect);
+    await tick();
+    list?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 </script>
 
 <div class="stack">
-  <section class="file">
+  <section class="sample">
     <div class="row">
-      <label for="restart" title="A restart marker every N% of the image height (or N MCU rows). Each glitch stays inside its band.">
-        Bands
-      </label>
-      <input
-        id="restart"
-        type="text"
-        list="restart-presets"
-        bind:value={restartText}
-        onchange={() => setRestart(restartText)}
-        placeholder={DEFAULT_RESTART}
-        autocomplete="off"
-        spellcheck="false"
-      />
-      <datalist id="restart-presets">
-        {#each presets as p (p)}<option value={p}></option>{/each}
-      </datalist>
-      <label for="mode">Mode</label>
-      <select id="mode" value={app.recipe.mode} onchange={(e) => app.setMode(e.currentTarget.value as 'safe' | 'raw')}>
-        <option value="safe">safe</option>
-        <option value="raw">raw</option>
+      <label for="encoding">Encoding</label>
+      <select id="encoding" value={app.recipe.encoding} onchange={(e) => app.setEncoding(e.currentTarget.value)}>
+        {#each encodings as enc (enc.id)}
+          <option value={enc.id}>{enc.id}</option>
+        {/each}
       </select>
+      <div class="seg" role="radiogroup" aria-label="Channels">
+        {#each [1, 2] as n (n)}
+          <button
+            role="radio"
+            aria-checked={app.recipe.channels === n}
+            class:on={app.recipe.channels === n}
+            onclick={() => app.setChannels(n as Channels)}
+            title={n === 1 ? 'Mono: every sample in one stream' : 'Stereo: alternate samples are left and right, processed separately'}
+          >
+            {n === 1 ? 'mono' : 'stereo'}
+          </button>
+        {/each}
+      </div>
     </div>
-    <p class="dim note">
-      {#if app.recipe.restart === null}
-        Bands: keep the file's own restart markers. Damage can run to the bottom.
-      {:else if app.recipe.restart === '0'}
-        Bands: none. One hit can wash out everything below it.
-      {:else}
-        Bands every {app.recipe.restart}{app.recipe.restart.endsWith('%') ? ' of the height' : ' MCU rows'}.
-      {/if}
-      {#if app.recipe.mode === 'raw'}Raw mode can forge markers and truncate; not reversible.{/if}
-    </p>
+    {#if current}
+      <p class="dim note">{current.describe}. Any step can override it.</p>
+    {/if}
+  </section>
+
+  <section class="palette" aria-label="Add an effect">
+    {#each app.effects as e (e.id)}
+      {@const Icon = iconFor(e.id)}
+      <button onclick={() => add(e.id)} title="{e.summary} (Audacity: {e.audacity})" disabled={!app.config}>
+        <Icon size={24} strokeWidth={2.25} />
+        <span>{e.id}</span>
+      </button>
+    {/each}
   </section>
 
   <div class="head">
@@ -67,29 +67,13 @@
     <button onclick={() => app.clearSteps()} disabled={app.recipe.steps.length === 0}>Clear</button>
   </div>
 
-  <ol class="steps">
+  <ol class="steps" bind:this={list}>
     {#each app.recipe.steps as step, i (step.uid)}
       <li><StepCard {step} index={i} count={app.recipe.steps.length} /></li>
     {:else}
-      <li class="dim none">No steps yet. Add an effect below; steps run top to bottom.</li>
+      <li class="dim none">No steps yet. Tap an effect above; steps run top to bottom.</li>
     {/each}
   </ol>
-
-  <section class="add">
-    <div class="row">
-      <select bind:value={pick} aria-label="Effect to add">
-        {#each app.effects as e (e.id)}
-          <option value={e.id}>{e.id}</option>
-        {/each}
-      </select>
-      <button class="primary" onclick={() => app.addStep(pick)} disabled={!picked}>
-        <Plus size={18} strokeWidth={2.5} /> Add
-      </button>
-    </div>
-    {#if picked}
-      <p class="dim note">{picked.summary} (Audacity: {picked.audacity})</p>
-    {/if}
-  </section>
 </div>
 
 <style>
@@ -111,18 +95,66 @@
     gap: 8px;
   }
 
-  .row input,
   .row select {
     flex: 1;
+    min-width: 0;
   }
 
-  .file label {
+  .sample label {
     font-weight: 700;
   }
 
   .note {
     margin: 6px 0 0;
     font-size: 0.88em;
+  }
+
+  /* Segmented mono/stereo switch: two buttons sharing one border. */
+  .seg {
+    display: flex;
+    flex: none;
+  }
+
+  .seg button {
+    padding: 0 10px;
+  }
+
+  .seg button + button {
+    border-left: none;
+  }
+
+  .seg button.on {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-color: var(--accent);
+  }
+
+  /* Effect palette: one tap adds a step. Five columns, so the ten effects
+     make two rows even on a phone. */
+  .palette {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .palette button {
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 2px 6px;
+    min-height: 64px;
+  }
+
+  .palette button span {
+    font-size: 0.68rem;
+    letter-spacing: -0.05em;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .palette button:hover:not(:disabled) {
+    color: var(--accent);
+    border-color: var(--accent);
   }
 
   .head {
@@ -149,10 +181,5 @@
 
   .none {
     padding: 8px 0;
-  }
-
-  .add {
-    border-top: var(--border);
-    padding-top: var(--pad);
   }
 </style>

@@ -9,7 +9,7 @@
 
   let dialog: HTMLDialogElement;
   let recipeInput: HTMLInputElement;
-  let format = $state<ExportFormat>('png');
+  let format = $state<ExportFormat>('tiff');
   let withRecipe = $state(true);
 
   export function show(): void {
@@ -18,19 +18,19 @@
 
   const formats: { id: ExportFormat; label: string; note: string }[] = [
     {
-      id: 'png',
-      label: 'Baked PNG',
-      note: 'Exactly what you see here, lossless. Looks the same everywhere.',
+      id: 'tiff',
+      label: 'TIFF',
+      note: 'Uncompressed 8-bit RGB with the colour profile: ready for masking in Photoshop. Large.',
     },
     {
-      id: 'jpeg-baked',
-      label: 'Baked JPEG',
-      note: 'What you see here, as a clean JPEG (quality 95). Smaller, good for sharing.',
+      id: 'png',
+      label: 'PNG',
+      note: 'Lossless and smaller than TIFF. Every pixel exactly as bent.',
     },
     {
       id: 'jpeg',
-      label: 'Glitched JPEG',
-      note: 'The broken file itself. Each viewer decodes it its own way, so it may look different elsewhere.',
+      label: 'JPEG',
+      note: 'Quality 95. Smallest, good for sharing; fine grain softens a little.',
     },
   ];
 
