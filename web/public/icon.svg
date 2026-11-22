@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+<!-- glitchrx app icon: a disc read as scanlines, some slid sideways
+     (the shift effect), with a green colour fringe. Source for every
+     icon; regenerate the PNGs with scripts/icons.sh. -->
+<defs><clipPath id="d"><circle cx="256" cy="256" r="156"/></clipPath></defs>
+<rect width="512" height="512" fill="#1d2021"/>
+<g id="art">
+<g><rect x="100" y="103.0" width="312" height="20.0" clip-path="url(#d)" fill="#ebdbb2"/></g>
+<g><rect x="100" y="129.0" width="312" height="20.0" clip-path="url(#d)" fill="#ebdbb2"/></g>
+<g transform="translate(0 0)"><rect x="100" y="155.0" width="312" height="20.0" clip-path="url(#d)" fill="#b8bb26"/></g>
+<g transform="translate(-14 0)"><rect x="100" y="155.0" width="312" height="20.0" clip-path="url(#d)" fill="#ebdbb2"/></g>
+<g><rect x="100" y="181.0" width="312" height="20.0" clip-path="url(#d)" fill="#ebdbb2"/></g>
+<g transform="translate(24 0)"><rect x="100" y="207.0" width="312" height="20.0" clip-path="url(#d)" fill="#b8bb26"/></g>
+<g transform="translate(38 0)"><rect x="100" y="207.0" width="312" height="20.0" clip-path="url(#d)" fill="#ebdbb2"/></g>
+<g transform="translate(-32 0)"><rect x="100" y="233.0" width="312" height="20.0" clip-path="url(#d)" fill="#b8bb26"/></g>
+<g transform="translate(-46 0)"><rect x="100" y="233.0" width="312" height="20.0" clip-path="url(#d)" fill="#ebdbb2"/></g>
+<g><rect x="100" y="259.0" width="312" height="20.0" clip-path="url(#d)" fill="#ebdbb2"/></g>
+<g><rect x="100" y="285.0" width="312" height="20.0" clip-path="url(#d)" fill="#ebdbb2"/></g>
+<g transform="translate(50 0)"><rect x="100" y="311.0" width="312" height="20.0" clip-path="url(#d)" fill="#b8bb26"/></g>
+<g transform="translate(64 0)"><rect x="100" y="311.0" width="312" height="20.0" clip-path="url(#d)" fill="#ebdbb2"/></g>
+<g transform="translate(-8 0)"><rect x="100" y="337.0" width="312" height="20.0" clip-path="url(#d)" fill="#b8bb26"/></g>
+<g transform="translate(-22 0)"><rect x="100" y="337.0" width="312" height="20.0" clip-path="url(#d)" fill="#ebdbb2"/></g>
+<g><rect x="100" y="363.0" width="312" height="20.0" clip-path="url(#d)" fill="#ebdbb2"/></g>
+<g><rect x="100" y="389.0" width="312" height="20.0" clip-path="url(#d)" fill="#ebdbb2"/></g>
+</g>
+</svg>
