@@ -45,7 +45,7 @@ Report the real output. Never assume success.
 
 Overrides Phil's global design defaults (Phil, 2026-11-22): minimal and professional, like an iOS app.
 
-- System font stack (SF Pro on Apple devices); no bundled fonts.
+- Young Serif (regular weight only) for headings: the app title, dialog titles and step names. Everything else uses the system font stack (SF Pro on Apple devices).
 - Muted Gruvbox palette with one green accent; tokens live in `web/src/app.css`.
 - Grouped rounded cards, hairline separators, no bold borders. iOS-style switches, segmented controls and translucent bars.
 - Lucide icons at stroke 1.75, tinted with the accent; effect icons are in `web/src/lib/icons.ts`.
