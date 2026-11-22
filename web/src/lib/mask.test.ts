@@ -12,6 +12,7 @@ import {
   migrateMask,
   newComponent,
   opDetail,
+  pasteOps,
   percent,
   withMode,
 } from './mask';
@@ -78,6 +79,10 @@ describe('migrateMask', () => {
     } as never;
     const m = migrateMask(old);
     expect(m.invert).toBe(true);
+    // The mask-wide feather moves onto every component.
+    expect('feather' in m).toBe(false);
+    expect(m.op!.map((o) => o.feather)).toEqual([0.01, 0.01, 0.01]);
+    for (const o of m.op!) delete o.feather;
     expect(modes(m.op!)).toEqual(['brush:add', 'radial:add', 'brush:add']);
     expect(m.op![0]).toEqual({
       shape: 'brush',
@@ -90,8 +95,24 @@ describe('migrateMask', () => {
   });
 
   it('leaves a current mask alone', () => {
-    const m = { invert: false, feather: 0, op: [brush(), bright('intersect')] };
+    const m = { invert: false, op: [brush(), { ...bright('intersect'), feather: 0.02 }] };
     expect(migrateMask(m)).toEqual(m);
+    // A component's own feather wins over an old mask-wide one.
+    const old = { ...m, feather: 0.05 } as never;
+    expect(migrateMask(old).op!.map((o) => o.feather)).toEqual([0.05, 0.02]);
+  });
+});
+
+describe('pasteOps', () => {
+  it('keeps intersections last, copies deeply and reports where the pasted ones went', () => {
+    const ops = [brush(), bright('intersect')];
+    const copied = [bright('intersect'), { ...brush('subtract'), opacity: 0.5 }];
+    const { ops: out, indices } = pasteOps(ops, copied);
+    expect(modes(out)).toEqual(['brush:add', 'brush:subtract', 'brightness:intersect', 'brightness:intersect']);
+    expect(indices).toEqual([1, 3]);
+    expect(out[1].opacity).toBe(0.5);
+    // Pasting twice gives independent copies.
+    expect(out[3]).not.toBe(copied[0]);
   });
 });
 

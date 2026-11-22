@@ -44,7 +44,11 @@ export function cleanTool(saved: unknown): ToolState {
 export const BRUSH_MIN = 0.005;
 export const BRUSH_MAX = 0.3;
 
-export const emptyMask = (): Mask => ({ invert: false, feather: 0, op: [] });
+export const emptyMask = (): Mask => ({ invert: false, op: [] });
+
+/** A component's opacity and feather, with their defaults filled in. */
+export const opOpacity = (op: MaskOp) => op.opacity ?? 1;
+export const opFeather = (op: MaskOp) => op.feather ?? 0;
 
 export const SHAPE_LABEL: Record<MaskShape, string> = {
   brush: 'Brush',
@@ -126,11 +130,34 @@ export function afterRemoval(active: number | null, removed: number[]): number |
 }
 
 /**
- * Masks saved before components existed had one `stroke` operation per
- * stroke. Runs of them become one brush each (an eraser stroke becomes an
- * erase stroke of that brush).
+ * Add copied components to a mask (intersections kept last). Returns the
+ * new list and where the pasted ones went, so they can be selected.
+ */
+export function pasteOps(ops: MaskOp[], pasted: MaskOp[]): { ops: MaskOp[]; indices: number[] } {
+  let out = ops;
+  const marked = pasted.map((op) => structuredClone(op));
+  for (const op of marked) out = insertOp(out, op).ops;
+  // Insertion moves earlier pastes along, so find them by identity at the end.
+  const indices = marked.map((op) => out.indexOf(op)).sort((a, b) => a - b);
+  return { ops: out, indices };
+}
+
+/**
+ * Masks from earlier builds of this branch, in the current shape:
+ * - one `stroke` operation per stroke: runs of them become one brush each
+ *   (an eraser stroke becomes an erase stroke of that brush);
+ * - a feather for the whole mask: it moves onto each component that has
+ *   none of its own (close, though not identical: each edge is blurred
+ *   rather than the finished mask).
  */
 export function migrateMask(mask: Mask): Mask {
+  const { feather, ...rest } = mask as Mask & { feather?: number };
+  const out = migrateStrokes(rest);
+  if (feather) out.op = out.op?.map((op) => (op.feather === undefined ? { ...op, feather } : op));
+  return out;
+}
+
+function migrateStrokes(mask: Mask): Mask {
   const out: MaskOp[] = [];
   let brush: Extract<MaskOp, { shape: 'brush' }> | null = null;
   for (const raw of mask.op ?? []) {

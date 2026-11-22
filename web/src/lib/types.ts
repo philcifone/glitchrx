@@ -94,19 +94,29 @@ export interface Stroke {
  * fractions of the picture (x of the width, y of the height); sizes are
  * fractions of its longer side.
  */
-export type MaskOp =
-  | { shape: 'brush'; mode: MaskMode; stroke: Stroke[] }
-  | { shape: 'linear'; mode: MaskMode; from: [number, number]; to: [number, number] }
-  /** A circle: centre `from`, edge through `to`. Hard-edged unless `hardness` < 1. */
-  | { shape: 'radial'; mode: MaskMode; from: [number, number]; to: [number, number]; hardness?: number }
-  | { shape: 'brightness'; mode: MaskMode; low: number; high: number; soft: number };
+export type MaskOp = MaskCommon &
+  (
+    | { shape: 'brush'; stroke: Stroke[] }
+    | { shape: 'linear'; from: [number, number]; to: [number, number] }
+    /** A circle: centre `from`, edge through `to`. Hard-edged unless `hardness` < 1. */
+    | { shape: 'radial'; from: [number, number]; to: [number, number]; hardness?: number }
+    | { shape: 'brightness'; low: number; high: number; soft: number }
+  );
+
+/** What every mask component has besides its shape. */
+export interface MaskCommon {
+  mode: MaskMode;
+  /** How strongly it counts, 0..1 (default 1). */
+  opacity?: number;
+  /** Blur of its edges, as a share of the longer side (default 0). */
+  feather?: number;
+}
 
 export type MaskShape = MaskOp['shape'];
 
 /** Where a step's result shows. The server omits empty and default fields. */
 export interface Mask {
   invert?: boolean;
-  feather?: number;
   op?: MaskOp[];
 }
 
