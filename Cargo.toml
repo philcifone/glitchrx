@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = ["crates/glitchrx-core", "crates/glitchrx-cli", "tools/gen-fixtures", "tools/contact-sheet"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+rust-version = "1.88"
+publish = false
+
+[workspace.dependencies]
+glitchrx-core = { path = "crates/glitchrx-core" }
+turbojpeg-sys = { version = "1.2", default-features = false, features = ["pkg-config"] }
+rand_chacha = "0.9"
+rand_core = "0.9"
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"
+thiserror = "2"
+anyhow = "1"
+png = "0.18"
+tempfile = "3"
+same-file = "1"
+clap = { version = "4", features = ["derive"] }
+blake3 = "1"
+proptest = "1"
+insta = { version = "1", features = ["yaml"] }
+
+[profile.dev.package."*"]
+# Dependencies optimized even in debug builds; keeps tests on large buffers fast.
+opt-level = 2
