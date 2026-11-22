@@ -1,5 +1,8 @@
 <script lang="ts">
-  // Title, open, presets, undo/redo, export, theme toggle.
+  // Title, open, presets, undo/redo, export, theme toggle. While a mask is
+  // being painted it becomes an edit bar, as in iOS: what is being masked,
+  // undo/redo (used constantly while painting) and Done. Nothing floats
+  // over the photo, and Open and Export wait until painting is done.
   import FolderOpen from '@lucide/svelte/icons/folder-open';
   import Bookmark from '@lucide/svelte/icons/bookmark';
   import Download from '@lucide/svelte/icons/download';
@@ -17,36 +20,53 @@
 </script>
 
 <header>
-  <h1>glitchrx</h1>
-  <div class="actions">
-    <button class="plain" onclick={onopen} title="Open a photo">
-      <FolderOpen size={18} strokeWidth={1.75} />
-      <span class="label">Open</span>
-    </button>
-    {#if app.config?.presets}
-      <button class="icon" onclick={onpresets} title="Presets: your saved recipes" aria-label="Presets">
-        <Bookmark size={18} strokeWidth={1.75} />
+  {#if app.maskTarget}
+    {@const t = app.maskTarget}
+    <div class="mode" role="status">
+      <h1>Mask</h1>
+      <span class="what">Step {t.n}: {t.step.effect}{t.step.enabled ? '' : ' (off)'}</span>
+    </div>
+    <div class="actions">
+      <button class="icon" onclick={() => app.undo()} disabled={!app.canUndo} title="Undo the last stroke (Ctrl+Z)" aria-label="Undo">
+        <Undo2 size={18} strokeWidth={1.75} />
       </button>
-    {/if}
-    <button class="icon" onclick={() => app.undo()} disabled={!app.canUndo} title="Undo (Ctrl+Z)" aria-label="Undo">
-      <Undo2 size={18} strokeWidth={1.75} />
-    </button>
-    <button class="icon" onclick={() => app.redo()} disabled={!app.canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
-      <Redo2 size={18} strokeWidth={1.75} />
-    </button>
-    <button class="primary" onclick={onexport} disabled={!app.doc} title="Export">
-      <Download size={18} strokeWidth={2} />
-      <span class="label">Export</span>
-    </button>
-    <button
-      class="icon"
-      onclick={() => (theme = toggleTheme())}
-      title="Switch to {theme === 'dark' ? 'light' : 'dark'} theme"
-      aria-label="Toggle theme"
-    >
-      {#if theme === 'dark'}<Sun size={18} strokeWidth={1.75} />{:else}<Moon size={18} strokeWidth={1.75} />{/if}
-    </button>
-  </div>
+      <button class="icon" onclick={() => app.redo()} disabled={!app.canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
+        <Redo2 size={18} strokeWidth={1.75} />
+      </button>
+      <button class="primary" onclick={() => app.stopMasking()} title="Finish painting (Enter)">Done</button>
+    </div>
+  {:else}
+    <h1>glitchrx</h1>
+    <div class="actions">
+      <button class="plain" onclick={onopen} title="Open a photo">
+        <FolderOpen size={18} strokeWidth={1.75} />
+        <span class="label">Open</span>
+      </button>
+      {#if app.config?.presets}
+        <button class="icon" onclick={onpresets} title="Presets: your saved recipes" aria-label="Presets">
+          <Bookmark size={18} strokeWidth={1.75} />
+        </button>
+      {/if}
+      <button class="icon" onclick={() => app.undo()} disabled={!app.canUndo} title="Undo (Ctrl+Z)" aria-label="Undo">
+        <Undo2 size={18} strokeWidth={1.75} />
+      </button>
+      <button class="icon" onclick={() => app.redo()} disabled={!app.canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
+        <Redo2 size={18} strokeWidth={1.75} />
+      </button>
+      <button class="primary" onclick={onexport} disabled={!app.doc} title="Export">
+        <Download size={18} strokeWidth={2} />
+        <span class="label">Export</span>
+      </button>
+      <button
+        class="icon"
+        onclick={() => (theme = toggleTheme())}
+        title="Switch to {theme === 'dark' ? 'light' : 'dark'} theme"
+        aria-label="Toggle theme"
+      >
+        {#if theme === 'dark'}<Sun size={18} strokeWidth={1.75} />{:else}<Moon size={18} strokeWidth={1.75} />{/if}
+      </button>
+    </div>
+  {/if}
 </header>
 
 <style>
@@ -69,6 +89,21 @@
 
   h1 {
     font-size: 1.3rem;
+  }
+
+  .mode {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .what {
+    color: var(--fg-dim);
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .actions {
