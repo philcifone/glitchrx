@@ -1,0 +1,21 @@
+[package]
+name = "glitchrx-serve"
+description = "The glitcharaxia web GUI: an axum server around glitchrx-core that serves the embedded Svelte frontend."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+glitchrx-core.workspace = true
+axum.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+if-addrs.workspace = true
+
+[dev-dependencies]
+tower.workspace = true
+http-body-util.workspace = true
+tempfile.workspace = true

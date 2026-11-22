@@ -1,25 +1,31 @@
-//! glitchrx-core: the engine behind the `glitchrx` CLI and (later) GUI.
+//! glitchrx-core: the engine behind the `glitchrx` CLI and web GUI.
 //!
-//! The pipeline in one paragraph: a JPEG is parsed into structure plus a
-//! *payload* (its de-stuffed scan data, see [`formats::jpeg`]). A [`Recipe`]
-//! is an ordered list of [`effects`], each applied in seeded *hits* (see
-//! [`placement`]) to that payload. The file is then reassembled with every
-//! header byte untouched. With the `turbo` feature, [`turbo::decode`] renders
-//! the result the way browsers will, tolerating the damage.
+//! The pipeline in one paragraph: an image file is decoded to a [`Raster`]
+//! of raw RGB bytes ([`codec`]). A [`Recipe`] is an ordered list of
+//! [`effects`], each run in seeded windows ([`placement`]) that read the
+//! bytes as audio samples in some encoding ([`samples`]), process them the
+//! way Audacity would, and clip them back to bytes. The raster is then
+//! encoded as TIFF, PNG or JPEG. This is "databending": what Phil used to do
+//! by importing TIFFs into Audacity as raw data.
 
+pub mod codec;
+pub mod dsp;
 pub mod effects;
 pub mod error;
-pub mod formats;
 pub mod params;
 pub mod placement;
+pub mod raster;
 pub mod recipe;
 pub mod rng;
+pub mod samples;
+pub mod turbo;
 
 #[cfg(feature = "fs")]
 pub mod io;
-#[cfg(feature = "turbo")]
-pub mod turbo;
 
+pub use codec::{Format, Image};
 pub use error::{Error, Result};
-pub use formats::jpeg::{Jpeg, Mode};
+pub use params::Units;
+pub use raster::Raster;
 pub use recipe::{Recipe, Step};
+pub use samples::Encoding;

@@ -8,3 +8,5 @@ publish.workspace = true
 [dependencies]
 glitchrx-core.workspace = true
 anyhow.workspace = true
+png.workspace = true
+tiff.workspace = true

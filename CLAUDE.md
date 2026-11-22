@@ -9,6 +9,7 @@ Run `just check` (or `scripts/check.sh` if `just` is not installed) before calli
 - `cargo fmt --check`
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo test --workspace`
+- `svelte-check` and `vitest` in `web/`, when `web/node_modules` exists (`just web` installs it)
 
 Report the real output. Never assume success.
 
@@ -22,13 +23,13 @@ Report the real output. Never assume success.
 
 ## Invariants (tests enforce these)
 
-- **Header-safe.** In safe mode, every byte outside the entropy-coded data is identical to the input.
-- **Length-preserving.** Byte effects never change the payload length.
 - **Inputs are never written,** even with `--force`. Outputs are never overwritten without `--force`.
-- **Determinism:**
-  - integer math only (gains quantized to Q8)
+- **Dimensions are preserved.** Effects never change the raster's length, and write only inside their windows.
+- **Determinism** (same input, recipe and seed give the same bytes everywhere; SPEC D-25):
+  - effect math in f64 with basic operations only; no platform `exp`/`sin`/`pow` in sample loops (use `dsp.rs`)
+  - libjpeg-turbo pinned to the accurate IDCT
   - our own sampling helpers on ChaCha8
-  - a per-effect `VERSION`, bumped whenever an algorithm's output changes
+  - a per-effect `VERSION`, bumped whenever an algorithm's output changes (the golden hashes catch it)
 - **No network calls** at runtime.
 
 ## Style
@@ -39,3 +40,12 @@ Report the real output. Never assume success.
 - State assumptions and proceed. Ask only when the answer materially changes the work.
 - After a tangent, give a short "current status / next step" recap.
 - Dev servers bind to 0.0.0.0 only when asked or for development. Report the port and LAN URL.
+
+## GUI design
+
+Overrides Phil's global design defaults (Phil, 2026-11-22): minimal and professional, like an iOS app.
+
+- Young Serif (regular weight only) for headings: the app title, dialog titles and step names. Everything else uses the system font stack (SF Pro on Apple devices).
+- Muted Gruvbox palette with one green accent; tokens live in `web/src/app.css`.
+- Grouped rounded cards, hairline separators, no bold borders. iOS-style switches, segmented controls and translucent bars.
+- Lucide icons at stroke 1.75, tinted with the accent; effect icons are in `web/src/lib/icons.ts`.

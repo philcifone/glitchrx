@@ -16,9 +16,11 @@ pub enum Kind {
     Int { min: i64, max: i64 },
     /// Decimal number in an inclusive range. Quantized to Q8 for the math.
     Float { min: f64, max: f64 },
-    /// A length: bytes (`4096`, `4k`, `1m`) or percent of the payload (`2%`).
+    /// A length: bytes (`4096`, `4k`), pixels (`300px`), image rows
+    /// (`2.5rows`, where a fractional row is that share of the width), or
+    /// percent (`2%`; of the image, or of the window where the effect says so).
     Size,
-    /// A `START:END` pair of positions, each bytes or percent.
+    /// A `START:END` pair of positions, each in any [`Kind::Size`] unit.
     Region,
     /// One word out of a fixed list.
     Choice(&'static [&'static str]),
@@ -33,25 +35,131 @@ pub struct ParamSpec {
     pub help: &'static str,
 }
 
-/// A position or length within the payload: absolute bytes or a fraction.
+/// A position, length or distance in the raster, in the unit it was given.
 ///
-/// Percentages are stored as integer milli-percent (1% = 1000) so that
-/// resolving them against a length is pure integer math, identical on every
-/// platform.
+/// Percentages and rows are stored as integer thousandths (1% = 1000,
+/// 1 row = 1000) so that resolving them is integer math, identical on every
+/// platform. How a bound turns into bytes depends on what it measures; see
+/// [`Units`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Bound {
     Bytes(u64),
+    Pixels(u64),
+    MilliRows(u64),
     MilliPercent(u32),
 }
 
 impl Bound {
-    /// Resolve against a payload length, clamped to `len`.
-    pub fn resolve(self, len: usize) -> usize {
-        let v = match self {
-            Bound::Bytes(b) => b.min(len as u64) as usize,
-            Bound::MilliPercent(mp) => ((len as u128 * mp as u128) / 100_000) as usize,
-        };
-        v.min(len)
+    /// A size relative to a window (`shuffle` block, `stutter` chunk):
+    /// percent is of `reference` bytes, every other unit is a length in the
+    /// picture. Clamped to `reference`.
+    pub fn of_window(self, reference: usize, units: &Units) -> usize {
+        match self {
+            Bound::MilliPercent(mp) => ((reference as u128 * mp as u128) / 100_000) as usize,
+            other => units.to_raster(units.full_bytes(other)),
+        }
+        .min(reference)
+    }
+}
+
+/// Converts bounds to byte counts for one raster.
+///
+/// Live previews run the recipe on a screen-sized copy of the image (SPEC
+/// D-26). For the preview to look like the export, every size and position
+/// must mean the same *place in the picture* at both resolutions. So sizes
+/// are always worked out at full resolution first ([`Units::full_bytes`])
+/// and then mapped into the raster being processed ([`Units::to_raster`]):
+///
+/// - whole rows scale with the height, the rest of a row with the width, so
+///   "2 rows and 300 px" at full size is "2/6 rows and 50 px" at 1/6 size;
+/// - the remainder of 0-2 bytes (the channel `phase`, which rotates colours)
+///   is kept as is.
+///
+/// Scaling bytes in proportion to the image's area instead would be wrong
+/// twice over: a third of a row at full size would become a twelfth of one
+/// at 1/4 size, and the byte remainder (the colour rotation) would come out
+/// arbitrary.
+///
+/// At full resolution (`width == full_width`) the mapping is the identity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Units {
+    /// Width in pixels of the image as decoded (export resolution).
+    pub full_width: usize,
+    pub full_height: usize,
+    /// Size of the raster being processed (smaller for previews).
+    pub width: usize,
+    pub height: usize,
+}
+
+impl Units {
+    /// Units for a raster processed at its own (full) resolution.
+    pub fn full(width: usize, height: usize) -> Units {
+        Units {
+            full_width: width,
+            full_height: height,
+            width,
+            height,
+        }
+    }
+
+    /// Bytes in the full-resolution raster.
+    pub fn full_len(&self) -> usize {
+        self.full_width * self.full_height * 3
+    }
+
+    /// Bytes in the raster being processed.
+    pub fn len(&self) -> usize {
+        self.width * self.height * 3
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn scaled(&self) -> bool {
+        (self.width, self.height) != (self.full_width, self.full_height)
+    }
+
+    /// A bound as full-resolution bytes. Pixels, rows and percent land on
+    /// whole pixels; plain bytes are kept exactly.
+    pub fn full_bytes(&self, b: Bound) -> usize {
+        match b {
+            Bound::Bytes(n) => n as usize,
+            Bound::Pixels(p) => p as usize * 3,
+            Bound::MilliRows(mr) => {
+                ((self.full_width as u128 * mr as u128 + 500) / 1000) as usize * 3
+            }
+            Bound::MilliPercent(mp) => {
+                ((self.full_len() as u128 * mp as u128) / 100_000) as usize / 3 * 3
+            }
+        }
+    }
+
+    /// Map a full-resolution byte distance (or position) into the raster
+    /// being processed: rows by the height ratio, the rest of a row by the
+    /// width ratio, and the byte remainder unchanged.
+    pub fn to_raster(&self, full: usize) -> usize {
+        if !self.scaled() {
+            return full;
+        }
+        let row = (self.full_width * 3).max(1);
+        let (rows, rest) = (full / row, full % row);
+        let (px, keep) = (rest / 3, rest % 3);
+        let ratio = |v: usize, num: usize, den: usize| (v * num + den / 2) / den.max(1);
+        let rows = ratio(rows, self.height, self.full_height);
+        let px = ratio(px, self.width, self.full_width).min(self.width.saturating_sub(1));
+        (rows * self.width + px) * 3 + keep
+    }
+
+    /// A position or length along the raster, in bytes (clamped to it).
+    pub fn span(&self, b: Bound) -> usize {
+        self.to_raster(self.full_bytes(b).min(self.full_len()))
+            .min(self.len())
+    }
+
+    /// A displacement in bytes, plus `phase` extra bytes.
+    pub fn offset(&self, b: Bound, phase: usize) -> usize {
+        self.to_raster(self.full_bytes(b) + phase)
     }
 }
 
@@ -71,6 +179,26 @@ fn parse_bound(s: &str) -> std::result::Result<Bound, String> {
         return Ok(Bound::MilliPercent((v * 1000.0).round() as u32));
     }
     let lower = s.to_ascii_lowercase();
+    if let Some(r) = lower
+        .strip_suffix("rows")
+        .or_else(|| lower.strip_suffix("row"))
+    {
+        let v: f64 = r
+            .trim()
+            .parse()
+            .map_err(|_| format!("`{s}` is not a number of rows"))?;
+        if !(0.0..=1e6).contains(&v) {
+            return Err(format!("`{s}` is out of range"));
+        }
+        return Ok(Bound::MilliRows((v * 1000.0).round() as u64));
+    }
+    if let Some(p) = lower.strip_suffix("px") {
+        let v: u64 = p
+            .trim()
+            .parse()
+            .map_err(|_| format!("`{s}` is not a whole number of pixels"))?;
+        return Ok(Bound::Pixels(v));
+    }
     let (digits, mult) = if let Some(d) = lower.strip_suffix('k') {
         (d, 1024u64)
     } else if let Some(d) = lower.strip_suffix('m') {
@@ -81,13 +209,8 @@ fn parse_bound(s: &str) -> std::result::Result<Bound, String> {
     let n: u64 = digits
         .trim()
         .parse()
-        .map_err(|_| format!("`{s}` is not a byte count or percentage"))?;
+        .map_err(|_| format!("`{s}` is not a size (try 4096, 300px, 2.5rows or 10%)"))?;
     Ok(Bound::Bytes(n.saturating_mul(mult)))
-}
-
-/// Convert a decimal to Q8 fixed point (x * 256, rounded).
-pub fn to_q8(v: f64) -> i32 {
-    (v * 256.0).round() as i32
 }
 
 /// Parse a `key=value,key=value` list into a map. Empty input gives an
@@ -182,11 +305,6 @@ impl Params {
         }
     }
 
-    /// A float parameter as Q8 fixed point.
-    pub fn q8(&self, name: &str) -> i32 {
-        to_q8(self.float(name))
-    }
-
     pub fn size(&self, name: &str) -> Bound {
         match self.get(name) {
             Value::Size(v) => *v,
@@ -230,7 +348,10 @@ fn parse_value(spec: &ParamSpec, text: &str) -> std::result::Result<Value, Strin
         }
         Kind::Size => {
             let b = parse_bound(t)?;
-            if matches!(b, Bound::Bytes(0) | Bound::MilliPercent(0)) {
+            if matches!(
+                b,
+                Bound::Bytes(0) | Bound::Pixels(0) | Bound::MilliRows(0) | Bound::MilliPercent(0)
+            ) {
                 return Err("must be greater than zero".into());
             }
             Ok(Value::Size(b))
@@ -272,8 +393,49 @@ mod tests {
         assert_eq!(parse_bound("12.5%").unwrap(), Bound::MilliPercent(12_500));
         assert!(parse_bound("101%").is_err());
         assert!(parse_bound("abc").is_err());
-        assert_eq!(Bound::MilliPercent(50_000).resolve(1001), 500);
-        assert_eq!(Bound::Bytes(5000).resolve(100), 100);
+        assert_eq!(parse_bound("300px").unwrap(), Bound::Pixels(300));
+        assert_eq!(parse_bound("2.5rows").unwrap(), Bound::MilliRows(2500));
+        assert_eq!(parse_bound("1 row").unwrap(), Bound::MilliRows(1000));
+        assert!(parse_bound("1.5px").is_err());
+    }
+
+    #[test]
+    fn full_resolution_units_are_exact() {
+        let u = Units::full(100, 50); // 300-byte rows, 15000 bytes
+        assert_eq!(u.span(Bound::MilliPercent(50_000)), 7500);
+        assert_eq!(u.span(Bound::Bytes(99_999)), 15_000, "clamped");
+        assert_eq!(u.span(Bound::MilliRows(2000)), 600);
+        assert_eq!(u.offset(Bound::MilliRows(330), 1), 33 * 3 + 1);
+        assert_eq!(u.offset(Bound::Pixels(7), 2), 23);
+        assert_eq!(u.offset(Bound::Bytes(4097), 0), 4097);
+        // Percent offsets land on whole pixels.
+        assert_eq!(u.offset(Bound::MilliPercent(1), 0) % 3, 0);
+        assert_eq!(Bound::MilliPercent(25_000).of_window(400, &u), 100);
+        assert_eq!(Bound::MilliRows(1000).of_window(400, &u), 300);
+    }
+
+    #[test]
+    fn scaled_units_keep_geometry() {
+        // Full 600x400, preview 100x67 (1/6).
+        let u = Units {
+            full_width: 600,
+            full_height: 400,
+            width: 100,
+            height: 67,
+        };
+        // 1/3 row right becomes 1/3 of the preview row, phase kept.
+        assert_eq!(u.offset(Bound::MilliRows(333), 1), 33 * 3 + 1);
+        // 12 rows and 60 px down-right becomes 2 rows and 10 px.
+        assert_eq!(
+            u.offset(Bound::Pixels(12 * 600 + 60), 0),
+            (2 * 100 + 10) * 3
+        );
+        // Bytes keep their remainder mod 3.
+        assert_eq!(u.offset(Bound::Bytes(3 * 60 + 2), 0), 10 * 3 + 2);
+        // Half the image is (about) half the preview's rows.
+        assert_eq!(u.span(Bound::MilliPercent(50_000)), 34 * 100 * 3);
+        // The whole image is the whole preview.
+        assert_eq!(u.span(Bound::MilliPercent(100_000)), 100 * 67 * 3);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/glitchrx-core", "crates/glitchrx-cli", "tools/gen-fixtures", "tools/contact-sheet"]
+members = ["crates/glitchrx-core", "crates/glitchrx-cli", "crates/glitchrx-serve", "crates/glitchrx-desktop", "tools/gen-fixtures", "tools/contact-sheet"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,6 +11,7 @@ publish = false
 
 [workspace.dependencies]
 glitchrx-core = { path = "crates/glitchrx-core" }
+glitchrx-serve = { path = "crates/glitchrx-serve" }
 turbojpeg-sys = { version = "1.2", default-features = false, features = ["pkg-config"] }
 rand_chacha = "0.9"
 rand_core = "0.9"
@@ -19,12 +20,20 @@ toml = "0.9"
 thiserror = "2"
 anyhow = "1"
 png = "0.18"
+tiff = "0.11"
 tempfile = "3"
 same-file = "1"
 clap = { version = "4", features = ["derive"] }
 blake3 = "1"
 proptest = "1"
 insta = { version = "1", features = ["yaml"] }
+# Web GUI (glitchrx serve)
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "query", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "macros", "signal"] }
+serde_json = "1"
+if-addrs = "0.15"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
 
 [profile.dev.package."*"]
 # Dependencies optimized even in debug builds; keeps tests on large buffers fast.

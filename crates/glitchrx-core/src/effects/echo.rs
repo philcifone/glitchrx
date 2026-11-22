@@ -1,111 +1,86 @@
-//! Feed-forward echo: add quieter, delayed copies of the input to itself.
+//! `echo`: Audacity's Echo, a feedback delay.
 
-use std::ops::Range;
-
-use super::{Effect, EffectInfo, PlacementDefaults, Reversibility};
+use super::{Effect, EffectInfo, Filter, PHASE, PlacementDefaults, Window};
+use crate::dsp::Ring;
 use crate::error::Result;
-use crate::params::{Kind, ParamSpec, Params};
+use crate::params::{Bound, Kind, ParamSpec, Params};
 use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "echo",
     version: 1,
-    summary: "Feed-forward echo: each byte gets quieter copies of the bytes `delay`, 2x`delay`, ... before it added on.",
-    details: "`y[i] = x[i] + sum over taps k of (q_k * x[i - k*delay]) >> 8`, modulo 256, where `q_k` is \
-              `gain^k` in Q8 fixed point. Because the added terms depend only on the input, the inverse \
-              subtracts them again walking forward through the window.",
-    reversible: Reversibility::Always,
+    audacity: "Echo",
+    summary: "Feedback delay: every sample adds a fading copy of the output `delay` earlier.",
+    details: "`y[n] = x[n] + decay * y[n - delay]`. A delay of a fraction of a row ghosts the \
+              picture sideways, whole rows ghost it downwards. Repeats stack until they fade, \
+              and the sum is clipped, which is where the bright bands come from.",
     params: &[
         ParamSpec {
             name: "delay",
-            kind: Kind::Int {
-                min: 1,
-                max: 1 << 24,
-            },
-            default: "1024",
-            help: "distance in bytes between a byte and its echo",
+            kind: Kind::Size,
+            default: "0.33rows",
+            help: "distance to the repeat (rows, px, % or bytes)",
         },
+        PHASE,
         ParamSpec {
-            name: "gain",
+            name: "decay",
             kind: Kind::Float { min: 0.0, max: 1.0 },
             default: "0.5",
-            help: "loudness of the first echo, 0..1",
-        },
-        ParamSpec {
-            name: "taps",
-            kind: Kind::Int { min: 1, max: 8 },
-            default: "1",
-            help: "number of echoes; tap k is gain^k loud at k x delay",
+            help: "loudness of each repeat relative to the one before",
         },
     ],
     placement: PlacementDefaults {
-        region: "5%:100%",
-        hits: "3",
-        len: "0.5%",
+        region: "0%:100%",
+        hits: "0",
+        len: "10%",
     },
-    example: "glitchrx --echo delay=2048,gain=0.6,taps=2 photo.jpg",
+    random_within: false,
+    exact_preview: false,
+    example: "glitchrx --echo delay=0.33rows,decay=0.5 photo.jpg",
     build,
 };
 
 fn build(p: &Params) -> Result<Box<dyn Effect>> {
-    let q1 = p.q8("gain");
-    // Tap gains as Q8, computed with integer math only: q_k = q_{k-1} * q_1.
-    let mut q = Vec::new();
-    let mut cur = 256i32;
-    for _ in 0..p.int("taps") {
-        cur = (cur * q1 + 128) >> 8;
-        q.push(cur as u32);
-    }
     Ok(Box::new(Echo {
-        delay: p.int("delay") as usize,
-        q,
+        delay: p.size("delay"),
+        phase: p.int("phase") as usize,
+        decay: p.float("decay"),
     }))
 }
 
 struct Echo {
-    delay: usize,
-    /// Q8 gain per tap (index 0 is tap 1).
-    q: Vec<u32>,
+    delay: Bound,
+    phase: usize,
+    decay: f64,
 }
 
-impl Echo {
-    /// Sum of the echo terms for position `i`, reading the *input* values.
-    fn echo_at(&self, buf: &[u8], i: usize) -> u8 {
-        let mut acc: u32 = 0;
-        for (k, &q) in self.q.iter().enumerate() {
-            let back = self.delay * (k + 1);
-            if back <= i {
-                acc = acc.wrapping_add((q * buf[i - back] as u32) >> 8);
-            }
+/// `y[n] = x[n] + decay * y[n - d]`, with the past outputs in a ring.
+struct Feedback {
+    ring: Ring,
+    decay: f64,
+}
+
+impl Filter for Feedback {
+    fn process(&mut self, x: &mut [f64]) {
+        for v in x {
+            let y = *v + self.decay * self.ring.oldest();
+            self.ring.push(y);
+            *v = y;
         }
-        acc as u8
     }
 }
 
 impl Effect for Echo {
-    fn apply(&self, buf: &mut [u8], w: Range<usize>, _rng: &mut Rng) {
-        // Walk backwards: y[i] needs x[i - delay], which (if inside the
-        // window) must still hold its original value. Going from the end
-        // means every earlier byte is untouched when we read it.
-        for i in w.rev() {
-            let e = self.echo_at(buf, i);
-            buf[i] = buf[i].wrapping_add(e);
-        }
-    }
-
-    fn invert(&self, buf: &mut [u8], w: Range<usize>, _rng: &mut Rng) -> Result<()> {
-        // Walk forwards: by the time we reach i, every earlier byte has
-        // already been restored to x, so the echo terms are exactly the ones
-        // that were added.
-        for i in w {
-            let e = self.echo_at(buf, i);
-            buf[i] = buf[i].wrapping_sub(e);
-        }
-        Ok(())
-    }
-
-    fn reversible(&self) -> bool {
-        true
+    fn run(&self, w: &mut Window<'_>, _rng: &mut Rng) -> Result<()> {
+        let d = w.samples(w.units.offset(self.delay, self.phase));
+        // A delay longer than the window can never be heard; a ring as long
+        // as the window behaves the same (it never wraps) and caps memory.
+        let len = d.min(w.frames().max(1));
+        let decay = self.decay;
+        w.filter(|| Feedback {
+            ring: Ring::new(len),
+            decay,
+        })
     }
 }
 
@@ -113,31 +88,34 @@ impl Effect for Echo {
 mod tests {
     use super::*;
     use crate::effects::testutil::*;
+    use crate::samples::Encoding;
 
     #[test]
-    fn hand_checked() {
-        // delay 2, gain 0.5 (q = 128): y[i] = x[i] + x[i-2]/2 inside 2..6.
-        let e = make(&INFO, "delay=2,gain=0.5");
-        let mut b = vec![10, 20, 30, 40, 50, 60];
-        e.apply(&mut b, 2..6, &mut Rng::new(0));
-        assert_eq!(b, vec![10, 20, 35, 50, 65, 80]);
+    fn impulse_repeats_and_fades() {
+        // One pixel-wide rows of 1 px = 3 bytes; delay 2 bytes, no phase.
+        let e = make(&INFO, "delay=2,phase=0,decay=0.5");
+        let mut b = u8_of(&[0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        run(e.as_ref(), &mut b, 1, Encoding::U8);
+        assert_eq!(
+            b,
+            u8_of(&[0.5, 0.0, 0.25, 0.0, 0.125, 0.0, 0.0625, 0.0, 0.03125])
+        );
     }
 
     #[test]
-    fn wraps_instead_of_clipping() {
-        let e = make(&INFO, "delay=1,gain=1.0");
-        let mut b = vec![200, 200];
-        e.apply(&mut b, 1..2, &mut Rng::new(0));
-        assert_eq!(b, vec![200, 144]); // 400 mod 256
+    fn feedback_clips_at_the_top() {
+        let e = make(&INFO, "delay=1,phase=0,decay=1");
+        let mut b = u8_of(&[0.5; 6]);
+        run(e.as_ref(), &mut b, 2, Encoding::U8);
+        assert_eq!(b, vec![192, 255, 255, 255, 255, 255]);
     }
 
     #[test]
-    fn round_trips() {
-        let buf = noise(5000, 1);
-        for params in ["delay=1", "delay=7,gain=0.9,taps=4", "delay=3000,gain=0.3"] {
-            let e = make(&INFO, params);
-            let g = round_trip(e.as_ref(), &buf, 100..4800);
-            assert_ne!(g, buf, "{params} changed nothing");
-        }
+    fn zero_decay_is_identity() {
+        let e = make(&INFO, "decay=0");
+        let orig = noise(300, 4);
+        let mut b = orig.clone();
+        run(e.as_ref(), &mut b, 10, Encoding::S16Le);
+        assert_eq!(b, orig);
     }
 }
