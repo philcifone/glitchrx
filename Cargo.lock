@@ -1392,6 +1392,7 @@ dependencies = [
  "glitchrx-core",
  "http-body-util",
  "if-addrs",
+ "png 0.18.1",
  "serde",
  "serde_json",
  "tempfile",

@@ -27,6 +27,26 @@ pub fn preview_jpeg(r: &Raster, quality: u8) -> Result<Vec<u8>, String> {
     .ok_or_else(|| "could not encode the preview".to_string())
 }
 
+/// Encode a mask as an RGBA PNG: `tint` everywhere, with the coverage as
+/// alpha, so the GUI can lay it over the preview. Fast compression: a mask
+/// is mostly flat and squeezes well anyway.
+pub fn mask_png(w: usize, h: usize, coverage: &[f32], tint: [u8; 3]) -> Result<Vec<u8>, String> {
+    let mut rgba = Vec::with_capacity(w * h * 4);
+    for &c in coverage {
+        let a = (c.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
+        rgba.extend_from_slice(&[tint[0], tint[1], tint[2], a]);
+    }
+    let mut out = Vec::new();
+    let mut enc = png::Encoder::new(&mut out, w as u32, h as u32);
+    enc.set_color(png::ColorType::Rgba);
+    enc.set_depth(png::BitDepth::Eight);
+    enc.set_compression(png::Compression::Fast);
+    let mut writer = enc.write_header().map_err(|e| e.to_string())?;
+    writer.write_image_data(&rgba).map_err(|e| e.to_string())?;
+    writer.finish().map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
 /// Export formats offered by the GUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
