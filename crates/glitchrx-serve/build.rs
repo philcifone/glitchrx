@@ -84,7 +84,8 @@ fn mime(path: &str) -> &'static str {
         "ico" => "image/x-icon",
         "woff2" => "font/woff2",
         "woff" => "font/woff",
-        "json" | "webmanifest" => "application/json",
+        "json" => "application/json",
+        "webmanifest" => "application/manifest+json",
         "txt" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }

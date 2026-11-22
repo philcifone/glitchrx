@@ -164,6 +164,21 @@ function filenameOf(res: Response): string | null {
   return plain ? plain[1] : null;
 }
 
+/**
+ * Whether to hand files to the share sheet instead of downloading them:
+ * touch devices that can share files (iOS, Android). On iOS this is the
+ * native way to save (Save Image, Save to Files, AirDrop), and in an app
+ * added to the home screen a download could open the file in place, with
+ * no back button to return.
+ */
+export function shareFiles(file: File): boolean {
+  return (
+    matchMedia('(pointer: coarse)').matches &&
+    typeof navigator.canShare === 'function' &&
+    navigator.canShare({ files: [file] })
+  );
+}
+
 /** Hand a blob to the browser as a download. */
 export function saveBlob(blob: Blob, name: string): void {
   const url = URL.createObjectURL(blob);

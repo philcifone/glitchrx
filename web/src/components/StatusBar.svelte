@@ -11,6 +11,12 @@
       {app.error}
       <button class="dismiss" onclick={() => app.dismissError()} aria-label="Dismiss">ok</button>
     </span>
+  {:else if app.ready}
+    <span class="ready" role="status">
+      <span class="file">{app.ready.name} is ready</span>
+      <button class="primary save" onclick={() => app.share()}>Save</button>
+      <button class="plain dismiss-ready" onclick={() => (app.ready = null)} aria-label="Discard">Discard</button>
+    </span>
   {:else if app.notice}
     <span class="ok" role="status">{app.notice}</span>
   {:else if app.doc}
@@ -56,6 +62,32 @@
     overflow: hidden;
     text-overflow: ellipsis;
     min-width: 0;
+  }
+
+  .ready {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+    color: var(--fg);
+  }
+
+  .file {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .save {
+    min-height: 30px;
+    padding: 0 16px;
+  }
+
+  .dismiss-ready {
+    min-height: 30px;
+    color: var(--fg-dim);
   }
 
   .warn {

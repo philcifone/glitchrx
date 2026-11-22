@@ -73,7 +73,9 @@ Background, mostly from the archived JPEG byte engine (`archive/jpeg-bytes`). JP
 - **Render cache / step cache.** What the server keeps per document so re-renders are fast: the screen-sized raster, and the raster after each step. Changing step 3 re-runs steps 3 onwards only.
 - **Root (`--root`).** The one folder `glitchrx serve` may browse, open from and save into. Paths outside it are refused.
 - **Step switch.** The on/off box on a GUI step. A switched-off step stays in the stack but is left out of renders and recipes.
-- **Token.** The shared secret of `glitchrx serve --token`. Opening the printed URL once stores it in a cookie.
+- **Token.** The shared secret of `glitchrx serve --token`. Opening the printed URL once stores it in a cookie; without it, a browser gets the sign-in page to paste it into.
+- **PWA (home-screen app).** The GUI added to a phone's home screen: it opens full screen with its own icon, from the web app manifest and iOS meta tags. Nothing is installed; it still talks to your server.
+- **Share sheet.** The phone's system menu for sending a file somewhere (Save Image, Save to Files, AirDrop). Exports on touch devices go through it.
 - **Window.** The bytes a single hit covers (`len`), a whole number of frames. Some parameters (`shuffle` block, `stutter` chunk) can be a percent of the window. Effects write only inside their windows.
 
 ## Archived: JPEG byte engine

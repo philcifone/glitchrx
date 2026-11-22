@@ -106,6 +106,12 @@ export class App {
   regionHint = $state<{ s: number; e: number } | null>(null);
   error = $state<string | null>(null);
   notice = $state<string | null>(null);
+  /**
+   * A finished export waiting for a tap to open the share sheet. Sharing
+   * must start from a tap, and a full-resolution render outlasts the one
+   * that started it, so the status bar offers a Save button instead.
+   */
+  ready = $state<File | null>(null);
 
   canUndo = $state(false);
   canRedo = $state(false);
@@ -508,8 +514,7 @@ export class App {
     this.working = 'Rendering full resolution';
     try {
       const { blob, name } = await api.exportFile(doc.id, this.dto(), format);
-      api.saveBlob(blob, name);
-      this.flash(`Downloaded ${name}`);
+      this.deliver(blob, name);
     } catch (e) {
       this.fail(e);
     } finally {
@@ -534,7 +539,7 @@ export class App {
   async downloadRecipe(): Promise<void> {
     try {
       const text = await api.recipeToToml(this.dto());
-      api.saveBlob(new Blob([text], { type: 'application/toml' }), `${this.stem()}.recipe.toml`);
+      this.deliver(new Blob([text], { type: 'application/toml' }), `${this.stem()}.recipe.toml`);
     } catch (e) {
       this.fail(e);
     }
@@ -559,6 +564,30 @@ export class App {
       this.setImage(null);
     }
     this.error = e instanceof Error ? e.message : String(e);
+  }
+
+  /** Download a file, or offer it to the share sheet on a phone. */
+  private deliver(blob: Blob, name: string): void {
+    const file = new File([blob], name, { type: blob.type });
+    if (api.shareFiles(file)) {
+      this.ready = file;
+    } else {
+      api.saveBlob(blob, name);
+      this.flash(`Downloaded ${name}`);
+    }
+  }
+
+  /** Open the share sheet for the waiting export (call from a tap). */
+  async share(): Promise<void> {
+    const file = this.ready;
+    if (!file) return;
+    try {
+      await navigator.share({ files: [file] });
+      this.ready = null;
+    } catch (e) {
+      // Closing the sheet is not an error; keep the file for another try.
+      if (!(e instanceof DOMException && e.name === 'AbortError')) this.fail(e);
+    }
   }
 
   flash(msg: string): void {

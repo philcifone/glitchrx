@@ -202,38 +202,74 @@ fn query_token(req: &Request) -> Option<String> {
         .map(|(_, v)| v.to_string())
 }
 
+/// Files that need no token: the web app manifest and its icons. Browsers
+/// fetch a manifest without cookies, and iOS fetches the home-screen icon
+/// on its own, so these must be public. They are static and say nothing
+/// about the photos.
+const PUBLIC: &[&str] = &[
+    "/manifest.webmanifest",
+    "/favicon.svg",
+    "/icon.svg",
+    "/icon-192.png",
+    "/icon-512.png",
+    "/icon-maskable-512.png",
+    "/apple-touch-icon.png",
+];
+
+/// The page a browser gets instead of the app when it has no token: one
+/// field to paste it into. Submitting loads `?token=...`, which sets the
+/// cookie like the printed URL. This matters for an app added to the iOS
+/// home screen, which may start with its own, empty cookie jar. No script,
+/// and `action=""` posts back to the same page, so nothing from the request
+/// is echoed into the HTML.
+const SIGN_IN: &str = r#"<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>glitchrx: sign in</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<style>
+:root{--bg:#f4efe0;--card:#fbf7ec;--fg:#3c3836;--dim:#928374;--fill:rgb(60 56 54/.07);--accent:#79740e;--on:#fbf7ec}
+@media (prefers-color-scheme:dark){:root{--bg:#1d2021;--card:#282828;--fg:#ebdbb2;--fill:rgb(235 219 178/.08);--accent:#b8bb26;--on:#1d2021}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100dvh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--fg);
+font:15px/1.4 -apple-system,BlinkMacSystemFont,system-ui,'Segoe UI',Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+main{width:min(360px,100%);background:var(--card);border-radius:14px;padding:24px 20px;text-align:center}
+img{width:64px;height:64px;border-radius:14px}
+h1{font:400 1.4rem Georgia,serif;margin:12px 0 4px}
+p{color:var(--dim);margin:0 0 18px;font-size:.9rem}
+code{white-space:nowrap}
+input,button{font:inherit;width:100%;min-height:44px;border:none;border-radius:10px}
+input{background:var(--fill);color:var(--fg);padding:0 12px;font-size:16px}
+button{margin-top:10px;background:var(--accent);color:var(--on);font-weight:600}
+</style></head>
+<body><main>
+<img src="/apple-touch-icon.png" alt="">
+<h1>glitchrx</h1>
+<p>Paste the access token: the part after <code>?token=</code> in the address <code>glitchrx serve</code> printed.</p>
+<form method="get" action="">
+<input name="token" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false" placeholder="Access token" required autofocus>
+<button type="submit">Open</button>
+</form>
+</main></body></html>
+"#;
+
+/// Whether the request is a browser loading a page (not a script call).
+fn wants_html(req: &Request) -> bool {
+    req.method() == axum::http::Method::GET
+        && req
+            .headers()
+            .get(header::ACCEPT)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|a| a.contains("text/html"))
+}
+
 /// When a token is configured, every request needs it: either as the
 /// cookie, or once as `?token=...` (the URL printed at startup), which sets
-/// the cookie and redirects to the clean URL. Also adds security headers.
+/// the cookie and redirects to the clean URL. The manifest and icons are
+/// exempt (`PUBLIC`). Also adds security headers to every response.
 async fn guard(State(st): State<Shared>, req: Request, next: Next) -> Response {
-    if let Some(token) = &st.token {
-        let from_cookie = cookie_token(req.headers()).is_some_and(|t| same_secret(&t, token));
-        if !from_cookie {
-            if query_token(&req).is_some_and(|t| same_secret(&t, token)) {
-                let cookie = format!(
-                    "{TOKEN_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000"
-                );
-                let mut res = Response::new(Body::empty());
-                *res.status_mut() = StatusCode::SEE_OTHER;
-                let location = req.uri().path().to_string();
-                res.headers_mut().insert(
-                    header::LOCATION,
-                    HeaderValue::from_str(&location).unwrap_or(HeaderValue::from_static("/")),
-                );
-                if let Ok(v) = HeaderValue::from_str(&cookie) {
-                    res.headers_mut().insert(header::SET_COOKIE, v);
-                }
-                return res;
-            }
-            return (
-                StatusCode::UNAUTHORIZED,
-                "glitchrx: access token required. Open the URL printed by `glitchrx serve` \
-                 (it ends in ?token=...).\n",
-            )
-                .into_response();
-        }
-    }
-    let mut res = next.run(req).await;
+    let mut res = check_token(&st, req, next).await;
     let h = res.headers_mut();
     h.insert(
         header::X_CONTENT_TYPE_OPTIONS,
@@ -253,6 +289,49 @@ async fn guard(State(st): State<Shared>, req: Request, next: Next) -> Response {
         HeaderValue::from_static("no-referrer"),
     );
     res
+}
+
+async fn check_token(st: &Shared, req: Request, next: Next) -> Response {
+    if let Some(token) = &st.token {
+        let from_cookie = cookie_token(req.headers()).is_some_and(|t| same_secret(&t, token));
+        let public = PUBLIC.contains(&req.uri().path());
+        if !from_cookie && !public {
+            if query_token(&req).is_some_and(|t| same_secret(&t, token)) {
+                let cookie = format!(
+                    "{TOKEN_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000"
+                );
+                let mut res = Response::new(Body::empty());
+                *res.status_mut() = StatusCode::SEE_OTHER;
+                let location = req.uri().path().to_string();
+                res.headers_mut().insert(
+                    header::LOCATION,
+                    HeaderValue::from_str(&location).unwrap_or(HeaderValue::from_static("/")),
+                );
+                if let Ok(v) = HeaderValue::from_str(&cookie) {
+                    res.headers_mut().insert(header::SET_COOKIE, v);
+                }
+                return res;
+            }
+            if wants_html(&req) {
+                return (
+                    StatusCode::UNAUTHORIZED,
+                    [
+                        (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                        (header::CACHE_CONTROL, "no-store"),
+                    ],
+                    SIGN_IN,
+                )
+                    .into_response();
+            }
+            return (
+                StatusCode::UNAUTHORIZED,
+                "glitchrx: access token required. Open the URL printed by `glitchrx serve` \
+                 (it ends in ?token=...).\n",
+            )
+                .into_response();
+        }
+    }
+    next.run(req).await
 }
 
 // ---------------------------------------------------------------------------
