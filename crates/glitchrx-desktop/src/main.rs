@@ -88,7 +88,11 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             let dialogs = Arc::new(NativeDialogs(app.handle().clone()));
-            let state = AppState::new(home(), Some(token.clone())).with_dialogs(dialogs);
+            let mut state = AppState::new(home(), Some(token.clone())).with_dialogs(dialogs);
+            // The same presets as `glitchrx serve`, so both see them.
+            if let Some(dir) = glitchrx_serve::presets::default_dir() {
+                state = state.with_presets(dir);
+            }
             let service = router(state);
             // Tauri runs on tokio, so the server shares its runtime.
             tauri::async_runtime::spawn(async move {

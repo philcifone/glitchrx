@@ -20,6 +20,7 @@ pub mod browse;
 pub mod dialogs;
 pub mod docs;
 pub mod dto;
+pub mod presets;
 pub mod render;
 
 use std::io;
@@ -40,6 +41,8 @@ pub struct Config {
     pub root: Option<PathBuf>,
     /// Shared access token, if required.
     pub token: Option<String>,
+    /// Where saved presets live; none turns presets off.
+    pub presets: Option<PathBuf>,
 }
 
 /// True when the frontend was built into this binary (not the placeholder).
@@ -75,7 +78,11 @@ pub fn serve(config: Config) -> io::Result<()> {
             .map_err(|e| io::Error::new(e.kind(), format!("cannot listen on {addr}: {e}")))?;
         let port = listener.local_addr()?.port();
         announce(&config, root.as_deref(), port);
-        let app = router(AppState::new(root, config.token.clone()));
+        let mut state = AppState::new(root, config.token.clone());
+        if let Some(dir) = &config.presets {
+            state = state.with_presets(dir.clone());
+        }
+        let app = router(state);
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = tokio::signal::ctrl_c().await;
