@@ -142,8 +142,8 @@
     }
   }
 
-  /* Narrow phones (mini, SE, Display Zoom): tighter, still tappable. */
-  @media (max-width: 389px) {
+  /* Phones up to the Pro Max (430 px): tighter, still tappable. */
+  @media (max-width: 429px) {
     header {
       gap: 8px;
       padding-left: 12px;
