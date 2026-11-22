@@ -18,6 +18,7 @@ import {
   insertOp,
   migrateMask,
   newComponent,
+  pasteOps,
   withMode,
   type ToolState,
 } from './mask';
@@ -60,6 +61,15 @@ const RECIPE_KEY = 'glitchrx.recipe';
  * often) can pick the same photo up again while the server still has it. */
 const DOC_KEY = 'glitchrx.doc';
 const TOOL_KEY = 'glitchrx.maskTool';
+const NEW_PHOTO_KEY = 'glitchrx.newPhoto';
+
+/** What opening another photo does with the steps already there. */
+export type NewPhotoChoice = 'ask' | 'keep' | 'fresh';
+
+function loadNewPhoto(): NewPhotoChoice {
+  const v = storageGet(NEW_PHOTO_KEY);
+  return v === 'keep' || v === 'fresh' ? v : 'ask';
+}
 
 function loadTool(): ToolState {
   try {
@@ -160,6 +170,18 @@ export class App {
    * Its handles show on the photo, and the photo's gestures act on it.
    */
   activeOp = $state<number | null>(null);
+  /**
+   * Every selected component (the active one included). Opacity and
+   * feather changes, copy and cut apply to all of them; a long press adds
+   * to the selection.
+   */
+  selected = $state<number[]>([]);
+  /** Components copied or cut, ready to paste into any step's mask. */
+  maskClipboard = $state<MaskOp[]>([]);
+  /** Opening another photo: ask, keep the steps, or start fresh (per device). */
+  newPhoto = $state<NewPhotoChoice>(loadNewPhoto());
+  /** Steps carried onto a photo just opened, waiting for keep or start fresh (0: not asking). */
+  askNewPhoto = $state(0);
   /** Brush and gradient settings for painting masks. */
   tool = $state<ToolState>(loadTool());
   /** Blob URL of the mask overlay for the step being painted. */
@@ -223,11 +245,15 @@ export class App {
   }
 
   /**
-   * Whether the preview should settle to an exact render: some enabled
-   * step's effect cannot be previewed at scale (the phaser).
+   * Whether the preview should settle to an exact render once changes
+   * stop: whenever any step runs. A live preview glitches a screen-sized
+   * copy, and pixel-level texture cannot scale with it, so only a
+   * full-resolution render shows what the export will be (Phil,
+   * 2026-11-22: exports did not match what he had liked on screen). On
+   * 20-26 MP photos that render takes about 0.3-1.6 s.
    */
   get needsExact(): boolean {
-    return this.recipe.steps.some((s) => s.enabled && this.effect(s.effect)?.exact_preview);
+    return this.recipe.steps.some((s) => s.enabled);
   }
 
   /** Whether "re-roll all" would change anything. */
@@ -269,6 +295,10 @@ export class App {
       const doc = await load();
       this.doc = doc;
       storageSet(DOC_KEY, doc.id);
+      // Steps from the last photo: keep them, clear them, or ask.
+      const carried = this.recipe.steps.length;
+      if (carried && this.newPhoto === 'fresh') this.startFresh();
+      else if (carried && this.newPhoto === 'ask') this.askNewPhoto = carried;
       this.setImage(null);
       this.setOriginal(null, '');
       this.setMaskUrl(null);
@@ -281,6 +311,24 @@ export class App {
     } finally {
       this.working = null;
     }
+  }
+
+  /** Clear the steps for a new photo. Undo brings them back. */
+  startFresh(): void {
+    this.askNewPhoto = 0;
+    if (!this.recipe.steps.length) return;
+    this.stopMasking();
+    this.recipe.steps = [];
+    this.changed();
+  }
+
+  keepSteps(): void {
+    this.askNewPhoto = 0;
+  }
+
+  setNewPhotoChoice(choice: NewPhotoChoice): void {
+    this.newPhoto = choice;
+    storageSet(NEW_PHOTO_KEY, choice);
   }
 
   // -------------------------------------------------------------------------
@@ -344,7 +392,11 @@ export class App {
     if (this.masking) {
       const n = this.step(this.masking)?.mask?.op?.length;
       if (n === undefined) this.stopMasking();
-      else if (this.activeOp !== null && this.activeOp >= n) this.activeOp = n ? n - 1 : null;
+      else {
+        if (this.activeOp !== null && this.activeOp >= n) this.activeOp = n ? n - 1 : null;
+        this.selected = this.selected.filter((i) => i < n);
+        if (this.activeOp !== null && !this.selected.includes(this.activeOp)) this.selected.push(this.activeOp);
+      }
     }
     this.revision++;
     this.render('fast');
@@ -485,10 +537,83 @@ export class App {
     this.startMasking(uid, index);
   }
 
-  /** Make a component the active one (editing that step's mask). */
+  /** Make a component the active one, and the only one selected. */
   selectComponent(uid: string, index: number): void {
     if (this.masking !== uid) this.startMasking(uid, index);
-    else this.activeOp = index;
+    else {
+      this.activeOp = index;
+      this.selected = [index];
+    }
+  }
+
+  /**
+   * Add a component to the selection, or take it out (long press, or
+   * shift / cmd / ctrl click). The active one stays put unless it is the
+   * one taken out.
+   */
+  toggleSelected(uid: string, index: number): void {
+    if (this.masking !== uid) return this.startMasking(uid, index);
+    if (!this.selected.includes(index)) {
+      this.selected = [...this.selected, index].sort((a, b) => a - b);
+      this.activeOp ??= index;
+      return;
+    }
+    this.selected = this.selected.filter((i) => i !== index);
+    if (this.activeOp === index) this.activeOp = this.selected.at(-1) ?? null;
+  }
+
+  /** The components that copy, cut and the sliders act on. */
+  private targets(uid: string): number[] {
+    const n = this.step(uid)?.mask?.op?.length ?? 0;
+    if (this.masking !== uid) return [];
+    return this.selected.filter((i) => i < n);
+  }
+
+  /** Set opacity or feather on every selected component. */
+  setOpsBlend(uid: string, patch: { opacity?: number; feather?: number }, commit = true): void {
+    const ops = this.step(uid)?.mask?.op;
+    if (!ops) return;
+    for (const i of this.targets(uid)) {
+      const op = ops[i];
+      // Defaults are left out, so recipes stay short.
+      if (patch.opacity !== undefined) {
+        if (patch.opacity >= 1) delete op.opacity;
+        else op.opacity = patch.opacity;
+      }
+      if (patch.feather !== undefined) {
+        if (patch.feather <= 0) delete op.feather;
+        else op.feather = patch.feather;
+      }
+    }
+    this.changed(commit);
+  }
+
+  /** Copy the selected components (or, when not editing, the whole mask). */
+  copyMaskOps(uid: string): void {
+    const ops = this.step(uid)?.mask?.op ?? [];
+    const pick = this.masking === uid ? this.targets(uid) : ops.map((_, i) => i);
+    this.maskClipboard = $state.snapshot(pick.map((i) => ops[i])) as MaskOp[];
+  }
+
+  /** Copy the selected components, then remove them: with paste, a move. */
+  cutMaskOps(uid: string): void {
+    const pick = this.targets(uid);
+    if (!pick.length) return;
+    this.copyMaskOps(uid);
+    this.removeMaskOps(uid, pick);
+  }
+
+  /** Paste copied components into a step's mask and select them. */
+  pasteMaskOps(uid: string): void {
+    const s = this.step(uid);
+    if (!s || !this.maskClipboard.length) return;
+    s.mask ??= emptyMask();
+    // A plain copy: structuredClone cannot copy the reactive proxies.
+    const { ops, indices } = pasteOps(s.mask.op ?? [], $state.snapshot(this.maskClipboard) as MaskOp[]);
+    s.mask.op = ops;
+    this.changed();
+    this.startMasking(uid, indices[0]);
+    this.selected = indices;
   }
 
   /** Change mask-wide settings (invert, feather). */
@@ -520,7 +645,10 @@ export class App {
     if (!m?.op?.[index]) return;
     const { ops, order } = withMode(m.op, index, mode);
     m.op = ops;
-    if (this.masking === uid && this.activeOp !== null) this.activeOp = order.indexOf(this.activeOp);
+    if (this.masking === uid) {
+      if (this.activeOp !== null) this.activeOp = order.indexOf(this.activeOp);
+      this.selected = this.selected.map((i) => order.indexOf(i)).sort((a, b) => a - b);
+    }
     this.changed();
   }
 
@@ -538,6 +666,10 @@ export class App {
       delete s.mask;
     } else if (this.masking === uid) {
       this.activeOp = afterRemoval(this.activeOp, indices);
+      this.selected = this.selected.flatMap((i) => {
+        const j = afterRemoval(i, indices);
+        return j === null ? [] : [j];
+      });
     }
     this.changed();
   }
@@ -556,6 +688,7 @@ export class App {
     const n = this.step(uid)?.mask?.op?.length ?? 0;
     this.masking = uid;
     this.activeOp = index ?? (n ? n - 1 : null);
+    this.selected = this.activeOp === null ? [] : [this.activeOp];
     this.maskKey = '';
     this.refreshMask();
   }
@@ -563,6 +696,7 @@ export class App {
   stopMasking(): void {
     this.masking = null;
     this.activeOp = null;
+    this.selected = [];
     this.maskKey = '';
     this.setMaskUrl(null);
   }
@@ -763,8 +897,9 @@ export class App {
     const exact = quality === 'exact';
     const { w, h } = this.target(exact ? 'full' : quality);
     const rev = this.revision;
+    // The progress line shows while it works; no message, since settling
+    // to exact happens after every change.
     this.busy = true;
-    if (exact) this.working = 'Rendering at full resolution';
     this.queue.request(() => this.runPreview(doc.id, recipe, w, h, exact, rev));
     if (this.masking) this.refreshMask();
     if (!exact && this.needsExact) {
@@ -799,8 +934,6 @@ export class App {
       // Too heavy is not an error: keep the last image and say so.
       if (e instanceof TooHeavyError) this.heavy = e.message;
       else this.fail(e);
-    } finally {
-      if (exact) this.working = null;
     }
   }
 

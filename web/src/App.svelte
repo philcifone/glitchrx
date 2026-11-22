@@ -12,6 +12,7 @@
   import OpenDialog from './components/OpenDialog.svelte';
   import ExportDialog from './components/ExportDialog.svelte';
   import PresetsDialog from './components/PresetsDialog.svelte';
+  import NewPhotoDialog from './components/NewPhotoDialog.svelte';
 
   let openDialog: OpenDialog;
 
@@ -123,6 +124,7 @@
 <OpenDialog bind:this={openDialog} />
 <ExportDialog bind:this={exportDialog} />
 <PresetsDialog bind:this={presetsDialog} />
+<NewPhotoDialog />
 
 <style>
   .app {

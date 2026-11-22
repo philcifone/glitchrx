@@ -29,7 +29,7 @@
     {#if app.heavy}
       <span class="warn" title={app.heavy}>too heavy live</span>
     {:else if app.renderMs !== null}
-      <span class="dim">{app.renderMs} ms{app.exact ? ', exact' : ''}</span>
+      <span class="dim">{app.renderMs} ms, {app.exact ? 'exact' : 'approximate'}</span>
     {/if}
   {:else}
     <span class="dim">no photo open{app.config ? ` | glitchrx ${app.config.version}` : ''}</span>

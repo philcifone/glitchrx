@@ -1,8 +1,9 @@
 <script lang="ts">
   // The preview stage: shows the latest render (or the original while
   // comparing), reports its size to the app, draws the region band while
-  // one is dragged, hosts the compare and exact buttons, and the mask
-  // painter while a step's mask is being painted.
+  // one is dragged, hosts the compare button, and the mask painter while a
+  // step's mask is being edited. The preview settles to an exact render by
+  // itself, so there is no button for that.
   import { onMount } from 'svelte';
   import { app } from '../lib/app.svelte';
   import MaskPainter from './MaskPainter.svelte';
@@ -95,15 +96,6 @@
 
   {#if app.doc && app.imageUrl}
     <button
-      class="exact"
-      class:on={app.exact}
-      onclick={() => app.render('exact')}
-      disabled={app.exact || !!app.working}
-      title="Render at full resolution, exactly like the export. Slower; long reverb tails differ most in the live preview."
-    >
-      {app.exact ? 'Exact' : 'Make exact'}
-    </button>
-    <button
       class="compare"
       class:on={app.comparing}
       onpointerdown={hold}
@@ -180,7 +172,6 @@
 
   /* Floating "glass" elements over the photo: blurred, rounded pills. */
   .working,
-  .exact,
   .compare {
     background: var(--glass);
     backdrop-filter: saturate(180%) blur(16px);
@@ -236,22 +227,12 @@
     flex: none;
   }
 
-  .exact,
   .compare {
     position: absolute;
     bottom: 12px;
     min-height: 34px;
     padding: 6px 16px;
     font-size: 0.9rem;
-  }
-
-  .exact {
-    left: 12px;
-  }
-
-  .exact.on {
-    opacity: 1;
-    color: var(--accent);
   }
 
   .compare {
@@ -262,7 +243,6 @@
     -webkit-touch-callout: none;
   }
 
-  .exact:hover:not(:disabled),
   .compare:hover:not(:disabled) {
     background: var(--glass);
   }

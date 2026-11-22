@@ -3,18 +3,23 @@
   // step's result shows. The mask is a list of components; tapping one
   // makes it active, and its handles (or its brush) work on the preview
   // (MaskPainter). The + row adds another; removing the last one removes
-  // the mask, so the step shows everywhere again.
+  // the mask, so the step shows everywhere again. A long press (or a
+  // shift / cmd / ctrl click) selects several: opacity, feather, copy and
+  // cut then act on all of them.
   import Paintbrush from '@lucide/svelte/icons/paintbrush';
   import Eraser from '@lucide/svelte/icons/eraser';
   import Blinds from '@lucide/svelte/icons/blinds';
   import CircleDot from '@lucide/svelte/icons/circle-dot';
   import SunMedium from '@lucide/svelte/icons/sun-medium';
   import Plus from '@lucide/svelte/icons/plus';
+  import Copy from '@lucide/svelte/icons/copy';
+  import Scissors from '@lucide/svelte/icons/scissors';
+  import ClipboardPaste from '@lucide/svelte/icons/clipboard-paste';
   import X from '@lucide/svelte/icons/x';
   import { app } from '../lib/app.svelte';
   import { SLIDER_STEPS } from '../lib/slider';
-  import { SHAPE_LABEL, brushScale, featherScale, opDetail, percent } from '../lib/mask';
-  import type { MaskMode, MaskShape, StepState } from '../lib/types';
+  import { SHAPE_LABEL, brushScale, featherScale, opDetail, opFeather, opOpacity, percent } from '../lib/mask';
+  import type { MaskMode, MaskOp, MaskShape, StepState } from '../lib/types';
   import DualRange from './DualRange.svelte';
 
   let { step }: { step: StepState } = $props();
@@ -24,7 +29,6 @@
   const ops = $derived(mask?.op ?? []);
   const editing = $derived(app.masking === step.uid);
   const opacity = $derived(app.opacity(step));
-  const feather = $derived(mask?.feather ?? 0);
   const usable = $derived(step.enabled && !!app.doc);
 
   const ICON: Record<MaskShape, typeof Paintbrush> = {
@@ -54,6 +58,72 @@
   }
 
   const isActive = (i: number) => editing && app.activeOp === i;
+  const isSelected = (i: number) => editing && app.selected.includes(i);
+  const several = $derived(editing && app.selected.length > 1);
+  const plural = (n: number) => `${n} ${n === 1 ? 'part' : 'parts'}`;
+
+  /** A row's second line: what it holds, and its blend if not the default. */
+  function detail(op: MaskOp): string {
+    const o = opOpacity(op);
+    const f = opFeather(op);
+    return [opDetail(op), o < 1 ? `${Math.round(o * 100)}%` : '', f > 0 ? `feather ${percent(f)}` : '']
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  // Long press on a row adds it to the selection (touch has no shift key).
+  // Moving the finger (scrolling the sheet) cancels it.
+  const LONG_PRESS_MS = 450;
+  let pressTimer: ReturnType<typeof setTimeout> | undefined;
+  let pressAt: [number, number] | null = null;
+  let longPressed = false;
+
+  function pressStart(e: PointerEvent, i: number) {
+    if (e.pointerType === 'mouse' || !usable) return;
+    longPressed = false;
+    pressAt = [e.clientX, e.clientY];
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(() => {
+      longPressed = true;
+      pressAt = null;
+      app.toggleSelected(uid, i);
+    }, LONG_PRESS_MS);
+  }
+
+  function pressMove(e: PointerEvent) {
+    if (pressAt && Math.hypot(e.clientX - pressAt[0], e.clientY - pressAt[1]) > 8) pressEnd();
+  }
+
+  function pressEnd() {
+    clearTimeout(pressTimer);
+    pressAt = null;
+  }
+
+  function pick(e: MouseEvent, i: number) {
+    // The long press already acted; this is the click that follows it.
+    if (longPressed) return void (longPressed = false);
+    if (e.shiftKey || e.metaKey || e.ctrlKey) app.toggleSelected(uid, i);
+    else app.selectComponent(uid, i);
+  }
+
+  /** A short confirmation beside the clipboard buttons. */
+  let flash = $state('');
+  let flashTimer: ReturnType<typeof setTimeout> | undefined;
+  function say(text: string) {
+    flash = text;
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => (flash = ''), 1600);
+  }
+
+  function copy() {
+    app.copyMaskOps(uid);
+    say(`Copied ${plural(app.maskClipboard.length)}`);
+  }
+
+  function cut() {
+    app.cutMaskOps(uid);
+    say(`Cut ${plural(app.maskClipboard.length)}`);
+  }
 
   // Bring the controls into view when editing starts (the phone sheet is short).
   let section = $state<HTMLElement>();
@@ -101,6 +171,12 @@
       <span class="grow dim note">None: shows everywhere. Start one with:</span>
     </div>
     {@render addButtons()}
+    {#if app.maskClipboard.length}
+      <button class="plain add" onclick={() => app.pasteMaskOps(uid)} disabled={!usable}>
+        <ClipboardPaste size={16} strokeWidth={1.75} />
+        Paste {plural(app.maskClipboard.length)}
+      </button>
+    {/if}
   {:else}
     <div class="row">
       <span class="lbl">Mask</span>
@@ -128,19 +204,25 @@
       {#each ops as op, i (i)}
         {@const Icon = ICON[op.shape]}
         {@const on = isActive(i)}
-        <li class:active={on}>
+        {@const text = detail(op)}
+        <li class:active={on} class:selected={isSelected(i)}>
           <div class="row">
             <button
               class="pick"
-              aria-pressed={on}
-              onclick={() => app.selectComponent(uid, i)}
+              aria-pressed={isSelected(i)}
+              onclick={(e) => pick(e, i)}
+              onpointerdown={(e) => pressStart(e, i)}
+              onpointermove={pressMove}
+              onpointerup={pressEnd}
+              onpointercancel={pressEnd}
+              oncontextmenu={(e) => e.preventDefault()}
               disabled={!usable}
-              title={on ? 'Being edited' : 'Edit this part of the mask'}
+              title={on ? 'Being edited' : 'Edit this part (shift-click to select several)'}
             >
               <span class="glyph"><Icon size={16} strokeWidth={1.75} /></span>
               <span class="text">
                 <span class="name">{SHAPE_LABEL[op.shape]}</span>
-                {#if opDetail(op)}<span class="detail dim">{opDetail(op)}</span>{/if}
+                {#if text}<span class="detail dim">{text}</span>{/if}
               </span>
             </button>
             <select value={op.mode} onchange={(e) => app.setMaskOpMode(uid, i, e.currentTarget.value as MaskMode)} aria-label="How it combines">
@@ -152,6 +234,42 @@
           </div>
 
           {#if on}
+            <!-- Opacity and feather side by side; with several selected,
+                 they set all of them. -->
+            <div class="blend2">
+              <label>
+                <span class="top"><span>Opacity</span><span class="val">{Math.round(opOpacity(op) * 100)}%</span></span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={Math.round(opOpacity(op) * 100)}
+                  style:--pct="{opOpacity(op) * 100}%"
+                  oninput={(e) => app.setOpsBlend(uid, { opacity: Number(e.currentTarget.value) / 100 }, false)}
+                  onchange={() => app.commit()}
+                  aria-label="Opacity of this part"
+                />
+              </label>
+              <label>
+                <span class="top"><span>Feather</span><span class="val">{percent(opFeather(op))}</span></span>
+                <input
+                  type="range"
+                  min="0"
+                  max={SLIDER_STEPS}
+                  step="1"
+                  value={featherScale.toSlider(opFeather(op))}
+                  style:--pct={sliderPct(featherScale.toSlider(opFeather(op)))}
+                  oninput={(e) => app.setOpsBlend(uid, { feather: featherScale.fromSlider(Number(e.currentTarget.value)) }, false)}
+                  onchange={() => app.commit()}
+                  aria-label="Feather of this part"
+                  title="Softens this part's edges"
+                />
+              </label>
+            </div>
+            {#if several}
+              <p class="note accent">Opacity and feather set all {app.selected.length} selected parts.</p>
+            {/if}
             {#if op.shape === 'brush'}
               <div class="segmented" role="radiogroup" aria-label="Brush">
                 <button role="radio" aria-checked={app.tool.tool === 'paint'} class:on={app.tool.tool === 'paint'} onclick={() => app.setTool({ tool: 'paint' })} title="Paint (B)">
@@ -226,13 +344,40 @@
       {/each}
     </ul>
 
-    {#if adding || ops.length === 0}
-      {@render addButtons()}
-    {:else}
-      <button class="plain add" onclick={() => (adding = true)} disabled={!usable}>
+    {#if editing && ops.length > 1 && !several}
+      <p class="note dim">Long-press a part (or shift-click) to select several.</p>
+    {/if}
+
+    <div class="row actions">
+      <button class="plain add" onclick={() => (adding = !adding)} disabled={!usable} aria-expanded={adding}>
         <Plus size={16} strokeWidth={1.75} />
         Add to mask
       </button>
+      <span class="grow flash dim" aria-live="polite">{flash}</span>
+      <button
+        class="icon"
+        onclick={copy}
+        disabled={!usable || (editing && !app.selected.length)}
+        title={editing ? 'Copy the selected parts' : 'Copy the whole mask'}
+        aria-label="Copy"
+      >
+        <Copy size={17} strokeWidth={1.75} />
+      </button>
+      <button class="icon" onclick={cut} disabled={!editing || !app.selected.length} title="Cut the selected parts (paste them into another step to move them)" aria-label="Cut">
+        <Scissors size={17} strokeWidth={1.75} />
+      </button>
+      <button
+        class="icon"
+        onclick={() => app.pasteMaskOps(uid)}
+        disabled={!usable || !app.maskClipboard.length}
+        title={app.maskClipboard.length ? `Paste ${plural(app.maskClipboard.length)}` : 'Nothing copied yet'}
+        aria-label="Paste"
+      >
+        <ClipboardPaste size={17} strokeWidth={1.75} />
+      </button>
+    </div>
+    {#if adding || ops.length === 0}
+      {@render addButtons()}
     {/if}
 
     {#if editing}
@@ -242,23 +387,6 @@
         <input class="switch" type="checkbox" checked={app.tool.show} onchange={(e) => app.setTool({ show: e.currentTarget.checked })} />
       </label>
     {/if}
-
-    <div class="row">
-      <span class="lbl">Feather</span>
-      <input
-        type="range"
-        min="0"
-        max={SLIDER_STEPS}
-        step="1"
-        value={featherScale.toSlider(feather)}
-        style:--pct={sliderPct(featherScale.toSlider(feather))}
-        oninput={(e) => app.updateMask(uid, { feather: featherScale.fromSlider(Number(e.currentTarget.value)) }, false)}
-        onchange={() => app.commit()}
-        aria-label="Feather"
-        title="Softens every edge of the mask"
-      />
-      <span class="val">{percent(feather)}</span>
-    </div>
   {/if}
 </section>
 
@@ -344,13 +472,57 @@
     transition: box-shadow 0.15s;
   }
 
-  .ops li.active {
+  .ops li.selected {
     box-shadow: inset 0 0 0 1.5px var(--accent);
+  }
+
+  .ops li.active {
     padding-bottom: 10px;
+  }
+
+  /* Opacity and feather, side by side. */
+  .blend2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+
+  .blend2 label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .blend2 .top {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+  }
+
+  .blend2 .val {
+    min-width: 0;
+  }
+
+  .note.accent {
+    color: var(--accent);
+  }
+
+  .actions {
+    gap: 2px;
+  }
+
+  .flash {
+    font-size: 0.8rem;
+    text-align: right;
+    padding-right: 4px;
   }
 
   /* The row's name area: tap to make the component active. */
   .pick {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
     flex: 1;
     min-width: 0;
     justify-content: flex-start;
