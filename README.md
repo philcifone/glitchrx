@@ -1,15 +1,15 @@
 # glitcharaxia
 
-Glitch art from photographs, by applying audio-style effects (echo, reverb, shuffle, bit-crush and others) to the compressed data inside a JPEG. It is the old "open a JPEG in Audacity as raw audio" technique, rebuilt so that it:
+Glitch art from photographs by databending: reading a photo's raw pixels as if they were audio, running audio effects over them (echo, reverb, delay, amplify and others), and turning the result back into an image. It is the old "import a TIFF into Audacity as raw data" technique, rebuilt so that it:
 
-- never corrupts the file header, so the result always opens
 - never modifies your original
-- is repeatable: the same seed gives the same glitch, byte for byte
-- can be undone exactly, for most effects
+- is repeatable: the same seed gives the same result, byte for byte
+- previews live, fast enough to use from a phone
+- keeps your photo's size, orientation and colour profile
 
 Everything runs locally. No image is ever uploaded anywhere.
 
-Status: Phase 2. A command-line tool (`glitchrx`) and a web GUI (`glitchrx serve`) with live preview, usable from a phone over your LAN or VPN. JPEG only for now; more formats are planned. See `SPEC.md` for the roadmap and `VOCAB.md` for terminology.
+Status: Phase 2. A command-line tool (`glitchrx`) and a web GUI (`glitchrx serve`), usable from a phone over your LAN or VPN. Reads JPEG, PNG and TIFF; writes TIFF (the default), PNG and JPEG. See `SPEC.md` for the roadmap and `VOCAB.md` for terminology.
 
 ## Install
 
@@ -30,55 +30,76 @@ On macOS or Windows without a system libjpeg-turbo, build with `--features glitc
 ## Usage
 
 ```
-glitchrx --echo photo.jpg                       # writes photo-glitch.jpg
-glitchrx --echo photo.jpg                       # again: photo-glitch-1.jpg
-glitchrx --echo photo.jpg out.jpg               # explicit output name
-glitchrx --echo delay=4096,gain=0.7 --shift by=200 photo.jpg
-glitchrx --shuffle --bake photo.jpg             # also writes photo-glitch.png
-glitchrx --echo hits=8 --restart 20% photo.jpg   # taller glitch bands
-glitchrx --echo --restart keep photo.jpg        # no bands: damage runs to the bottom
+glitchrx --echo photo.jpg                       # writes photo-glitch.tif
+glitchrx --echo photo.jpg                       # again: photo-glitch-1.tif
+glitchrx --echo photo.jpg out.png               # explicit output; its extension sets the format
+glitchrx --echo --format jpeg photo.jpg         # photo-glitch.jpg
+glitchrx --echo delay=0.33rows,decay=0.6 --reverb photo.jpg
+glitchrx --echo --encoding ulaw photo.jpg       # read the pixels as mu-law audio
+glitchrx --shift by=0.5rows,phase=2,hits=12 photo.jpg
 glitchrx --stutter --batch *.jpg                # every file, automatic names
-glitchrx --info photo.jpg                       # what is inside the file
+glitchrx --info photo.jpg                       # format, size, orientation, colour profile
 glitchrx --list                                 # every effect and parameter
 ```
 
-Effects run in the order you give them, and each takes optional `key=value` parameters. Every run prints the output name, how well it decodes, and the seed. For reversible chains it also prints the exact command that undoes the run:
+Effects run in the order you give them, and each takes optional `key=value` parameters. Every run prints the output name, its size, and the seed:
 
 ```
-photo-glitch.jpg  (decode: recovered, seed 81723)
-  undo: glitchrx --reverse --echo delay=4096,gain=0.7 --seed 81723 photo-glitch.jpg
+photo-glitch.tif  (6240 x 4160, tiff, seed 81723)
 ```
 
-Re-run with `--seed` to reproduce a glitch you liked. Use `--save-recipe` to keep the whole chain in a small TOML file, and replay it later with `--recipe`.
+Re-run with `--seed` to reproduce a result you liked. Use `--save-recipe` to keep the whole chain in a small TOML file, and replay it later with `--recipe`.
 
-"decode: recovered" is normal. It means the decoder hit the damage you made and worked around it, which is the glitch.
+The output is TIFF by default: uncompressed 8-bit RGB, ready for masking in Photoshop. The colour profile of the original is written into every output, so colours match the original.
+
+### Encodings
+
+Audacity's Import Raw Data dialog asks how to read the bytes as samples. That choice changes the look more than any effect parameter, so it is a setting here too: `--encoding` for the whole chain, or `encoding=` on one effect.
+
+| Encoding | Look |
+| --- | --- |
+| `u8` (default) | Clean ghosts; colours rotate through the channels |
+| `s8` | Like `u8`, but highlights clip and invert |
+| `s16le`, `s16be` | Ghosts under heavy rainbow grain; byte order changes the palette |
+| `s24le`, `s24be` | One sample per pixel; posterized two-tone fields |
+| `ulaw`, `alaw` | Posterized neon blocks with hard edges |
+
+`--channels 2` reads the bytes as stereo, as Audacity did when you imported stereo: alternate samples are left and right, and each side is processed on its own.
+
+### Sizes
+
+Every pixel is three bytes (R, G, B), and rows follow each other, so a distance in the data is a distance in the picture. Sizes take units: `rows` (`0.33rows` is a third of the width, sideways; `6rows` is six rows down), `px`, `%` of the image (which runs top to bottom, so `40%:60%` is the middle band), or plain bytes.
+
+A distance of whole pixels keeps colours. `phase=1` or `phase=2` adds one or two bytes, which shifts red into green into blue: the colour fringes of databent images.
 
 ### Effects
 
-| Effect | What it does | Reversible |
+| Effect | Audacity counterpart | What it does |
 | --- | --- | --- |
-| `echo` | Adds quieter, delayed copies of the data | yes |
-| `reverb` | Three feedback echoes in series | yes |
-| `shift` | Rotates stretches of data sideways | yes |
-| `backwards` | Reverses stretches of data | yes |
-| `shuffle` | Swaps blocks of data around | yes |
-| `amplify` | Scales data away from the midpoint | wrap mode yes, clip mode no |
-| `bitcrush` | Throws away low bits | no |
-| `stutter` | Repeats a chunk over the following data | no |
+| `echo` | Echo | Fading repeats that feed back on themselves |
+| `delay` | Delay | A fixed number of crisp repeats |
+| `reverb` | Reverb | A haze of overlapping ghosts (Freeverb) |
+| `amplify` | Amplify | Gain in dB, with clipping |
+| `invert` | Invert | Flips samples; close to a negative with `u8` |
+| `bitcrush` | (plug-ins) | Fewer levels per sample: banding |
+| `backwards` | Reverse | Mirrors stretches of the picture |
+| `shift` | cut and paste | Slides bands sideways |
+| `shuffle` | cut and paste | Swaps blocks around |
+| `stutter` | Repeat | Repeats a strip down the picture |
 
-All parameters are documented in `docs/effects.md`, which is generated from the code.
+All parameters are documented in `docs/effects.md`, which is generated from the code. Where an effect lands is set by `region`, `hits` and `len`, shared by every effect.
 
 ### Safety rules
 
 - The input file is never written. This holds even with `--force`, and also through symlinks and hard links.
 - Existing files are never overwritten unless you pass `--force`.
-- Output names continue a sequence: `-glitch`, `-glitch-1`, `-glitch-2`. Glitching `photo-glitch-1.jpg` produces the next free `photo-glitch-N.jpg`, not `photo-glitch-1-glitch.jpg`.
+- Output names continue a sequence: `-glitch`, `-glitch-1`, `-glitch-2`. Bending `photo-glitch-1.tif` produces the next free `photo-glitch-N.tif`, not `photo-glitch-1-glitch.tif`. The numbers are shared across formats.
 - Exit codes:
   - 0: success
   - 1: runtime error
   - 2: bad command line
   - 3: refused (for safety)
-  - 4: unsupported file
+  - 4: unsupported file (not a JPEG, PNG or TIFF)
 
 ## Web GUI
 
@@ -93,34 +114,29 @@ glitchrx serve --host 0.0.0.0 --token --root ~/Pictures   # from a phone over LA
 In the GUI:
 - **Open** a photo from your device (it is sent to your own server, nowhere else) or, with `--root`, from the server's folders.
 - **Add steps** from the effect list. Steps run top to bottom. Each one can be switched off, re-rolled (new seed), moved, duplicated or removed. Shared placement settings (`region`, `hits`, `len`) are under "Placement".
-- **Bands** sets the restart interval (the CLI's `--restart`); see below.
 - **Hold "original"** (or the `\` key) to compare with the untouched photo.
 - **Undo and redo** with the buttons or Ctrl+Z / Ctrl+Shift+Z. History holds recipes, not images.
-- **Export** at full resolution: a baked PNG or JPEG (what the preview shows), or the glitched JPEG itself. With `--root`, results can be saved next to the original using the CLI's `-glitch`, `-glitch-1` naming. Nothing is overwritten. The recipe can be downloaded, then loaded again later or replayed with `glitchrx --recipe`.
+- **Export** at full resolution as TIFF, PNG or JPEG. With `--root`, results can be saved next to the original using the CLI's `-glitch`, `-glitch-1` naming. Nothing is overwritten. The recipe can be downloaded, then loaded again later or replayed with `glitchrx --recipe`.
 
-The preview is decoded on the server with libjpeg-turbo, the same decoder browsers use, and sent to the page as a clean image. What you see is the baked result, whatever browser you use. On a 24 MP photo, a preview takes roughly 150-250 ms.
+The preview runs the recipe on a copy of the photo shrunk to your screen, with every size scaled to match, so even a 26 MP photo previews quickly. It is close to the full-resolution export but not identical: long reverb tails and very fine shuffles differ most. A newer slider position cancels a render that is still running.
+
+The GUI is being reworked for the pixel engine (Phase 2c): encoding pickers and the new export formats are coming, and the "Bands" and "Mode" controls left over from the JPEG engine have no effect.
 
 ## How it works
 
-A JPEG is a header (dimensions, colour tables, metadata) followed by compressed image data. Changing the header breaks the file, while changing the image data produces glitches. `glitchrx` parses the file, finds the image data, and lets the effects edit only that.
+1. **Decode** the photo to a *raster*: R, G, B for each pixel, row after row, exactly what an uncompressed TIFF stores. A sideways phone photo is turned upright first, so rows are the rows you see.
+2. **Bend.** Each effect reads a stretch of those bytes as audio samples in its encoding, processes them in floating point the way Audacity would, and clips the result back to bytes. Clipping is where the bright, saturated colours come from.
+3. **Encode** the raster as TIFF, PNG or JPEG, with the original colour profile.
 
-One detail the Audacity method missed: inside the image data, the byte value 255 (`FF`) always appears as `FF 00`. Any other `FF xx` pair is a control marker, and an accidental `FF D9` means "end of image", which turns everything after it flat gray. `glitchrx` removes those `00`s before the effects run and puts them back afterwards, so no effect can forge a marker. `--mode raw` turns this protection off if you want the Audacity behaviour, truncations included.
-
-### Glitch bands and restart markers
-
-When the decoder hits damaged data, it loses its place, and the colour of every following block drifts. Left alone, one glitch near the top turns the rest of the picture into a flat wash. That is what most viewers show as a gray block.
-
-JPEG has a built-in fix: *restart markers*, checkpoints where the decoder resets. Most cameras and phones do not write them. By default `glitchrx` first rewrites the file with a marker every 10% of the image height (`--restart 10%`), so each glitch stays in a band, and the rest of the photo survives. This rewrite is lossless: the pixels do not change.
-
-- `--restart 3%` gives thin streaks, and `--restart 25%` gives large chunks.
-- `--restart 0` removes all markers, and `--restart keep` leaves the file exactly as it was. Either way you get the wash-to-the-bottom look.
-- Because of the rewrite, `--reverse` gives back the original *pixels* exactly, but not byte for byte. Add `--restart keep` to both runs if you need the exact original bytes back.
+The raster always keeps its length, so the image keeps its dimensions. The math uses only basic floating-point operations, which give identical results on every machine, so a seed reproduces the same bytes everywhere.
 
 ### About endianness
 
-In Audacity, you chose between little endian and big endian when importing raw data. That only matters when one audio sample is made of two or more bytes (16-bit audio). It decides whether the first byte of each pair is the high part or the low part of the number. Choose the "wrong" order and the effect math treats the bytes differently, which changes the look but is not an error.
+In Audacity, you chose between little endian and big endian when importing raw data. That only matters when one sample is made of two or more bytes. It decides whether the first byte of each pair is the loud (high) part or the quiet (low) part of the number. With `s16le` the green and blue bytes of a pixel tend to be the loud parts; with `s16be` it flips. Neither is wrong; they are different palettes.
 
-`glitchrx` works on single bytes (8-bit samples), where byte order does not exist, so there is nothing to choose. A 16-bit mode may come later as an option.
+### Earlier: JPEG byte glitching
+
+Until SPEC v0.3, `glitchrx` glitched the *compressed* data inside a JPEG. That gives flat colour bands, not the databent look, and was retired. It is kept in git at the tag `archive/jpeg-bytes`; its version 1 recipes only replay there.
 
 ## Development
 
@@ -138,7 +154,7 @@ Layout:
 - `crates/glitchrx-cli`: the `glitchrx` command
 - `crates/glitchrx-serve`: the web server behind `glitchrx serve`
 - `web/`: the Svelte GUI, embedded into the binary at build time
-- `tools/`: fixture generator, contact sheets
+- `tools/`: fixture generator, contact sheets (`just sheets photo.jpg`)
 - `docs/`: effect reference and decision records
 
 ## Privacy
