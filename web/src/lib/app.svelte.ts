@@ -498,6 +498,12 @@ export class App {
     this.changed();
   }
 
+  /** The step being painted and its number in the stack (from 1). */
+  get maskTarget(): { n: number; step: StepState } | null {
+    const i = this.recipe.steps.findIndex((s) => s.uid === this.masking);
+    return i < 0 ? null : { n: i + 1, step: this.recipe.steps[i] };
+  }
+
   /** Paint this step's mask on the preview. */
   startMasking(uid: string): void {
     this.masking = uid;

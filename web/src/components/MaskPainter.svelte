@@ -83,7 +83,15 @@
       ctx.shadowBlur = 3 * dpr;
       ctx.beginPath();
       if (op.shape === 'radial') {
-        ctx.arc(ax, ay, Math.hypot(bx - ax, by - ay), 0, 2 * Math.PI);
+        // The circle as it will paint, with its outline on top.
+        const r = Math.hypot(bx - ax, by - ay);
+        ctx.save();
+        ctx.fillStyle = op.mode === 'subtract' ? ERASE : PAINT;
+        ctx.beginPath();
+        ctx.arc(ax, ay, r, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.restore();
+        ctx.arc(ax, ay, r, 0, 2 * Math.PI);
       } else {
         // Lines across the picture at both ends, square to the drag,
         // like Lightroom's linear gradient guides.
@@ -120,8 +128,11 @@
         hardness: t.hardness,
         points: [roundCoord(x), roundCoord(y)],
       };
+    } else if (t.tool === 'radial') {
+      // Hard-edged: the mask's feather is what softens it.
+      live = { shape: 'radial', mode: 'add', from: [x, y], to: [x, y], hardness: 1 };
     } else {
-      live = { shape: t.tool, mode: 'add', from: [x, y], to: [x, y] };
+      live = { shape: 'linear', mode: 'add', from: [x, y], to: [x, y] };
     }
     redraw();
   }

@@ -153,7 +153,7 @@
         <p class="note dim">
           Drag on the photo: {app.tool.tool === 'linear'
             ? 'full where you start, fading out where you let go.'
-            : 'full at the centre, fading out to the edge.'}
+            : 'a circle from its centre out to where you let go. Feather softens its edge.'}
         </p>
       {/if}
       <label class="row">
@@ -202,7 +202,7 @@
                   {:else if op.shape === 'radial'}<CircleDot size={16} strokeWidth={1.75} />
                   {:else}<SunMedium size={16} strokeWidth={1.75} />{/if}
                 </span>
-                <span class="grow name">{op.shape === 'brightness' ? 'Brightness' : op.shape === 'linear' ? 'Linear gradient' : 'Radial gradient'}</span>
+                <span class="grow name">{op.shape === 'brightness' ? 'Brightness' : op.shape === 'linear' ? 'Linear gradient' : 'Radial'}</span>
                 <select value={op.mode} onchange={(e) => app.setMaskOpMode(uid, row.index, e.currentTarget.value as MaskMode)} aria-label="How it combines">
                   {#each MODES as m (m.id)}<option value={m.id}>{m.label}</option>{/each}
                 </select>

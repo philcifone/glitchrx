@@ -85,7 +85,9 @@ export type MaskMode = 'add' | 'subtract' | 'intersect';
  */
 export type MaskOp =
   | { shape: 'stroke'; mode: MaskMode; size: number; hardness: number; points: number[] }
-  | { shape: 'linear' | 'radial'; mode: MaskMode; from: [number, number]; to: [number, number] }
+  | { shape: 'linear'; mode: MaskMode; from: [number, number]; to: [number, number] }
+  /** A circle: centre `from`, edge through `to`. Hard-edged unless `hardness` < 1. */
+  | { shape: 'radial'; mode: MaskMode; from: [number, number]; to: [number, number]; hardness?: number }
   | { shape: 'brightness'; mode: MaskMode; low: number; high: number; soft: number };
 
 /** Where a step's result shows. The server omits empty and default fields. */
