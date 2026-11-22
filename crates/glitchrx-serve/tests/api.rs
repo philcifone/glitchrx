@@ -99,7 +99,7 @@ async fn effects_and_config() {
     assert_eq!(s, StatusCode::OK);
     assert!(h.contains_key(header::CONTENT_SECURITY_POLICY));
     let effects = json_of(&b);
-    assert_eq!(effects.as_array().unwrap().len(), 14);
+    assert_eq!(effects.as_array().unwrap().len(), 15);
     assert_eq!(effects[0]["id"], "echo");
 
     let (_, _, b) = send(
