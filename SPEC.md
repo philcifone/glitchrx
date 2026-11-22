@@ -276,7 +276,7 @@ Built and tested on `phase-1-cli`; the byte engine is now at `archive/jpeg-bytes
 - **2c GUI on the pixel core.** Section 9.1 and 9.2: scaled previews, cancellation, budget, TIFF export.
 - **2d Second-batch effects.** Phaser, wahwah, distort, speed, with contact sheets (D-33). Tuning defaults against `samples/examples/` with Phil is postponed (Phil, 2026-11-22).
 - **2d' PWA pass.** App icon, home-screen install, name and splash, so the GUI feels like an app on iOS.
-- **2e Tauri wrapper.** Linux done (D-35); macOS (Apple Silicon) later. Reuses the PWA icon.
+- **2e Tauri wrapper.** Linux done (D-35); macOS (Apple Silicon) later, steps in `docs/macos.md`. Reuses the PWA icon.
 
 ### Phase 3: depth
 
