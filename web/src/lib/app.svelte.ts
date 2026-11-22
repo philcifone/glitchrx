@@ -232,11 +232,15 @@ export class App {
   }
 
   /**
-   * Whether the preview should settle to an exact render: some enabled
-   * step's effect cannot be previewed at scale (the phaser).
+   * Whether the preview should settle to an exact render once changes
+   * stop: whenever any step runs. A live preview glitches a screen-sized
+   * copy, and pixel-level texture cannot scale with it, so only a
+   * full-resolution render shows what the export will be (Phil,
+   * 2026-11-22: exports did not match what he had liked on screen). On
+   * 20-26 MP photos that render takes about 0.3-1.6 s.
    */
   get needsExact(): boolean {
-    return this.recipe.steps.some((s) => s.enabled && this.effect(s.effect)?.exact_preview);
+    return this.recipe.steps.some((s) => s.enabled);
   }
 
   /** Whether "re-roll all" would change anything. */
@@ -858,8 +862,9 @@ export class App {
     const exact = quality === 'exact';
     const { w, h } = this.target(exact ? 'full' : quality);
     const rev = this.revision;
+    // The progress line shows while it works; no message, since settling
+    // to exact happens after every change.
     this.busy = true;
-    if (exact) this.working = 'Rendering at full resolution';
     this.queue.request(() => this.runPreview(doc.id, recipe, w, h, exact, rev));
     if (this.masking) this.refreshMask();
     if (!exact && this.needsExact) {
@@ -894,8 +899,6 @@ export class App {
       // Too heavy is not an error: keep the last image and say so.
       if (e instanceof TooHeavyError) this.heavy = e.message;
       else this.fail(e);
-    } finally {
-      if (exact) this.working = null;
     }
   }
 
