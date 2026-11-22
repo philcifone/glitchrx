@@ -15,6 +15,11 @@
 //!   `speed` is in between: it reads samples at a new rate and
 //!   interpolates, so it needs the whole window at once, like an edit.
 //!
+//! - **Pixel effects** (pixelsort) are not audio at all: they see the
+//!   window as whole RGB pixels laid out in rows, so the step's encoding
+//!   and channels do not apply, and their windows always cover whole
+//!   pixels.
+//!
 //! Effects only ever write inside their window.
 
 use crate::error::{Error, Result};
@@ -30,6 +35,7 @@ mod distort;
 mod echo;
 mod invert;
 mod phaser;
+mod pixelsort;
 mod reverb;
 mod shift;
 mod shuffle;
@@ -57,6 +63,9 @@ pub trait Filter {
 pub struct Window<'a> {
     /// The window's bytes, a whole number of frames.
     pub bytes: &'a mut [u8],
+    /// Where the window starts in the raster, in bytes. Pixel effects use
+    /// it to find rows and columns; for them it is a multiple of 3.
+    pub start: usize,
     pub encoding: Encoding,
     /// 1 (mono), 2 (stereo: samples alternate left/right) or 3 (one channel
     /// per colour: with 8-bit samples, R, G and B each processed alone).
@@ -121,9 +130,33 @@ pub struct PlacementDefaults {
     pub len: &'static str,
 }
 
+/// Which section of the effect picker an effect belongs to, and how it sees
+/// the raster.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Group {
+    /// Behaves like its Audacity namesake: repeats, ghosts, gain, sweeps.
+    Audio,
+    /// Treats the bytes as data: flipping, crushing, moving them around.
+    Data,
+    /// Works on whole RGB pixels in two dimensions (pixel sorting); the
+    /// sample encoding and channels do not apply.
+    Pixel,
+}
+
+impl Group {
+    pub fn name(self) -> &'static str {
+        match self {
+            Group::Audio => "audio",
+            Group::Data => "data",
+            Group::Pixel => "pixel",
+        }
+    }
+}
+
 /// Static description of an effect: identity, docs, parameters, constructor.
 pub struct EffectInfo {
     pub id: &'static str,
+    pub group: Group,
     /// Bumped whenever the effect's output for a given input, parameters and
     /// seed changes, so old recipes are refused instead of silently
     /// replaying differently.
@@ -191,6 +224,7 @@ pub static REGISTRY: &[&EffectInfo] = &[
     &wahwah::INFO,
     &distort::INFO,
     &speed::INFO,
+    &pixelsort::INFO,
 ];
 
 /// Find an effect by id.
@@ -242,15 +276,34 @@ pub fn markdown_reference() -> String {
         "\nSet once per recipe (`--encoding`, `--channels`), or per step with \
          `encoding=` and `channels=` in the step's parameters.\n\n",
     );
+    s.push_str(
+        "## Every step
+
+\
+         - `opacity` (0 to 1, default 1): blend the step's result over the picture it \
+         received, as with a layer's opacity. Example: `--echo opacity=0.5`.\n\
+         - A mask (recipe files and the GUI): where the result shows, made of \
+         brushes, gradients, circles and brightness ranges. See `[step.mask]` in SPEC section 8.\n\n",
+    );
     for e in REGISTRY {
         s.push_str(&format!(
             "## {}\n\n{}\n\n{}\n\n",
             e.id, e.summary, e.details
         ));
-        s.push_str(&format!(
-            "Follows Audacity's {}. Version: {}.\n\n",
-            e.audacity, e.version
-        ));
+        if e.group == Group::Pixel {
+            s.push_str(&format!("Version: {}.\n\n", e.version));
+        } else {
+            s.push_str(&format!(
+                "Follows Audacity's {}. Version: {}.\n\n",
+                e.audacity, e.version
+            ));
+        }
+        if e.group == Group::Pixel {
+            s.push_str(
+                "A pixel effect: it works on whole RGB pixels, so the encoding and channels \
+                 do not apply.\n\n",
+            );
+        }
         if e.exact_preview {
             s.push_str(
                 "Live previews of this effect are approximate; the GUI renders it at full \
@@ -293,6 +346,7 @@ pub(crate) mod testutil {
         let units = Units::full(width, bytes.len() / (width * 3));
         let mut w = Window {
             bytes,
+            start: 0,
             encoding: enc,
             channels: 1,
             units: &units,
@@ -335,6 +389,7 @@ mod tests {
             let mut b = red.clone();
             let mut w = Window {
                 bytes: &mut b,
+                start: 0,
                 encoding: Encoding::U8,
                 channels,
                 units: &units,
@@ -358,6 +413,7 @@ mod tests {
         let units = Units::full(4, 1);
         let mut w = Window {
             bytes: &mut b,
+            start: 0,
             encoding: Encoding::U8,
             channels: 2,
             units: &units,
@@ -374,6 +430,7 @@ mod tests {
         let units = Units::full(10, 1);
         let mut w = Window {
             bytes: &mut b,
+            start: 0,
             encoding: Encoding::U8,
             channels: 1,
             units: &units,

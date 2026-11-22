@@ -37,6 +37,8 @@ glitchrx --echo --format jpeg photo.jpg         # photo-glitch.jpg
 glitchrx --echo delay=0.33rows,decay=0.6 --reverb photo.jpg
 glitchrx --echo --encoding ulaw photo.jpg       # read the pixels as mu-law audio
 glitchrx --shift by=0.5rows,phase=2,hits=12 photo.jpg
+glitchrx --pixelsort low=0.3 photo.jpg          # melt the bright areas into streaks
+glitchrx --echo opacity=0.5 photo.jpg           # blend the step at half strength
 glitchrx --stutter --batch *.jpg                # every file, automatic names
 glitchrx --info photo.jpg                       # format, size, orientation, colour profile
 glitchrx --list                                 # every effect and parameter
@@ -90,6 +92,9 @@ A distance of whole pixels keeps colours. `phase=1` or `phase=2` adds one or two
 | `wahwah` | Wahwah | A swept resonant filter: pulsing smears and ringing fringes |
 | `distort` | Distortion | Hard clip, soft saturation, or folding highlights into bands |
 | `speed` | Change Speed | Squeezes or stretches parts of the picture: shears |
+| `pixelsort` | (pixel effect) | Sorts runs of pixels by brightness, hue or saturation: streaks down or across the picture |
+
+`pixelsort` is not audio: it works on whole pixels, so the encoding and channels do not apply. Every step also takes `opacity` (0 to 1), which blends its result over the picture it received.
 
 All parameters are documented in `docs/effects.md`, which is generated from the code. Where an effect lands is set by `region`, `hits` and `len`, shared by every effect.
 
@@ -118,16 +123,18 @@ glitchrx serve --host 0.0.0.0 --token --root ~/Pictures   # from a phone over LA
 **On a phone, add it to the home screen** (Safari: Share, then Add to Home Screen). It then opens full screen with its own icon, like an app. The home-screen app may keep its own cookies, so it can ask for the token once. Exports open the share sheet (Save Image, Save to Files, AirDrop) through a Save button in the status bar.
 
 In the GUI:
-- **Open** a photo from your device (it is sent to your own server, nowhere else) or, with `--root`, from the server's folders.
+- **Open** a photo from your device (it is sent to your own server, nowhere else) or, with `--root`, from the server's folders. If steps are already in the stack, you are asked whether to keep them or start fresh (undoable; "Don't ask again" is changeable in Presets).
 - **Pick the encoding** for the whole recipe (and mono, stereo or RGB) at the top. Any step can override both.
-- **Add steps** by tapping an effect in the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter) and data effects (invert, bitcrush, backwards, shift, shuffle). On a phone the palette sits behind the floating + button. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
+- **Add steps** by tapping an effect in the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter), data effects (invert, bitcrush, backwards, shift, shuffle) and pixel effects (pixelsort). On a phone the palette sits behind the floating + button. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
 - **Placement** (`region`, `hits`, `len`) is always shown on each step. Dragging the region's two handles shades the preview outside the band it covers.
-- **Shake** (the wand) rolls a step's own settings at random, within the useful range; placement and encoding stay. **Re-roll** (the dice) picks a new seed, which moves where hits land; it is greyed out when a step has nothing random (`hits=0`, except for `shuffle`).
+- **Shake** (the shuffle arrows) rolls a step's own settings at random, within the useful range; placement and encoding stay. **Re-roll** (the dice, beside the seed at the end of Placement) picks a new seed, which moves where hits land; it is greyed out when a step has nothing random (`hits=0`, except for `shuffle`).
+- **Blend** each step with its opacity, and **mask** it. A mask is built from components: brushes (paint and erase), linear gradients, radials (hard-edged circles; feather fades them) and brightness ranges that limit the mask to light or dark parts. Tap a component to make it active; a radial or linear then shows handles on the photo to move or resize it, and the others show pins to tap. Each component adds, subtracts or intersects, and has its own opacity and feather (side by side when it is active); long-press to select several and set them together. Copy, Cut and Paste move components between steps. Paint in shows the step only inside the mask; Paint out shows it everywhere else. The red overlay shows the mask; Done ends editing. On a desktop, B and E paint and erase and [ and ] size the brush. Masks are saved in the recipe as strokes and shapes, so they replay exactly at full resolution.
+- **Presets** (the bookmark) are your own saved recipes, kept by the server in `~/.config/glitchrx/presets` (`--presets DIR` to move them), so your phone and desktop share them. Use one to replace the steps, or add its steps to the current recipe. They are ordinary recipe files: `glitchrx --recipe ~/.config/glitchrx/presets/NAME.toml photo.jpg`.
 - **Hold "original"** (or the `\` key) to compare with the untouched photo.
 - **Undo and redo** with the buttons or Ctrl+Z / Ctrl+Shift+Z. History holds recipes, not images.
 - **Export** at full resolution as TIFF, PNG or JPEG. With `--root`, results can be saved next to the original using the CLI's `-glitch`, `-glitch-1` naming. Nothing is overwritten. The recipe can be downloaded, then loaded again later or replayed with `glitchrx --recipe`.
 
-The preview runs the recipe on a copy of the photo shrunk to your screen, with every size scaled to match, so even a 26 MP photo previews quickly. It is close to the full-resolution export but not identical: long reverb tails and very fine shuffles differ most. The phaser cannot be previewed at a smaller size at all, so with a phaser in the recipe the preview turns exact by itself once you stop for a moment. **Make exact** renders the current recipe at full resolution and shrinks the result, which is exactly what export will give; it takes about a second on a 26 MP photo. A newer slider position cancels a render that is still running, and a live preview that runs over 3 s stops with a "too heavy to preview live" notice (export, and usually Make exact, still work).
+While you change things, the preview runs the recipe on a copy of the photo shrunk to your screen, with every size scaled to match, so even a 26 MP photo answers quickly. That copy is close to the export but not identical, because pixel-level texture cannot shrink with the picture. So once you stop for a moment the preview settles to an exact render: the recipe at full resolution, shrunk to fit, which is exactly what export gives (0.3 to 1.6 s on a 26 MP photo). The status bar says whether the view is approximate or exact. A newer change cancels a render that is still running, and a live preview that runs over 3 s stops with a "too heavy to preview live" notice (export still works).
 
 ## Desktop app
 

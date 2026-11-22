@@ -4,6 +4,7 @@ import type { EffectInfo } from './types';
 
 const echo: EffectInfo = {
   id: 'echo',
+  group: 'audio',
   version: 1,
   audacity: 'Echo',
   summary: '',

@@ -4,16 +4,19 @@
   // shown: it is where most of the variety comes from), seed and
   // arrangement buttons.
   import Dices from '@lucide/svelte/icons/dices';
-  import WandSparkles from '@lucide/svelte/icons/wand-sparkles';
+  import Shuffle from '@lucide/svelte/icons/shuffle';
+  import VenetianMask from '@lucide/svelte/icons/venetian-mask';
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import Copy from '@lucide/svelte/icons/copy';
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import { app, CHANNELS_KEY, ENCODING_KEY } from '../lib/app.svelte';
   import { iconFor } from '../lib/icons';
+  import { usesSamples } from '../lib/palette';
   import { CHANNEL_CHOICES, channelName } from '../lib/channels';
   import type { Channels, StepState } from '../lib/types';
   import ParamField from './ParamField.svelte';
+  import BlendSection from './BlendSection.svelte';
 
   let { step, index, count }: { step: StepState; index: number; count: number } = $props();
 
@@ -26,6 +29,7 @@
   // Empty string = follow the recipe.
   const stepEncoding = $derived(step.params[ENCODING_KEY] ?? '');
   const stepChannels = $derived(step.params[CHANNELS_KEY] ?? '');
+  const opacity = $derived(app.opacity(step));
   // Open when first added; collapsing is per card and not part of history.
   let open = $state(true);
 
@@ -43,24 +47,19 @@
       <span class="glyph"><Icon size={18} strokeWidth={1.75} /></span>
       <span class="label serif">{step.effect}</span>
       {#if stepEncoding}<span class="enc">{stepEncoding}</span>{/if}
+      {#if step.mask}
+        <span class="enc tag-icon" class:live={app.masking === step.uid} title="Masked" aria-label="Masked">
+          <VenetianMask size={14} strokeWidth={1.75} />
+        </span>
+      {/if}
+      {#if opacity < 1}<span class="enc">{Math.round(opacity * 100)}%</span>{/if}
     </button>
     <label class="toggle" title={step.enabled ? 'Turn this step off' : 'Turn this step on'}>
       <input class="switch" type="checkbox" checked={step.enabled} onchange={() => app.toggleStep(step.uid)} />
       <span class="visually-hidden">Enabled</span>
     </label>
     <button class="icon" onclick={() => app.shake(step.uid)} disabled={!info} title="Shake: random settings for this step (placement stays)" aria-label="Shake settings">
-      <WandSparkles size={18} strokeWidth={1.75} />
-    </button>
-    <button
-      class="icon"
-      onclick={() => app.reroll(step.uid)}
-      disabled={!seeded}
-      title={seeded
-        ? 'New seed for this step'
-        : 'Nothing random here: with hits=0 the step covers its whole region. Set hits above 0 to scatter it.'}
-      aria-label="Re-roll seed"
-    >
-      <Dices size={18} strokeWidth={1.75} />
+      <Shuffle size={18} strokeWidth={1.75} />
     </button>
   </header>
 
@@ -72,6 +71,7 @@
             <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
           {/each}
         </section>
+        {#if usesSamples(info)}
         <div class="sample">
           <label>
             <span>Encoding</span>
@@ -98,39 +98,57 @@
             </select>
           </label>
         </div>
+        {/if}
         <section class="group" aria-label="Placement">
           <h3 class="section-label">Placement</h3>
           {#each placement as spec (spec.name)}
             <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
           {/each}
+          <!-- The seed decides where the hits land, so it lives here, with
+               the dice that re-rolls it. -->
+          <div class="seed">
+            <label for="seed-{step.uid}">Seed</label>
+            <input
+              id="seed-{step.uid}"
+              type="text"
+              inputmode="numeric"
+              bind:value={seedText}
+              onchange={() => app.setSeed(step.uid, seedText)}
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <button
+              class="icon"
+              onclick={() => app.reroll(step.uid)}
+              disabled={!seeded}
+              title={seeded
+                ? 'New seed: the same settings, landing somewhere else'
+                : 'Nothing random here: with hits=0 the step covers its whole region. Set hits above 0 to scatter it.'}
+              aria-label="Re-roll seed"
+            >
+              <Dices size={18} strokeWidth={1.75} />
+            </button>
+          </div>
         </section>
+        <BlendSection {step} />
       {:else}
         <p class="err">Unknown effect `{step.effect}`.</p>
       {/if}
 
-      <div class="foot">
-        <label class="seed">
-          <span>Seed</span>
-          <input
-            type="text"
-            inputmode="numeric"
-            bind:value={seedText}
-            onchange={() => app.setSeed(step.uid, seedText)}
-            spellcheck="false"
-            autocomplete="off"
-          />
-        </label>
-        <button class="icon" onclick={() => app.moveStep(step.uid, -1)} disabled={index === 0} aria-label="Move up" title="Move up">
-          <ChevronUp size={18} strokeWidth={1.75} />
+      <!-- What to do with the step itself, apart from its settings. -->
+      <div class="foot" role="group" aria-label="Step">
+        <button class="plain" onclick={() => app.moveStep(step.uid, -1)} disabled={index === 0} title="Move up" aria-label="Move up">
+          <ChevronUp size={18} strokeWidth={1.75} /> <span class="txt">Up</span>
         </button>
-        <button class="icon" onclick={() => app.moveStep(step.uid, 1)} disabled={index === count - 1} aria-label="Move down" title="Move down">
-          <ChevronDown size={18} strokeWidth={1.75} />
+        <button class="plain" onclick={() => app.moveStep(step.uid, 1)} disabled={index === count - 1} title="Move down" aria-label="Move down">
+          <ChevronDown size={18} strokeWidth={1.75} /> <span class="txt">Down</span>
         </button>
-        <button class="icon" onclick={() => app.duplicateStep(step.uid)} aria-label="Duplicate" title="Duplicate (new seed)">
-          <Copy size={18} strokeWidth={1.75} />
+        <button class="plain" onclick={() => app.duplicateStep(step.uid)} title="Duplicate (with a new seed)" aria-label="Duplicate">
+          <Copy size={17} strokeWidth={1.75} /> <span class="txt">Duplicate</span>
         </button>
-        <button class="icon danger" onclick={() => app.removeStep(step.uid)} aria-label="Remove" title="Remove step">
-          <Trash2 size={18} strokeWidth={1.75} />
+        <span class="grow"></span>
+        <button class="plain danger" onclick={() => app.removeStep(step.uid)} title="Remove this step" aria-label="Remove step">
+          <Trash2 size={17} strokeWidth={1.75} /> <span class="txt">Remove</span>
         </button>
       </div>
     </div>
@@ -198,6 +216,17 @@
     border-radius: 5px;
   }
 
+  .enc.tag-icon {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 5px;
+  }
+
+  .enc.live {
+    color: var(--accent-fg);
+    background: var(--accent);
+  }
+
   .toggle {
     display: inline-flex;
     align-items: center;
@@ -241,7 +270,7 @@
   }
 
   .sample span,
-  .seed span {
+  .seed label {
     font-size: 0.85rem;
     font-weight: 500;
   }
@@ -250,20 +279,36 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    padding: 8px 0;
+    padding: 6px 0;
+  }
+
+  .foot button {
+    gap: 4px;
+    padding: 6px 8px;
+    font-size: 0.85rem;
+  }
+
+  .foot .grow {
+    flex: 1;
+  }
+
+  /* The narrowest phones get icons only (each button keeps its name). */
+  @media (max-width: 360px) {
+    .foot .txt {
+      display: none;
+    }
   }
 
   .seed {
-    flex: 1;
     display: flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
-    margin-right: 4px;
   }
 
   .seed input {
     flex: 1;
+    min-width: 0;
     width: 100%;
   }
 

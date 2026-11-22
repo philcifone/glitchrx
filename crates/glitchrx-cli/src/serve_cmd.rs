@@ -40,6 +40,11 @@ struct ServeCli {
     /// printed as part of the URL.
     #[arg(long, value_name = "SECRET", num_args = 0..=1, require_equals = true)]
     token: Option<Option<String>>,
+
+    /// Directory for saved presets (your own recipes, shared by every device
+    /// using this server). Default: ~/.config/glitchrx/presets.
+    #[arg(long, value_name = "DIR")]
+    presets: Option<PathBuf>,
 }
 
 pub fn main(args: Vec<OsString>) -> ExitCode {
@@ -63,6 +68,7 @@ pub fn main(args: Vec<OsString>) -> ExitCode {
         port: cli.port,
         root: cli.root,
         token,
+        presets: cli.presets.or_else(glitchrx_serve::presets::default_dir),
     };
     match serve(config) {
         Ok(()) => ExitCode::SUCCESS,

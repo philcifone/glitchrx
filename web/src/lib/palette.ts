@@ -1,34 +1,45 @@
 // How the effect picker groups effects.
 //
-// "Audio" effects behave like their Audacity namesakes: they listen to the
-// samples and add to them (repeats, ghosts, gain). "Data" effects treat the
-// bytes as data: flipping, crushing, reversing, moving them around. The
-// split is for finding things, not a technical one; stutter is an edit
-// underneath but sounds like audio, so it sits with audio.
+// The server says which group each effect is in. "Audio" effects behave
+// like their Audacity namesakes: they listen to the samples and add to them
+// (repeats, ghosts, gain). "Data" effects treat the bytes as data: flipping,
+// crushing, reversing, moving them around. "Pixel" effects are not audio at
+// all: they work on whole pixels in two dimensions (pixel sorting). Within a
+// group, effects keep a fixed picker order, so related ones sit together.
 
-import type { EffectInfo } from './types';
+import type { EffectGroup, EffectInfo } from './types';
 
 export interface Group {
   label: string;
   effects: EffectInfo[];
 }
 
-const AUDIO = ['echo', 'delay', 'reverb', 'phaser', 'wahwah', 'amplify', 'distort', 'speed', 'stutter'];
-const DATA = ['invert', 'bitcrush', 'backwards', 'shift', 'shuffle'];
+const GROUPS: { id: EffectGroup; label: string }[] = [
+  { id: 'audio', label: 'Audio' },
+  { id: 'data', label: 'Data' },
+  { id: 'pixel', label: 'Pixel' },
+];
 
-/**
- * The effects in picker order, by group. Effects not listed (new ones) go
- * under audio, since the planned additions are Audacity filters.
- */
+/** Picker order inside each group; effects not listed go last. */
+const ORDER = [
+  'echo', 'delay', 'reverb', 'phaser', 'wahwah', 'amplify', 'distort', 'speed', 'stutter',
+  'invert', 'bitcrush', 'backwards', 'shift', 'shuffle',
+  'pixelsort',
+];
+
+/** The effects in picker order, by group; empty groups are left out. */
 export function groupEffects(effects: EffectInfo[]): Group[] {
-  const rank = (list: string[], id: string) => {
-    const i = list.indexOf(id);
-    return i < 0 ? list.length : i;
+  const rank = (id: string) => {
+    const i = ORDER.indexOf(id);
+    return i < 0 ? ORDER.length : i;
   };
-  const data = effects.filter((e) => DATA.includes(e.id)).sort((a, b) => rank(DATA, a.id) - rank(DATA, b.id));
-  const audio = effects.filter((e) => !DATA.includes(e.id)).sort((a, b) => rank(AUDIO, a.id) - rank(AUDIO, b.id));
-  return [
-    { label: 'Audio', effects: audio },
-    { label: 'Data', effects: data },
-  ].filter((g) => g.effects.length > 0);
+  return GROUPS.map((g) => ({
+    label: g.label,
+    effects: effects.filter((e) => (e.group ?? 'audio') === g.id).sort((a, b) => rank(a.id) - rank(b.id)),
+  })).filter((g) => g.effects.length > 0);
+}
+
+/** Whether the step's encoding and channels apply to this effect. */
+export function usesSamples(e: EffectInfo | undefined): boolean {
+  return e?.group !== 'pixel';
 }

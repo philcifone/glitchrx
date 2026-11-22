@@ -1,12 +1,13 @@
 //! `bitcrush`: keep only the top bits of each sample.
 
-use super::{Effect, EffectInfo, Filter, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Filter, Group, PlacementDefaults, Window};
 use crate::error::Result;
 use crate::params::{Kind, ParamSpec, Params};
 use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "bitcrush",
+    group: Group::Data,
     version: 1,
     audacity: "a bitcrusher (Audacity has none built in; the usual Nyquist plug-ins)",
     summary: "Reduce every sample to `bits` bits of resolution.",

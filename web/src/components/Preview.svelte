@@ -1,9 +1,12 @@
 <script lang="ts">
   // The preview stage: shows the latest render (or the original while
   // comparing), reports its size to the app, draws the region band while
-  // one is dragged, and hosts the compare and exact buttons.
+  // one is dragged, hosts the compare button, and the mask painter while a
+  // step's mask is being edited. The preview settles to an exact render by
+  // itself, so there is no button for that.
   import { onMount } from 'svelte';
   import { app } from '../lib/app.svelte';
+  import MaskPainter from './MaskPainter.svelte';
 
   let { onopen }: { onopen: () => void } = $props();
   let box: HTMLDivElement;
@@ -35,6 +38,7 @@
     app.compare(true);
   }
   const release = () => app.compare(false);
+
 </script>
 
 <div class="box" bind:this={box}>
@@ -63,6 +67,11 @@
         <div class="shade" style:top="{r.e}%" style:bottom="0"></div>
       </div>
     {/if}
+    {#if app.masking && !app.comparing && app.maskTarget}
+      <!-- What is being painted, and Done, are in the top bar: nothing
+           floats over the photo while painting. -->
+      <MaskPainter {rect} />
+    {/if}
   {:else if !app.doc}
     <div class="empty">
       <p>Open a photo to start: JPEG, PNG or TIFF.</p>
@@ -76,7 +85,7 @@
   {#if app.busy || app.working}
     <div class="progress" aria-hidden="true"></div>
   {/if}
-  {#if app.working}
+  {#if app.working && !app.masking}
     <div class="working" role="status">{app.working}</div>
   {:else if app.heavy}
     <div class="working heavy" role="status">
@@ -86,15 +95,6 @@
   {/if}
 
   {#if app.doc && app.imageUrl}
-    <button
-      class="exact"
-      class:on={app.exact}
-      onclick={() => app.render('exact')}
-      disabled={app.exact || !!app.working}
-      title="Render at full resolution, exactly like the export. Slower; long reverb tails differ most in the live preview."
-    >
-      {app.exact ? 'Exact' : 'Make exact'}
-    </button>
     <button
       class="compare"
       class:on={app.comparing}
@@ -172,7 +172,6 @@
 
   /* Floating "glass" elements over the photo: blurred, rounded pills. */
   .working,
-  .exact,
   .compare {
     background: var(--glass);
     backdrop-filter: saturate(180%) blur(16px);
@@ -228,22 +227,12 @@
     flex: none;
   }
 
-  .exact,
   .compare {
     position: absolute;
     bottom: 12px;
     min-height: 34px;
     padding: 6px 16px;
     font-size: 0.9rem;
-  }
-
-  .exact {
-    left: 12px;
-  }
-
-  .exact.on {
-    opacity: 1;
-    color: var(--accent);
   }
 
   .compare {
@@ -254,7 +243,6 @@
     -webkit-touch-callout: none;
   }
 
-  .exact:hover:not(:disabled),
   .compare:hover:not(:disabled) {
     background: var(--glass);
   }

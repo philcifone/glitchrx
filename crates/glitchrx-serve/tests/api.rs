@@ -99,7 +99,7 @@ async fn effects_and_config() {
     assert_eq!(s, StatusCode::OK);
     assert!(h.contains_key(header::CONTENT_SECURITY_POLICY));
     let effects = json_of(&b);
-    assert_eq!(effects.as_array().unwrap().len(), 14);
+    assert_eq!(effects.as_array().unwrap().len(), 15);
     assert_eq!(effects[0]["id"], "echo");
 
     let (_, _, b) = send(
@@ -630,4 +630,156 @@ async fn desktop_routes_are_absent_in_the_browser_server() {
     assert_eq!(json_of(&b)["desktop"], false);
     let (s, _, _) = send(&app, post_json("/api/desktop/open", json!({}))).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+/// Decode an RGBA PNG into (width, height, pixels).
+fn rgba(png_bytes: &[u8]) -> (usize, usize, Vec<u8>) {
+    let dec = png::Decoder::new(std::io::Cursor::new(png_bytes));
+    let mut reader = dec.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+    let info = reader.next_frame(&mut buf).unwrap();
+    assert_eq!(info.color_type, png::ColorType::Rgba);
+    buf.truncate(info.buffer_size());
+    (info.width as usize, info.height as usize, buf)
+}
+
+#[tokio::test]
+async fn masks_travel_and_show() {
+    let app = app(None, None);
+    let doc = upload(&app, "baseline-420.jpg", fixture("baseline-420.jpg")).await;
+    let id = doc["id"].as_str().unwrap().to_string();
+    // A left-to-right gradient on the second step, at half opacity.
+    let recipe = json!({"steps": [
+        {"effect": "invert", "seed": "1", "params": {"hits": "0"}},
+        {"effect": "bitcrush", "seed": "2", "params": {"opacity": "0.5"},
+         "mask": {"op": [
+            {"shape": "linear", "from": [0.0, 0.5], "to": [1.0, 0.5], "feather": 0.01}]}}]});
+
+    // The mask survives TOML both ways.
+    let (s, _, toml) = send(&app, post_json("/api/recipe/to-toml", recipe.clone())).await;
+    assert_eq!(s, StatusCode::OK);
+    let toml = String::from_utf8(toml).unwrap();
+    assert!(
+        toml.contains("[[step.mask.op]]") && toml.contains("version = 3"),
+        "{toml}"
+    );
+    let req = Request::post("/api/recipe/from-toml")
+        .body(Body::from(toml))
+        .unwrap();
+    let (s, _, back) = send(&app, req).await;
+    assert_eq!(s, StatusCode::OK);
+    // Defaults come back written out (`mode = "add"`), so they read clearly.
+    let mut expected = recipe["steps"][1]["mask"].clone();
+    expected["op"][0]["mode"] = json!("add");
+    assert_eq!(json_of(&back)["steps"][1]["mask"], expected);
+
+    // Preview renders with it.
+    let (s, _, b) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/preview"),
+            json!({"recipe": recipe, "max_w": 200, "max_h": 200}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+
+    // The mask view: tinted, opaque on the left, clear on the right.
+    let ask = |step: usize| {
+        post_json(
+            &format!("/api/docs/{id}/mask"),
+            json!({"recipe": recipe, "step": step, "max_w": 200, "max_h": 200,
+                   "tint": [10, 20, 30]}),
+        )
+    };
+    let (s, h, b) = send(&app, ask(1)).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(h[header::CONTENT_TYPE], "image/png");
+    let (w, hgt, px) = rgba(&b);
+    assert!(w <= 200 && hgt <= 200);
+    let alpha = |x: usize| px[((hgt / 2) * w + x) * 4 + 3];
+    assert_eq!(&px[..3], &[10, 20, 30]);
+    assert!(
+        alpha(2) > 230 && alpha(w - 3) < 25,
+        "{} {}",
+        alpha(2),
+        alpha(w - 3)
+    );
+
+    // A step without a mask shows everywhere; a missing step is an error.
+    let (_, _, b) = send(&app, ask(0)).await;
+    assert!(rgba(&b).2.chunks(4).all(|p| p[3] == 255));
+    let (s, _, _) = send(&app, ask(5)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}
+
+fn put_json(uri: &str, v: Value) -> Request<Body> {
+    Request::put(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(v.to_string()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn presets_save_list_replace_delete() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("presets");
+    let app = router(AppState::new(None, None).with_presets(dir.clone()));
+    let get = |uri: &str| Request::get(uri).body(Body::empty()).unwrap();
+
+    let (_, _, b) = send(&app, get("/api/config")).await;
+    assert_eq!(json_of(&b)["presets"], true);
+    let (s, _, b) = send(&app, get("/api/presets")).await;
+    assert_eq!((s, json_of(&b)), (StatusCode::OK, json!([])));
+
+    // Save; names may have spaces (URL-encoded in the path).
+    let uri = "/api/presets/Melt%20down";
+    let body = json!({"recipe": sample_recipe()});
+    let (s, _, b) = send(&app, put_json(uri, body.clone())).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(json_of(&b)["name"], "Melt down");
+    // It is an ordinary recipe file the CLI can replay.
+    let text = fs::read_to_string(dir.join("Melt down.toml")).unwrap();
+    assert!(Recipe::from_toml(&text).is_ok(), "{text}");
+
+    // Taken names need `replace`.
+    let (s, _, _) = send(&app, put_json(uri, body.clone())).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    let one = json!({"recipe": {"steps": [{"effect": "invert", "seed": "3"}]}, "replace": true});
+    let (s, _, _) = send(&app, put_json(uri, one)).await;
+    assert_eq!(s, StatusCode::OK);
+
+    let (_, _, b) = send(&app, get("/api/presets")).await;
+    let list = json_of(&b);
+    assert_eq!(list[0]["name"], "Melt down");
+    assert_eq!(list[0]["effects"], json!(["invert"]));
+    let (s, _, b) = send(&app, get(uri)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(json_of(&b)["steps"][0]["seed"], "3");
+
+    // Bad names and empty recipes are refused; nothing leaves the directory.
+    for bad in ["/api/presets/..%2Fescape", "/api/presets/.hidden"] {
+        let (s, _, _) = send(&app, put_json(bad, body.clone())).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{bad}");
+    }
+    assert!(!tmp.path().join("escape.toml").exists());
+    let (s, _, _) = send(&app, put_json("/api/presets/empty", json!({"recipe": {}}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    let del = || Request::delete(uri).body(Body::empty()).unwrap();
+    assert_eq!(send(&app, del()).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(send(&app, del()).await.0, StatusCode::NOT_FOUND);
+
+    // A server without a presets directory says so.
+    let plain = app_without_presets();
+    let (_, _, b) = send(&plain, get("/api/config")).await;
+    assert_eq!(json_of(&b)["presets"], false);
+    assert_eq!(
+        send(&plain, get("/api/presets")).await.0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+fn app_without_presets() -> Router {
+    app(None, None)
 }

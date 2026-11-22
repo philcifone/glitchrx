@@ -14,8 +14,12 @@ export interface ParamInfo {
   placement: boolean;
 }
 
+/** Picker section. Pixel effects work on whole pixels: no encoding or channels. */
+export type EffectGroup = 'audio' | 'data' | 'pixel';
+
 export interface EffectInfo {
   id: string;
+  group: EffectGroup;
   version: number;
   summary: string;
   details: string;
@@ -56,6 +60,8 @@ export interface EncodingInfo {
 export interface ServerConfig {
   /** Running in the desktop app: native Open and Save dialogs. */
   desktop: boolean;
+  /** Saved presets are available on this server. */
+  presets: boolean;
   version: string;
   browse: boolean;
   root_name: string | null;
@@ -69,12 +75,59 @@ export interface ServerConfig {
  */
 export type Channels = 1 | 2 | 3;
 
+/** How a mask operation combines with the mask so far. */
+export type MaskMode = 'add' | 'subtract' | 'intersect';
+
+/** One stroke of a brush component. */
+export interface Stroke {
+  /** Take back this brush's own paint instead of adding to it. */
+  erase?: boolean;
+  /** Diameter as a share of the picture's longer side. */
+  size: number;
+  hardness: number;
+  /** Flat x, y list, as fractions of the picture. */
+  points: number[];
+}
+
+/**
+ * One mask component (see crates/glitchrx-core/src/mask.rs). Positions are
+ * fractions of the picture (x of the width, y of the height); sizes are
+ * fractions of its longer side.
+ */
+export type MaskOp = MaskCommon &
+  (
+    | { shape: 'brush'; stroke: Stroke[] }
+    | { shape: 'linear'; from: [number, number]; to: [number, number] }
+    /** A circle: centre `from`, edge through `to`. Hard-edged unless `hardness` < 1. */
+    | { shape: 'radial'; from: [number, number]; to: [number, number]; hardness?: number }
+    | { shape: 'brightness'; low: number; high: number; soft: number }
+  );
+
+/** What every mask component has besides its shape. */
+export interface MaskCommon {
+  mode: MaskMode;
+  /** How strongly it counts, 0..1 (default 1). */
+  opacity?: number;
+  /** Blur of its edges, as a share of the longer side (default 0). */
+  feather?: number;
+}
+
+export type MaskShape = MaskOp['shape'];
+
+/** Where a step's result shows. The server omits empty and default fields. */
+export interface Mask {
+  invert?: boolean;
+  op?: MaskOp[];
+}
+
 /** A step as sent to the server. Seeds are strings: they are full u64s. */
 export interface StepDto {
   effect: string;
   effect_version?: number;
   seed: string;
+  /** Effect parameters, plus the step keys encoding, channels and opacity. */
   params: Record<string, string>;
+  mask?: Mask;
 }
 
 export interface RecipeDto {
@@ -96,6 +149,17 @@ export interface RecipeState {
   encoding: string;
   channels: Channels;
   steps: StepState[];
+}
+
+/** A saved preset, as listed. */
+export interface PresetInfo {
+  name: string;
+  steps: number;
+  effects: string[];
+  /** Seconds since 1970. */
+  modified: number;
+  /** Why this build cannot use it (an effect version that moved on, say). */
+  error?: string;
 }
 
 export interface BrowseEntry {

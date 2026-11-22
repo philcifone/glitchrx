@@ -4,6 +4,7 @@ import type { EffectInfo } from './types';
 
 const effect = (hits: string, random_within = false): EffectInfo => ({
   id: 'x',
+  group: 'audio',
   version: 1,
   audacity: 'X',
   summary: '',

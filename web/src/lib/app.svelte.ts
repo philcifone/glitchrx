@@ -9,6 +9,20 @@ import * as api from './api';
 import { ApiError, TooHeavyError } from './api';
 import { History } from './history';
 import { LatestOnly } from './latest';
+import {
+  DEFAULT_TOOL,
+  MASK_TINT,
+  afterRemoval,
+  cleanTool,
+  emptyMask,
+  insertOp,
+  migrateMask,
+  newComponent,
+  pasteOps,
+  withMode,
+  type ToolState,
+} from './mask';
+import { usesSamples } from './palette';
 import { usesSeed } from './seed';
 import { shakeParams } from './shake';
 import type {
@@ -16,9 +30,16 @@ import type {
   DocInfo,
   EffectInfo,
   ExportFormat,
+  Mask,
+  MaskMode,
+  MaskOp,
+  MaskShape,
+  Stroke,
+  PresetInfo,
   RecipeDto,
   RecipeState,
   ServerConfig,
+  StepDto,
   StepState,
 } from './types';
 
@@ -27,6 +48,8 @@ export const DEFAULT_ENCODING = 'u8';
 /** Step parameter keys that override the recipe's encoding and channels. */
 export const ENCODING_KEY = 'encoding';
 export const CHANNELS_KEY = 'channels';
+/** Step key for how strongly the result is blended over the step's input. */
+export const OPACITY_KEY = 'opacity';
 /** How long the region band stays on the preview after a drag ends. */
 const REGION_LINGER_MS = 900;
 /** After the last change, wait this long before a sharper render (SPEC 10.2). */
@@ -37,6 +60,24 @@ const RECIPE_KEY = 'glitchrx.recipe';
 /** The open photo's server id, so a reload (iOS discards background tabs
  * often) can pick the same photo up again while the server still has it. */
 const DOC_KEY = 'glitchrx.doc';
+const TOOL_KEY = 'glitchrx.maskTool';
+const NEW_PHOTO_KEY = 'glitchrx.newPhoto';
+
+/** What opening another photo does with the steps already there. */
+export type NewPhotoChoice = 'ask' | 'keep' | 'fresh';
+
+function loadNewPhoto(): NewPhotoChoice {
+  const v = storageGet(NEW_PHOTO_KEY);
+  return v === 'keep' || v === 'fresh' ? v : 'ask';
+}
+
+function loadTool(): ToolState {
+  try {
+    return cleanTool(JSON.parse(storageGet(TOOL_KEY) ?? 'null'));
+  } catch {
+    return { ...DEFAULT_TOOL };
+  }
+}
 
 let uidCounter = 0;
 /** Unique within this page. (crypto.randomUUID needs HTTPS; LAN use is HTTP.) */
@@ -50,13 +91,16 @@ const emptyRecipe = (): RecipeState => ({ encoding: DEFAULT_ENCODING, channels: 
 /**
  * A recipe from storage or a file, in the current shape. Recipes saved by
  * the 2a GUI carry `mode` and `restart` and no encoding; those fields are
- * dropped and the defaults filled in.
+ * dropped and the defaults filled in. Masks from before components had one
+ * operation per brush stroke; those become brushes.
  */
 function normalize(r: Partial<RecipeState>, known: (effect: string) => boolean): RecipeState {
   return {
     encoding: typeof r.encoding === 'string' ? r.encoding : DEFAULT_ENCODING,
     channels: r.channels === 2 || r.channels === 3 ? r.channels : 1,
-    steps: (r.steps ?? []).filter((s) => known(s.effect)),
+    steps: (r.steps ?? [])
+      .filter((s) => known(s.effect))
+      .map((s) => (s.mask ? { ...s, mask: migrateMask(s.mask) } : s)),
   };
 }
 
@@ -116,8 +160,45 @@ export class App {
   canUndo = $state(false);
   canRedo = $state(false);
 
+  /** Saved presets, as last listed. */
+  presets = $state<PresetInfo[]>([]);
+
+  /** The step whose mask is being edited on the preview, by uid. */
+  masking = $state<string | null>(null);
+  /**
+   * The mask component being edited (its index in the mask), or null.
+   * Its handles show on the photo, and the photo's gestures act on it.
+   */
+  activeOp = $state<number | null>(null);
+  /**
+   * Every selected component (the active one included). Opacity and
+   * feather changes, copy and cut apply to all of them; a long press adds
+   * to the selection.
+   */
+  selected = $state<number[]>([]);
+  /** Components copied or cut, ready to paste into any step's mask. */
+  maskClipboard = $state<MaskOp[]>([]);
+  /** Opening another photo: ask, keep the steps, or start fresh (per device). */
+  newPhoto = $state<NewPhotoChoice>(loadNewPhoto());
+  /** Steps carried onto a photo just opened, waiting for keep or start fresh (0: not asking). */
+  askNewPhoto = $state(0);
+  /** Brush and gradient settings for painting masks. */
+  tool = $state<ToolState>(loadTool());
+  /** Blob URL of the mask overlay for the step being painted. */
+  maskUrl = $state<string | null>(null);
+  /**
+   * Revisions: `revision` counts recipe changes; the others say which
+   * revision the shown preview and mask overlay were rendered from. The
+   * painter keeps a fresh stroke on screen until a render includes it.
+   */
+  revision = $state(0);
+  imageRevision = $state(0);
+  maskRevision = $state(0);
+
   private history = new History(JSON.stringify(emptyRecipe()));
   private queue = new LatestOnly(() => (this.busy = false));
+  private maskQueue = new LatestOnly();
+  private maskKey = '';
   private box: Box = { w: 0, h: 0, dpr: 1 };
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private originalKey = '';
@@ -164,11 +245,15 @@ export class App {
   }
 
   /**
-   * Whether the preview should settle to an exact render: some enabled
-   * step's effect cannot be previewed at scale (the phaser).
+   * Whether the preview should settle to an exact render once changes
+   * stop: whenever any step runs. A live preview glitches a screen-sized
+   * copy, and pixel-level texture cannot scale with it, so only a
+   * full-resolution render shows what the export will be (Phil,
+   * 2026-11-22: exports did not match what he had liked on screen). On
+   * 20-26 MP photos that render takes about 0.3-1.6 s.
    */
   get needsExact(): boolean {
-    return this.recipe.steps.some((s) => s.enabled && this.effect(s.effect)?.exact_preview);
+    return this.recipe.steps.some((s) => s.enabled);
   }
 
   /** Whether "re-roll all" would change anything. */
@@ -210,8 +295,14 @@ export class App {
       const doc = await load();
       this.doc = doc;
       storageSet(DOC_KEY, doc.id);
+      // Steps from the last photo: keep them, clear them, or ask.
+      const carried = this.recipe.steps.length;
+      if (carried && this.newPhoto === 'fresh') this.startFresh();
+      else if (carried && this.newPhoto === 'ask') this.askNewPhoto = carried;
       this.setImage(null);
       this.setOriginal(null, '');
+      this.setMaskUrl(null);
+      this.maskKey = '';
       this.heavy = null;
       this.error = null;
       this.render('full');
@@ -220,6 +311,24 @@ export class App {
     } finally {
       this.working = null;
     }
+  }
+
+  /** Clear the steps for a new photo. Undo brings them back. */
+  startFresh(): void {
+    this.askNewPhoto = 0;
+    if (!this.recipe.steps.length) return;
+    this.stopMasking();
+    this.recipe.steps = [];
+    this.changed();
+  }
+
+  keepSteps(): void {
+    this.askNewPhoto = 0;
+  }
+
+  setNewPhotoChoice(choice: NewPhotoChoice): void {
+    this.newPhoto = choice;
+    storageSet(NEW_PHOTO_KEY, choice);
   }
 
   // -------------------------------------------------------------------------
@@ -234,11 +343,12 @@ export class App {
       channels: r.channels,
       steps: r.steps
         .filter((s) => s.enabled)
-        .map(({ effect, effect_version, seed, params }) => ({
+        .map(({ effect, effect_version, seed, params, mask }) => ({
           effect,
           ...(effect_version === undefined ? {} : { effect_version }),
           seed,
           params,
+          ...(mask ? { mask } : {}),
         })),
     };
   }
@@ -249,6 +359,7 @@ export class App {
 
   /** Call after every recipe mutation. */
   changed(commit = true): void {
+    this.revision++;
     this.render('fast');
     if (commit) this.commit();
   }
@@ -276,6 +387,18 @@ export class App {
     this.canUndo = this.history.canUndo;
     this.canRedo = this.history.canRedo;
     storageSet(RECIPE_KEY, snap);
+    // Undoing past "Add mask" ends editing; undoing an added component
+    // moves the selection to the one before it.
+    if (this.masking) {
+      const n = this.step(this.masking)?.mask?.op?.length;
+      if (n === undefined) this.stopMasking();
+      else {
+        if (this.activeOp !== null && this.activeOp >= n) this.activeOp = n ? n - 1 : null;
+        this.selected = this.selected.filter((i) => i < n);
+        if (this.activeOp !== null && !this.selected.includes(this.activeOp)) this.selected.push(this.activeOp);
+      }
+    }
+    this.revision++;
     this.render('fast');
   }
 
@@ -289,6 +412,7 @@ export class App {
   }
 
   removeStep(uid: string): void {
+    if (this.masking === uid) this.stopMasking();
     this.recipe.steps = this.recipe.steps.filter((s) => s.uid !== uid);
     this.changed();
   }
@@ -380,6 +504,260 @@ export class App {
     this.setParam(uid, CHANNELS_KEY, channels === null ? null : String(channels));
   }
 
+  /** A step's opacity, 0..1 (1 unless set). */
+  opacity(step: StepState): number {
+    const v = Number(step.params[OPACITY_KEY]);
+    return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 1;
+  }
+
+  /** Set a step's opacity; 1 removes the key. */
+  setOpacity(uid: string, value: number, commit = true): void {
+    const v = Math.round(Math.min(1, Math.max(0, value)) * 100) / 100;
+    this.setParam(uid, OPACITY_KEY, v >= 1 ? null : String(v), commit);
+  }
+
+  // -------------------------------------------------------------------------
+  // Masks. A mask is a stack of components; each stroke, each finished
+  // handle drag and each added component is one history entry.
+
+  /**
+   * Add a component to a step's mask (creating the mask if needed), make
+   * it the active one and start editing.
+   */
+  addComponent(uid: string, shape: MaskShape): void {
+    const s = this.step(uid);
+    if (!s) return;
+    s.mask ??= emptyMask();
+    const ops = s.mask.op ?? [];
+    const aspect = this.doc ? this.doc.width / this.doc.height : 1;
+    const { ops: next, index } = insertOp(ops, newComponent(shape, aspect, ops.length));
+    s.mask.op = next;
+    if (shape === 'brush') this.setTool({ tool: 'paint' });
+    this.changed();
+    this.startMasking(uid, index);
+  }
+
+  /** Make a component the active one, and the only one selected. */
+  selectComponent(uid: string, index: number): void {
+    if (this.masking !== uid) this.startMasking(uid, index);
+    else {
+      this.activeOp = index;
+      this.selected = [index];
+    }
+  }
+
+  /**
+   * Add a component to the selection, or take it out (long press, or
+   * shift / cmd / ctrl click). The active one stays put unless it is the
+   * one taken out.
+   */
+  toggleSelected(uid: string, index: number): void {
+    if (this.masking !== uid) return this.startMasking(uid, index);
+    if (!this.selected.includes(index)) {
+      this.selected = [...this.selected, index].sort((a, b) => a - b);
+      this.activeOp ??= index;
+      return;
+    }
+    this.selected = this.selected.filter((i) => i !== index);
+    if (this.activeOp === index) this.activeOp = this.selected.at(-1) ?? null;
+  }
+
+  /** The components that copy, cut and the sliders act on. */
+  private targets(uid: string): number[] {
+    const n = this.step(uid)?.mask?.op?.length ?? 0;
+    if (this.masking !== uid) return [];
+    return this.selected.filter((i) => i < n);
+  }
+
+  /** Set opacity or feather on every selected component. */
+  setOpsBlend(uid: string, patch: { opacity?: number; feather?: number }, commit = true): void {
+    const ops = this.step(uid)?.mask?.op;
+    if (!ops) return;
+    for (const i of this.targets(uid)) {
+      const op = ops[i];
+      // Defaults are left out, so recipes stay short.
+      if (patch.opacity !== undefined) {
+        if (patch.opacity >= 1) delete op.opacity;
+        else op.opacity = patch.opacity;
+      }
+      if (patch.feather !== undefined) {
+        if (patch.feather <= 0) delete op.feather;
+        else op.feather = patch.feather;
+      }
+    }
+    this.changed(commit);
+  }
+
+  /** Copy the selected components (or, when not editing, the whole mask). */
+  copyMaskOps(uid: string): void {
+    const ops = this.step(uid)?.mask?.op ?? [];
+    const pick = this.masking === uid ? this.targets(uid) : ops.map((_, i) => i);
+    this.maskClipboard = $state.snapshot(pick.map((i) => ops[i])) as MaskOp[];
+  }
+
+  /** Copy the selected components, then remove them: with paste, a move. */
+  cutMaskOps(uid: string): void {
+    const pick = this.targets(uid);
+    if (!pick.length) return;
+    this.copyMaskOps(uid);
+    this.removeMaskOps(uid, pick);
+  }
+
+  /** Paste copied components into a step's mask and select them. */
+  pasteMaskOps(uid: string): void {
+    const s = this.step(uid);
+    if (!s || !this.maskClipboard.length) return;
+    s.mask ??= emptyMask();
+    // A plain copy: structuredClone cannot copy the reactive proxies.
+    const { ops, indices } = pasteOps(s.mask.op ?? [], $state.snapshot(this.maskClipboard) as MaskOp[]);
+    s.mask.op = ops;
+    this.changed();
+    this.startMasking(uid, indices[0]);
+    this.selected = indices;
+  }
+
+  /** Change mask-wide settings (invert, feather). */
+  updateMask(uid: string, patch: Partial<Mask>, commit = true): void {
+    const s = this.step(uid);
+    if (!s?.mask) return;
+    Object.assign(s.mask, patch);
+    this.changed(commit);
+  }
+
+  /** Add a stroke to a brush component. */
+  addStroke(uid: string, index: number, stroke: Stroke): void {
+    const op = this.step(uid)?.mask?.op?.[index];
+    if (op?.shape !== 'brush') return;
+    op.stroke.push(stroke);
+    this.changed();
+  }
+
+  /** Change one component's values (a radial's ends, a brightness range). */
+  updateMaskOp(uid: string, index: number, patch: Partial<MaskOp>, commit = true): void {
+    const ops = this.step(uid)?.mask?.op;
+    if (!ops?.[index]) return;
+    Object.assign(ops[index], patch);
+    this.changed(commit);
+  }
+
+  setMaskOpMode(uid: string, index: number, mode: MaskMode): void {
+    const m = this.step(uid)?.mask;
+    if (!m?.op?.[index]) return;
+    const { ops, order } = withMode(m.op, index, mode);
+    m.op = ops;
+    if (this.masking === uid) {
+      if (this.activeOp !== null) this.activeOp = order.indexOf(this.activeOp);
+      this.selected = this.selected.map((i) => order.indexOf(i)).sort((a, b) => a - b);
+    }
+    this.changed();
+  }
+
+  /**
+   * Remove components. Removing the last one removes the mask itself (an
+   * empty mask would hide the step everywhere), which ends editing.
+   */
+  removeMaskOps(uid: string, indices: number[]): void {
+    const s = this.step(uid);
+    const m = s?.mask;
+    if (!s || !m?.op) return;
+    m.op = m.op.filter((_, i) => !indices.includes(i));
+    if (m.op.length === 0) {
+      if (this.masking === uid) this.stopMasking();
+      delete s.mask;
+    } else if (this.masking === uid) {
+      this.activeOp = afterRemoval(this.activeOp, indices);
+      this.selected = this.selected.flatMap((i) => {
+        const j = afterRemoval(i, indices);
+        return j === null ? [] : [j];
+      });
+    }
+    this.changed();
+  }
+
+  /** The step being edited and its number in the stack (from 1). */
+  get maskTarget(): { n: number; step: StepState } | null {
+    const i = this.recipe.steps.findIndex((s) => s.uid === this.masking);
+    return i < 0 ? null : { n: i + 1, step: this.recipe.steps[i] };
+  }
+
+  /**
+   * Edit this step's mask on the preview, with component `index` active
+   * (by default the last one, usually the newest).
+   */
+  startMasking(uid: string, index?: number): void {
+    const n = this.step(uid)?.mask?.op?.length ?? 0;
+    this.masking = uid;
+    this.activeOp = index ?? (n ? n - 1 : null);
+    this.selected = this.activeOp === null ? [] : [this.activeOp];
+    this.maskKey = '';
+    this.refreshMask();
+  }
+
+  stopMasking(): void {
+    this.masking = null;
+    this.activeOp = null;
+    this.selected = [];
+    this.maskKey = '';
+    this.setMaskUrl(null);
+  }
+
+  setTool(patch: Partial<ToolState>): void {
+    Object.assign(this.tool, patch);
+    storageSet(TOOL_KEY, JSON.stringify($state.snapshot(this.tool)));
+    if (patch.show !== undefined) {
+      this.maskKey = '';
+      if (patch.show) this.refreshMask();
+      else this.setMaskUrl(null);
+    }
+  }
+
+  /** The revision the painter should compare its fresh strokes with. */
+  get paintedRevision(): number {
+    return this.tool.show && this.maskUrl ? this.maskRevision : this.imageRevision;
+  }
+
+  /**
+   * Fetch the overlay for the step being painted. The mask comes from the
+   * server, so what is shown is exactly what renders; the request shares
+   * the preview's cache for the picture arriving at the step.
+   */
+  private refreshMask(): void {
+    const doc = this.doc;
+    const uid = this.masking;
+    if (!doc || !uid || !this.tool.show) return;
+    const recipe = this.dto();
+    // The step's position among the steps sent (enabled ones only).
+    const index = this.recipe.steps.filter((s) => s.enabled).findIndex((s) => s.uid === uid);
+    if (index < 0) {
+      this.setMaskUrl(null);
+      return;
+    }
+    const { w, h } = this.target('fast');
+    const key = JSON.stringify([doc.id, index, w, h, recipe]);
+    if (key === this.maskKey) return;
+    this.maskKey = key;
+    const rev = this.revision;
+    this.maskQueue.request(async () => {
+      try {
+        const blob = await api.maskView(doc.id, recipe, index, w, h, MASK_TINT);
+        if (this.doc?.id !== doc.id || this.masking !== uid) return;
+        const url = URL.createObjectURL(blob);
+        await preload(url);
+        this.setMaskUrl(url);
+        this.maskRevision = rev;
+      } catch (e) {
+        // A mask too heavy to show live is not worth an error banner.
+        if (!(e instanceof ApiError && e.status === 503)) this.fail(e);
+        this.maskKey = '';
+      }
+    });
+  }
+
+  private setMaskUrl(url: string | null): void {
+    if (this.maskUrl) URL.revokeObjectURL(this.maskUrl);
+    this.maskUrl = url;
+  }
+
   /** Draw a region band on the preview while it is being dragged. */
   showRegion(s: number, e: number): void {
     clearTimeout(this.regionTimer);
@@ -399,6 +777,7 @@ export class App {
 
   /** Replace the recipe with one loaded from a file. */
   loadRecipe(dto: RecipeDto): void {
+    this.stopMasking(); // every step is replaced
     this.recipe = normalize(
       {
         encoding: dto.encoding,
@@ -408,6 +787,81 @@ export class App {
       () => true, // the server already checked the effects
     );
     this.changed();
+  }
+
+  /** Add a recipe's steps after the current ones. */
+  appendRecipe(dto: RecipeDto): void {
+    // The added steps keep the sample format they were saved with, even if
+    // this recipe's differs. (Pixel effects have none to keep.)
+    const pin = (s: StepDto) =>
+      !usesSamples(this.effect(s.effect))
+        ? s.params
+        : {
+            ...(dto.encoding !== this.recipe.encoding ? { [ENCODING_KEY]: dto.encoding } : {}),
+            ...(dto.channels !== this.recipe.channels ? { [CHANNELS_KEY]: String(dto.channels) } : {}),
+            ...s.params,
+          };
+    for (const s of dto.steps) {
+      this.recipe.steps.push({ ...s, params: { ...pin(s) }, uid: newUid(), enabled: true });
+    }
+    this.changed();
+  }
+
+  // -------------------------------------------------------------------------
+  // Presets: recipes saved on the server, shared by every device using it.
+
+  async loadPresets(): Promise<void> {
+    if (!this.config?.presets) return;
+    try {
+      this.presets = await api.listPresets();
+    } catch (e) {
+      this.fail(e);
+    }
+  }
+
+  /** Use a preset: replace the recipe, or add its steps (`append`). Undoable. */
+  async applyPreset(name: string, append = false): Promise<void> {
+    try {
+      const dto = await api.getPreset(name);
+      if (append) this.appendRecipe(dto);
+      else this.loadRecipe(dto);
+      this.flash(`${append ? 'Added' : 'Loaded'} ${name}`);
+    } catch (e) {
+      this.fail(e);
+    }
+  }
+
+  /**
+   * Save the recipe as a preset. A taken name is replaced only after the
+   * user confirms. Returns true once saved.
+   */
+  async savePreset(name: string): Promise<boolean> {
+    const recipe = this.dto();
+    try {
+      let saved: string;
+      try {
+        saved = await api.savePreset(name, recipe, false);
+      } catch (e) {
+        if (!(e instanceof ApiError && e.status === 409)) throw e;
+        if (!confirm(`Replace the preset "${name.trim()}"?`)) return false;
+        saved = await api.savePreset(name, recipe, true);
+      }
+      this.flash(`Saved preset ${saved}`);
+      await this.loadPresets();
+      return true;
+    } catch (e) {
+      this.fail(e);
+      return false;
+    }
+  }
+
+  async deletePreset(name: string): Promise<void> {
+    try {
+      await api.deletePreset(name);
+      await this.loadPresets();
+    } catch (e) {
+      this.fail(e);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -442,9 +896,12 @@ export class App {
     const recipe = this.dto();
     const exact = quality === 'exact';
     const { w, h } = this.target(exact ? 'full' : quality);
+    const rev = this.revision;
+    // The progress line shows while it works; no message, since settling
+    // to exact happens after every change.
     this.busy = true;
-    if (exact) this.working = 'Rendering at full resolution';
-    this.queue.request(() => this.runPreview(doc.id, recipe, w, h, exact));
+    this.queue.request(() => this.runPreview(doc.id, recipe, w, h, exact, rev));
+    if (this.masking) this.refreshMask();
     if (!exact && this.needsExact) {
       // Approximate while things change; exact once they stop.
       this.idleTimer = setTimeout(() => this.render('exact'), EXACT_IDLE_MS);
@@ -460,6 +917,7 @@ export class App {
     w: number,
     h: number,
     exact: boolean,
+    rev: number,
   ): Promise<void> {
     try {
       const res = await api.preview(docId, recipe, w, h, exact);
@@ -467,6 +925,7 @@ export class App {
       const url = URL.createObjectURL(res.blob);
       await preload(url);
       this.setImage(url);
+      this.imageRevision = rev;
       this.renderMs = res.ms;
       this.exact = exact;
       this.heavy = null;
@@ -475,8 +934,6 @@ export class App {
       // Too heavy is not an error: keep the last image and say so.
       if (e instanceof TooHeavyError) this.heavy = e.message;
       else this.fail(e);
-    } finally {
-      if (exact) this.working = null;
     }
   }
 

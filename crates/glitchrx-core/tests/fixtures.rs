@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use glitchrx_core::codec::{self, Format};
 use glitchrx_core::effects::REGISTRY;
+use glitchrx_core::mask::{Mask, MaskOp, Mode, Shape, Stroke};
 use glitchrx_core::{Encoding, Raster, Recipe, Step, Units};
 
 fn fixture_dir() -> PathBuf {
@@ -51,6 +52,74 @@ fn mean_diff(a: &Raster, b: &Raster) -> f64 {
         .map(|(x, y)| x.abs_diff(*y) as u64)
         .sum();
     sum as f64 / a.bytes.len() as f64
+}
+
+/// A mask that uses every kind of component, every mode, invert, and
+/// component feather and opacity.
+fn busy_mask() -> Mask {
+    Mask {
+        invert: true,
+        ops: vec![
+            // Feathered: a brightness range follows pixel-level detail,
+            // which a preview-sized picture cannot have, and the blur keeps
+            // that speckle from swamping the placement check below.
+            MaskOp {
+                feather: 0.01,
+                ..MaskOp::new(
+                    Shape::Brightness {
+                        low: 0.4,
+                        high: 0.9,
+                        soft: 0.1,
+                    },
+                    Mode::Add,
+                )
+            },
+            MaskOp {
+                feather: 0.01,
+                ..MaskOp::new(
+                    Shape::Brush {
+                        strokes: vec![
+                            Stroke {
+                                erase: false,
+                                size: 0.08,
+                                hardness: 0.4,
+                                points: vec![0.1, 0.1, 0.4, 0.5, 0.9, 0.6],
+                            },
+                            Stroke {
+                                erase: true,
+                                size: 0.03,
+                                hardness: 0.7,
+                                points: vec![0.35, 0.45, 0.45, 0.55],
+                            },
+                        ],
+                    },
+                    Mode::Add,
+                )
+            },
+            MaskOp {
+                opacity: 0.6,
+                ..MaskOp::new(
+                    Shape::Linear {
+                        from: [0.0, 0.2],
+                        to: [0.0, 1.0],
+                    },
+                    Mode::Intersect,
+                )
+            },
+            MaskOp {
+                feather: 0.02,
+                opacity: 0.8,
+                ..MaskOp::new(
+                    Shape::Radial {
+                        from: [0.6, 0.5],
+                        to: [0.75, 0.5],
+                        hardness: 1.0,
+                    },
+                    Mode::Subtract,
+                )
+            },
+        ],
+    }
 }
 
 fn recipe(effect: &str, params: &str, seed: u64, encoding: Encoding) -> Recipe {
@@ -157,8 +226,27 @@ fn every_effect_keeps_dimensions_and_stays_in_its_windows() {
     let base = decode("baseline-444.jpg").raster;
     let units = Units::full(base.width, base.height);
     for e in REGISTRY {
-        for enc in [Encoding::U8, Encoding::S16Be, Encoding::S24Le] {
-            let r = recipe(e.id, "hits=5,len=3%", 7, enc);
+        // Masked runs too: a mask and opacity only soften a step's own
+        // change, so they never write outside its windows either.
+        for (enc, masked) in [
+            (Encoding::U8, false),
+            (Encoding::S16Be, false),
+            (Encoding::S24Le, false),
+            (Encoding::U8, true),
+        ] {
+            let mut r = recipe(
+                e.id,
+                if masked {
+                    "hits=5,len=3%,opacity=0.8"
+                } else {
+                    "hits=5,len=3%"
+                },
+                7,
+                enc,
+            );
+            if masked {
+                r.steps[0].mask = Some(busy_mask());
+            }
             let step = &r.prepare_all().unwrap()[0];
             let mut out = base.clone();
             r.apply(&mut out).unwrap();
@@ -170,11 +258,15 @@ fn every_effect_keeps_dimensions_and_stays_in_its_windows() {
             for (i, (a, b)) in base.bytes.iter().zip(&out.bytes).enumerate() {
                 assert!(
                     inside[i] || a == b,
-                    "{} ({enc}) wrote byte {i} outside its windows",
+                    "{} ({enc}, masked {masked}) wrote byte {i} outside its windows",
                     e.id
                 );
             }
-            assert_ne!(out, base, "{} ({enc}) changed nothing", e.id);
+            assert_ne!(
+                out, base,
+                "{} ({enc}, masked {masked}) changed nothing",
+                e.id
+            );
         }
     }
 }
@@ -238,7 +330,51 @@ fn golden_hashes() {
             blake3::hash(&out.bytes).to_hex().to_string(),
         );
     }
+    // Masks and opacity are part of the determinism contract too.
+    let mut out = base.clone();
+    let mut r = recipe("bitcrush", "opacity=0.7", 0xC0FFEE, Encoding::U8);
+    r.steps[0].mask = Some(busy_mask());
+    r.apply(&mut out).unwrap();
+    hashes.insert(
+        "mask/bitcrush".to_string(),
+        blake3::hash(&out.bytes).to_hex().to_string(),
+    );
     insta::assert_yaml_snapshot!(hashes);
+}
+
+/// A mask is drawn in picture coordinates, so a preview-sized mask lands
+/// where the full-size one does. Invert at full strength makes any
+/// misplacement show up as a large error.
+#[test]
+fn masked_previews_resemble_the_export() {
+    let full = decode("baseline-444.jpg").raster;
+    let (pw, ph) = (full.width / 4, full.height / 4);
+    let small = full.downscale(pw, ph);
+    let units = Units {
+        full_width: full.width,
+        full_height: full.height,
+        width: small.width,
+        height: small.height,
+    };
+    let mut r = recipe("invert", "hits=0", 1, Encoding::U8);
+    r.steps[0].mask = Some(busy_mask());
+    let mut export = full.clone();
+    r.apply(&mut export).unwrap();
+    let export = export.downscale(pw, ph);
+    let mut preview = small.clone();
+    r.apply_with(&mut preview.bytes, &units, glitchrx_core::recipe::NEVER)
+        .unwrap();
+    let strength = mean_diff(&small, &export);
+    let error = mean_diff(&preview, &export);
+    println!("masked invert: strength {strength:6.2}  preview error {error:6.2}");
+    assert!(
+        strength > 20.0,
+        "the mask hid too much to test: {strength:.2}"
+    );
+    assert!(
+        error < 4.0,
+        "preview error {error:.2} vs strength {strength:.2}"
+    );
 }
 
 /// A step run on a quarter-size preview should look like the full-size

@@ -1,6 +1,6 @@
 //! `distort`: waveshaping, after Audacity's Distortion.
 
-use super::{Effect, EffectInfo, Filter, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Filter, Group, PlacementDefaults, Window};
 use crate::dsp::db_to_gain;
 use crate::error::Result;
 use crate::params::{Kind, ParamSpec, Params};
@@ -8,6 +8,7 @@ use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "distort",
+    group: Group::Audio,
     version: 1,
     audacity: "Distortion",
     summary: "Drive the samples into a curve: hard clipping, soft saturation, or folding back.",

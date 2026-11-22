@@ -10,6 +10,7 @@
   import { app } from '../lib/app.svelte';
   import { SLIDER_STEPS, percentScale, rowsScale, sliderScale } from '../lib/slider';
   import type { ParamInfo } from '../lib/types';
+  import DualRange from './DualRange.svelte';
 
   let { uid, spec, value }: { uid: string; spec: ParamInfo; value: string | undefined } = $props();
 
@@ -147,43 +148,14 @@
     <div class="ctl">
       {#if region}
         {@const r = region}
-        <!-- Two range inputs stacked on one track. Only their thumbs take
-             pointer events, so each handle can be grabbed where it is.
-             The handle nearer the free side sits on top, so two handles
-             pushed together can always be pulled apart again. -->
-        <div class="dual" class:low-top={r.s > 50}>
-          <div class="fill" style:left="{r.s}%" style:width="{r.e - r.s}%"></div>
-          <input
-            class="lo"
-            type="range"
-            min="0"
-            max="100"
-            step="0.5"
-            value={r.s}
-            oninput={(e) => {
-              const v = Math.min(Number(e.currentTarget.value), r.e);
-              e.currentTarget.value = String(v);
-              dragRegion(v, r.e);
-            }}
-            onchange={endRegion}
-            aria-label="region start (percent from the top)"
-          />
-          <input
-            class="hi"
-            type="range"
-            min="0"
-            max="100"
-            step="0.5"
-            value={r.e}
-            oninput={(e) => {
-              const v = Math.max(Number(e.currentTarget.value), r.s);
-              e.currentTarget.value = String(v);
-              dragRegion(r.s, v);
-            }}
-            onchange={endRegion}
-            aria-label="region end (percent from the top)"
-          />
-        </div>
+        <DualRange
+          lo={r.s}
+          hi={r.e}
+          labelLo="region start (percent from the top)"
+          labelHi="region end (percent from the top)"
+          oninput={dragRegion}
+          onchange={endRegion}
+        />
       {/if}
       <input
         {id}
@@ -250,77 +222,10 @@
     width: 10ch;
   }
 
-  /* Two-handle region slider: two range inputs stacked on one track. */
-  .dual {
-    position: relative;
-    flex: 1;
-    min-width: 0;
-    height: 28px;
-  }
-
-  /* The track, drawn once for both inputs. */
-  .dual::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 50%;
-    height: 4px;
-    border-radius: 2px;
-    transform: translateY(-50%);
-    background: var(--fill-strong);
-  }
-
-  .fill {
-    position: absolute;
-    top: 50%;
-    height: 4px;
-    transform: translateY(-50%);
-    background: var(--accent);
-  }
-
-  .dual input {
-    position: absolute;
-    inset: 0;
-    height: 100%;
-    min-height: 0;
-    pointer-events: none;
-  }
-
-  .dual .hi {
-    z-index: 2;
-  }
-
-  .dual.low-top .lo {
-    z-index: 3;
-  }
-
-  .dual input::-webkit-slider-runnable-track {
-    background: none;
-  }
-
-  .dual input::-webkit-slider-thumb {
-    pointer-events: auto;
-    cursor: grab;
-  }
-
-  .dual input::-moz-range-track,
-  .dual input::-moz-range-progress {
-    background: none;
-  }
-
-  .dual input::-moz-range-thumb {
-    pointer-events: auto;
-    cursor: grab;
-  }
-
   @media (pointer: coarse) {
     .reset {
       min-height: 32px;
       min-width: 32px;
-    }
-    .dual {
-      height: 44px;
     }
   }
 </style>

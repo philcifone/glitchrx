@@ -143,7 +143,12 @@ impl Doc {
             .zip(&keys)
             .take_while(|((cached, _), key)| cached == *key)
             .count();
-        base.steps.truncate(keep);
+        // Drop the cache from the first difference on. A recipe that is a
+        // prefix of the cached chain (the mask view asks for the picture as
+        // it arrives at a step) differs nowhere, so the tail is kept.
+        if keep < keys.len() {
+            base.steps.truncate(keep);
+        }
 
         let mut bytes = match keep {
             0 => base.raster.bytes.clone(),
@@ -158,6 +163,35 @@ impl Doc {
             }
         }
         Ok(Raster::new(size.0, size.1, bytes))
+    }
+
+    /// Step `index`'s mask at preview size, as coverage 0..1 per pixel, with
+    /// the preview's width and height. Brightness operations read the
+    /// picture as it arrives at the step, which comes from the cache. A step
+    /// without a mask shows everywhere.
+    pub fn mask(
+        &self,
+        recipe: &Recipe,
+        index: usize,
+        max_w: usize,
+        max_h: usize,
+        cancel: Cancel<'_>,
+    ) -> Result<(usize, usize, Vec<f32>)> {
+        let step = recipe.steps.get(index).ok_or_else(|| {
+            glitchrx_core::Error::Recipe(format!("there is no step {}", index + 1))
+        })?;
+        recipe.validate()?;
+        let before = Recipe {
+            steps: recipe.steps[..index].to_vec(),
+            ..recipe.clone()
+        };
+        let input = self.preview(&before, max_w, max_h, cancel)?;
+        let (w, h) = (input.width, input.height);
+        let coverage = match &step.mask {
+            Some(m) => m.render(w, h, &input.bytes, cancel)?,
+            None => vec![1.0; w * h],
+        };
+        Ok((w, h, coverage))
     }
 
     /// Bend the full-resolution image, exactly as the CLI would.
@@ -343,5 +377,20 @@ mod tests {
         let a = random_hex(16);
         assert_eq!(a.len(), 32);
         assert_ne!(a, random_hex(16));
+    }
+
+    /// Asking for the picture before a step (the mask view does) keeps the
+    /// steps after it cached.
+    #[test]
+    fn a_prefix_keeps_the_cached_tail() {
+        let d = doc("baseline-420.jpg");
+        let full = recipe(
+            &[("echo", "", 1), ("shift", "", 2), ("stutter", "", 3)],
+            Encoding::U8,
+        );
+        d.preview(&full, 120, 120, NEVER).unwrap();
+        d.mask(&full, 1, 120, 120, NEVER).unwrap();
+        let cached = d.lock().base.as_ref().unwrap().steps.len();
+        assert_eq!(cached, 3);
     }
 }
