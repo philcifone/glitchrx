@@ -2,7 +2,8 @@
 //
 // Picked by Phil from a contact sheet of Lucide icons: playful rather than
 // literal (a mountain for echo, a drum for stutter). The dice stays
-// reserved for re-rolling seeds, and the wand for shaking settings.
+// reserved for re-rolling seeds, and shuffle for shaking settings. Distort
+// is a shell (Phil, 2026-11-22), for its spiralling warp.
 
 import Mountain from '@lucide/svelte/icons/mountain';
 import Copy from '@lucide/svelte/icons/copy';
@@ -16,7 +17,7 @@ import Orbit from '@lucide/svelte/icons/orbit';
 import Drum from '@lucide/svelte/icons/drum';
 import Tornado from '@lucide/svelte/icons/tornado';
 import Footprints from '@lucide/svelte/icons/footprints';
-import Zap from '@lucide/svelte/icons/zap';
+import Shell from '@lucide/svelte/icons/shell';
 import Rabbit from '@lucide/svelte/icons/rabbit';
 import ArrowDownWideNarrow from '@lucide/svelte/icons/arrow-down-wide-narrow';
 import Sparkles from '@lucide/svelte/icons/sparkles';
@@ -38,7 +39,7 @@ const ICONS: Record<string, IconComponent> = {
   // a spark for distortion, a rabbit for speed.
   phaser: Tornado,
   wahwah: Footprints,
-  distort: Zap,
+  distort: Shell,
   speed: Rabbit,
   // Phase 3: the sort glyph, wide to narrow, as pixels settle by brightness.
   pixelsort: ArrowDownWideNarrow,

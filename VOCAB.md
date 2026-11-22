@@ -71,7 +71,7 @@ Background, mostly from the archived JPEG byte engine (`archive/jpeg-bytes`). JP
 - **Opacity.** How much of a step's result is blended over the picture it received, 0 to 1. A step key like `encoding`, so `--echo opacity=0.5` works on the CLI. With a mask, the two multiply.
 - **Strength slider (deferred).** A single 0-100 control per effect that would drive several of its parameters at once. Waiting for the tuning pass; opacity covers the simple case.
 - **Preset.** A recipe saved under a name on the server (`~/.config/glitchrx/presets/NAME.toml`), shared by every device that uses the server. Your own looks, not built-in ones. Use one to replace the steps, or add its steps to the current recipe.
-- **Re-roll vs shake.** Re-roll (dice) gives a step a new seed, which moves where its hits land. Shake (wand) gives it new random settings for its own parameters, leaving placement and encoding alone. Both write into the recipe, so results stay replayable.
+- **Re-roll vs shake.** Re-roll (dice) gives a step a new seed, which moves where its hits land. Shake (shuffle arrows) gives it new random settings for its own parameters, leaving placement and encoding alone. Both write into the recipe, so results stay replayable.
 - **Recipe.** A TOML file (version 3) that lists the effects, parameters, seeds, opacities and masks, plus the recipe-wide encoding and channels. Replaying it on the same input gives the same output. Version 2 files (no opacity or masks) still load.
 - **Region.** The part of the raster where hits may land, for example `40%:60%`. In the raster, percent of the data is percent of the image height, so that really is the middle band.
 - **Seed.** The number that drives all randomness. The same seed always gives the same result.

@@ -2,14 +2,14 @@
   // A step's blend settings: opacity, and the mask that decides where the
   // step's result shows. The mask is a list of components; tapping one
   // makes it active, and its handles (or its brush) work on the preview
-  // (MaskPainter). The + row adds another.
+  // (MaskPainter). The + row adds another; removing the last one removes
+  // the mask, so the step shows everywhere again.
   import Paintbrush from '@lucide/svelte/icons/paintbrush';
   import Eraser from '@lucide/svelte/icons/eraser';
   import Blinds from '@lucide/svelte/icons/blinds';
   import CircleDot from '@lucide/svelte/icons/circle-dot';
   import SunMedium from '@lucide/svelte/icons/sun-medium';
   import Plus from '@lucide/svelte/icons/plus';
-  import Trash2 from '@lucide/svelte/icons/trash-2';
   import X from '@lucide/svelte/icons/x';
   import { app } from '../lib/app.svelte';
   import { SLIDER_STEPS } from '../lib/slider';
@@ -110,9 +110,6 @@
       {:else}
         <button onclick={() => app.startMasking(uid)} disabled={!usable}>Edit</button>
       {/if}
-      <button class="icon danger" onclick={() => app.removeMask(uid)} title="Remove the mask" aria-label="Remove the mask">
-        <Trash2 size={18} strokeWidth={1.75} />
-      </button>
     </div>
 
     <div class="segmented" role="radiogroup" aria-label="Where the glitch shows">
