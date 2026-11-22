@@ -31,15 +31,24 @@ export interface DocInfo {
   name: string;
   /** Root-relative path when opened from the server; null for uploads. */
   path: string | null;
+  /** Upright size in pixels. */
   width: number;
   height: number;
-  encoding: string;
-  subsampling: string;
+  format: 'jpeg' | 'png' | 'tiff';
+  /** EXIF orientation that was applied (1 = none). */
+  orientation: number;
+  has_icc: boolean;
   file_len: number;
-  payload_len: number;
-  restart_interval: number;
-  has_exif_thumbnail: boolean;
-  trailing_len: number;
+  /** Raw RGB bytes the effects work on. */
+  raw_len: number;
+}
+
+/** A sample encoding (Audacity's Import Raw Data choices). */
+export interface EncodingInfo {
+  id: string;
+  /** Bytes per sample. */
+  bytes: number;
+  describe: string;
 }
 
 export interface ServerConfig {
@@ -47,9 +56,11 @@ export interface ServerConfig {
   browse: boolean;
   root_name: string | null;
   max_preview_side: number;
+  encodings: EncodingInfo[];
 }
 
-export type Mode = 'safe' | 'raw';
+/** Mono or stereo: how many interleaved channels the samples form. */
+export type Channels = 1 | 2;
 
 /** A step as sent to the server. Seeds are strings: they are full u64s. */
 export interface StepDto {
@@ -60,8 +71,9 @@ export interface StepDto {
 }
 
 export interface RecipeDto {
-  mode: Mode;
-  restart: string | null;
+  /** Recipe-wide encoding and channels; a step may override them in its params. */
+  encoding: string;
+  channels: Channels;
   steps: StepDto[];
 }
 
@@ -74,8 +86,8 @@ export interface StepState extends StepDto {
 }
 
 export interface RecipeState {
-  mode: Mode;
-  restart: string | null;
+  encoding: string;
+  channels: Channels;
   steps: StepState[];
 }
 
@@ -92,6 +104,4 @@ export interface Listing {
   files: BrowseEntry[];
 }
 
-export type ExportFormat = 'jpeg' | 'png' | 'jpeg-baked';
-
-export type DecodeWord = 'clean' | 'recovered' | 'partial' | 'failed';
+export type ExportFormat = 'tiff' | 'png' | 'jpeg';

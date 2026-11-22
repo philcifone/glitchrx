@@ -60,11 +60,29 @@ export function sliderScale(min: number, max: number, isInt: boolean): SliderSca
   };
 }
 
+/** Round to a precision that suits the magnitude: 0.33, 2.5, 12. */
+const magnitudeRound = (v: number) =>
+  v >= 10 ? Math.round(v) : v >= 1 ? Math.round(v * 10) / 10 : Math.round(v * 100) / 100;
+
+/**
+ * Log scale for sizes in rows, 0.01 .. 64 rows. A fraction of a row is a
+ * sideways offset (a third of the width), whole rows move things down, so
+ * both ends matter and a log scale gives each about half the slider.
+ */
+export const rowsScale: SliderScale = (() => {
+  const lo = Math.log(0.01);
+  const hi = Math.log(64);
+  return {
+    toSlider: (v) => clamp(((Math.log(Math.max(v, 0.01)) - lo) / (hi - lo)) * SLIDER_STEPS, 0, SLIDER_STEPS),
+    fromSlider: (t) => clamp(magnitudeRound(Math.exp(lo + (t / SLIDER_STEPS) * (hi - lo))), 0.01, 64),
+  };
+})();
+
 /** Log scale for percentages, 0.01% .. 100%, used by size parameters. */
 export const percentScale: SliderScale = (() => {
   const lo = Math.log(0.01);
   const hi = Math.log(100);
-  const round = (v: number) => (v >= 10 ? Math.round(v) : v >= 1 ? Math.round(v * 10) / 10 : Math.round(v * 100) / 100);
+  const round = magnitudeRound;
   return {
     toSlider: (v) => clamp(((Math.log(Math.max(v, 0.01)) - lo) / (hi - lo)) * SLIDER_STEPS, 0, SLIDER_STEPS),
     fromSlider: (t) => clamp(round(Math.exp(lo + (t / SLIDER_STEPS) * (hi - lo))), 0.01, 100),

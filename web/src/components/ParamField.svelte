@@ -2,12 +2,13 @@
   // Editor for one effect parameter, chosen by its kind:
   //   int / float  slider (log scale for wide ranges) + exact number
   //   choice       dropdown
-  //   size         text (bytes, 4k, 1m or %) + log slider while it is a percent
-  //   region       start/end sliders while both ends are percents, + text
+  //   size         text (rows, px, % or bytes) + log slider for rows and %
+  //   region       one two-handle slider while both ends are percents, + text;
+  //                dragging draws the band on the preview
   // Sliders update the preview live and record one history entry on release.
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
   import { app } from '../lib/app.svelte';
-  import { SLIDER_STEPS, percentScale, sliderScale } from '../lib/slider';
+  import { SLIDER_STEPS, percentScale, rowsScale, sliderScale } from '../lib/slider';
   import type { ParamInfo } from '../lib/types';
 
   let { uid, spec, value }: { uid: string; spec: ParamInfo; value: string | undefined } = $props();
@@ -38,12 +39,23 @@
     el.value = text;
   }
 
-  // Size: a percent value gets a slider.
+  // Size: a value in rows or percent gets a log slider in that unit.
   const pct = (s: string) => {
     const m = /^\s*([\d.]+)\s*%\s*$/.exec(s);
     return m ? Number(m[1]) : null;
   };
-  const sizePct = $derived(spec.kind === 'size' ? pct(text) : null);
+  const rows = (s: string) => {
+    const m = /^\s*([\d.]+)\s*rows?\s*$/.exec(s);
+    return m ? Number(m[1]) : null;
+  };
+  const sizeSlider = $derived.by(() => {
+    if (spec.kind !== 'size') return null;
+    const p = pct(text);
+    if (p !== null) return { scale: percentScale, value: p, unit: '%' };
+    const r = rows(text);
+    if (r !== null) return { scale: rowsScale, value: r, unit: 'rows' };
+    return null;
+  });
 
   // Region: START:END with both ends in percent gets two sliders.
   const region = $derived.by(() => {
@@ -54,10 +66,15 @@
     return s === null || e === null ? null : { s, e };
   });
 
-  function setRegion(s: number, e: number, commit: boolean) {
-    const v = `${Math.min(s, e)}%:${Math.max(s, e)}%`;
-    if (commit) set(v);
-    else live(v);
+  /** Live region change from a handle; the preview draws the band. */
+  function dragRegion(s: number, e: number) {
+    app.showRegion(s, e);
+    live(`${s}%:${e}%`);
+  }
+
+  function endRegion() {
+    app.commit();
+    app.hideRegion();
   }
 </script>
 
@@ -101,14 +118,15 @@
     </select>
   {:else if spec.kind === 'size'}
     <div class="ctl">
-      {#if sizePct !== null}
+      {#if sizeSlider}
+        {@const sl = sizeSlider}
         <input
           type="range"
           min="0"
           max={SLIDER_STEPS}
           step="1"
-          value={percentScale.toSlider(sizePct)}
-          oninput={(e) => live(`${percentScale.fromSlider(Number(e.currentTarget.value))}%`)}
+          value={sl.scale.toSlider(sl.value)}
+          oninput={(e) => live(`${sl.scale.fromSlider(Number(e.currentTarget.value))}${sl.unit}`)}
           onchange={() => app.commit()}
           aria-label="{spec.name} slider"
         />
@@ -124,42 +142,57 @@
       />
     </div>
   {:else if spec.kind === 'region'}
-    {#if region}
-      <div class="ctl">
-        <span class="dim lab">from</span>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          step="0.5"
-          value={region.s}
-          oninput={(e) => setRegion(Number(e.currentTarget.value), region.e, false)}
-          onchange={() => app.commit()}
-          aria-label="region start"
-        />
-      </div>
-      <div class="ctl">
-        <span class="dim lab">to</span>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          step="0.5"
-          value={region.e}
-          oninput={(e) => setRegion(region.s, Number(e.currentTarget.value), false)}
-          onchange={() => app.commit()}
-          aria-label="region end"
-        />
-      </div>
-    {/if}
-    <input
-      {id}
-      type="text"
-      value={text}
-      onchange={(e) => commitField(e.currentTarget)}
-      spellcheck="false"
-      autocomplete="off"
-    />
+    <div class="ctl">
+      {#if region}
+        {@const r = region}
+        <!-- Two range inputs stacked on one track. Only their thumbs take
+             pointer events, so each handle can be grabbed where it is.
+             The handle nearer the free side sits on top, so two handles
+             pushed together can always be pulled apart again. -->
+        <div class="dual" class:low-top={r.s > 50}>
+          <div class="fill" style:left="{r.s}%" style:width="{r.e - r.s}%"></div>
+          <input
+            class="lo"
+            type="range"
+            min="0"
+            max="100"
+            step="0.5"
+            value={r.s}
+            oninput={(e) => {
+              const v = Math.min(Number(e.currentTarget.value), r.e);
+              e.currentTarget.value = String(v);
+              dragRegion(v, r.e);
+            }}
+            onchange={endRegion}
+            aria-label="region start (percent from the top)"
+          />
+          <input
+            class="hi"
+            type="range"
+            min="0"
+            max="100"
+            step="0.5"
+            value={r.e}
+            oninput={(e) => {
+              const v = Math.max(Number(e.currentTarget.value), r.s);
+              e.currentTarget.value = String(v);
+              dragRegion(r.s, v);
+            }}
+            onchange={endRegion}
+            aria-label="region end (percent from the top)"
+          />
+        </div>
+      {/if}
+      <input
+        {id}
+        class="num"
+        type="text"
+        value={text}
+        onchange={(e) => commitField(e.currentTarget)}
+        spellcheck="false"
+        autocomplete="off"
+      />
+    </div>
   {/if}
 </div>
 
@@ -209,10 +242,92 @@
     flex: none;
   }
 
-  .lab {
-    width: 4ch;
-    flex: none;
-    font-size: 0.85em;
+  .num[type='text'] {
+    width: 11ch;
+  }
+
+  /* Two-handle region slider. */
+  .dual {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    height: 32px;
+  }
+
+  /* The track, drawn once for both inputs. */
+  .dual::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 4px;
+    transform: translateY(-50%);
+    background: var(--bg2);
+  }
+
+  .fill {
+    position: absolute;
+    top: 50%;
+    height: 6px;
+    transform: translateY(-50%);
+    background: var(--accent);
+  }
+
+  .dual input {
+    position: absolute;
+    inset: 0;
+    height: 100%;
+    background: none;
+    pointer-events: none;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  .dual .hi {
+    z-index: 2;
+  }
+
+  .dual.low-top .lo {
+    z-index: 3;
+  }
+
+  .dual input::-webkit-slider-runnable-track {
+    background: none;
+  }
+
+  .dual input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    pointer-events: auto;
+    width: 18px;
+    height: 26px;
+    background: var(--bg);
+    border: 3px solid var(--accent);
+    cursor: grab;
+  }
+
+  .dual input::-moz-range-track {
+    background: none;
+  }
+
+  .dual input::-moz-range-thumb {
+    pointer-events: auto;
+    width: 12px;
+    height: 20px;
+    border-radius: 0;
+    background: var(--bg);
+    border: 3px solid var(--accent);
+    cursor: grab;
+  }
+
+  @media (pointer: coarse) {
+    .dual {
+      height: 44px;
+    }
+    .dual input::-webkit-slider-thumb {
+      width: 26px;
+      height: 36px;
+    }
   }
 
   @media (pointer: coarse) {

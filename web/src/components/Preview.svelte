@@ -1,17 +1,26 @@
 <script lang="ts">
   // The preview stage: shows the latest render (or the original while
-  // comparing), reports its size to the app, and hosts the compare button.
+  // comparing), reports its size to the app, draws the region band while
+  // one is dragged, and hosts the compare and exact buttons.
   import { onMount } from 'svelte';
   import { app } from '../lib/app.svelte';
 
   let { onopen }: { onopen: () => void } = $props();
   let box: HTMLDivElement;
+  let img = $state<HTMLImageElement>();
+  // The image's box inside the stage, for placing the region band. Kept up
+  // to date by the observer below, since the image resizes with the stage.
+  let rect = $state({ x: 0, y: 0, w: 0, h: 0 });
+  function measure() {
+    if (img) rect = { x: img.offsetLeft, y: img.offsetTop, w: img.offsetWidth, h: img.offsetHeight };
+  }
 
   onMount(() => {
     // Tell the app how big the preview area is, so renders fit it.
     const ro = new ResizeObserver(([entry]) => {
       const { width, height } = entry.contentRect;
       app.setViewport(Math.round(width), Math.round(height), window.devicePixelRatio || 1);
+      measure();
     });
     ro.observe(box);
     return () => ro.disconnect();
@@ -30,10 +39,33 @@
 
 <div class="box" bind:this={box}>
   {#if shown}
-    <img src={shown} alt={app.comparing ? 'Original photo' : 'Glitched preview'} draggable="false" />
+    <img
+      bind:this={img}
+      src={shown}
+      alt={app.comparing ? 'Original photo' : 'Glitched preview'}
+      draggable="false"
+      onload={measure}
+    />
+    {#if app.regionHint}
+      <!-- The region is a share of the raster's bytes, and rows follow each
+           other, so it is the same share of the height: a horizontal band. -->
+      {@const r = app.regionHint}
+      <div
+        class="band"
+        aria-hidden="true"
+        style:left="{rect.x}px"
+        style:top="{rect.y}px"
+        style:width="{rect.w}px"
+        style:height="{rect.h}px"
+      >
+        <div class="shade" style:top="0" style:height="{r.s}%"></div>
+        <div class="edge" style:top="{r.s}%" style:height="{r.e - r.s}%"></div>
+        <div class="shade" style:top="{r.e}%" style:bottom="0"></div>
+      </div>
+    {/if}
   {:else if !app.doc}
     <div class="empty">
-      <p>Open a JPEG to start.</p>
+      <p>Open a photo to start: JPEG, PNG or TIFF.</p>
       <button class="primary" onclick={onopen}>Open a photo</button>
       <p class="dim hint">Or drop one here. Photos go to this glitchrx server only.</p>
     </div>
@@ -44,9 +76,23 @@
   {/if}
   {#if app.working}
     <div class="working" role="status">{app.working}</div>
+  {:else if app.heavy}
+    <div class="working heavy" role="status">
+      {app.heavy}.
+      <button onclick={() => app.render('exact')}>Try exact</button>
+    </div>
   {/if}
 
   {#if app.doc && app.imageUrl}
+    <button
+      class="exact"
+      class:on={app.exact}
+      onclick={() => app.render('exact')}
+      disabled={app.exact || !!app.working}
+      title="Render at full resolution, exactly like the export. Slower; long reverb tails differ most in the live preview."
+    >
+      {app.exact ? 'Exact' : 'Make exact'}
+    </button>
     <button
       class="compare"
       class:on={app.comparing}
@@ -130,6 +176,48 @@
     background: var(--bg);
     border: var(--border);
     padding: 4px 10px;
+  }
+
+  /* Region band: shade outside it, bold edges along it. */
+  .band {
+    position: absolute;
+    pointer-events: none;
+  }
+
+  .shade {
+    position: absolute;
+    left: 0;
+    right: 0;
+    background: rgb(0 0 0 / 0.55);
+  }
+
+  .edge {
+    position: absolute;
+    left: 0;
+    right: 0;
+    border-top: 3px solid var(--accent);
+    border-bottom: 3px solid var(--accent);
+  }
+
+  .heavy {
+    border-color: var(--warn);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: calc(100% - 24px);
+  }
+
+  .exact {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    background: var(--bg);
+  }
+
+  .exact.on {
+    opacity: 1;
+    color: var(--accent);
+    border-color: var(--accent);
   }
 
   .compare {

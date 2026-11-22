@@ -2,7 +2,6 @@
 // access-token cookie (if any) rides along automatically.
 
 import type {
-  DecodeWord,
   DocInfo,
   EffectInfo,
   ExportFormat,
@@ -20,6 +19,9 @@ export class ApiError extends Error {
     super(message);
   }
 }
+
+/** A preview that ran over the server's time budget (SPEC 9.2). */
+export class TooHeavyError extends ApiError {}
 
 async function fail(res: Response): Promise<never> {
   let msg = `${res.status} ${res.statusText}`;
@@ -77,34 +79,42 @@ export interface PreviewResult {
   blob: Blob;
   width: number;
   height: number;
-  decode: DecodeWord;
-  message: string | null;
   ms: number;
 }
 
 /**
- * Render a preview covering a `maxW` x `maxH` box (device pixels).
- * Resolves to null when the server dropped it for a newer request.
+ * Render a preview covering a `maxW` x `maxH` box (device pixels). With
+ * `exact`, the server bends the full-resolution photo and then shrinks it,
+ * which is exactly the export but slower. Resolves to null when the server
+ * dropped it for a newer request; throws TooHeavyError over the budget.
  */
 export async function preview(
   docId: string,
   recipe: RecipeDto | null,
   maxW: number,
   maxH: number,
+  exact = false,
 ): Promise<PreviewResult | null> {
   const body = recipe
-    ? { recipe, max_w: maxW, max_h: maxH }
+    ? { recipe, max_w: maxW, max_h: maxH, exact }
     : { original: true, max_w: maxW, max_h: maxH };
   const res = await postJson(`/api/docs/${docId}/preview`, body);
   if (res.status === 204) return null;
+  if (res.headers.get('x-too-heavy')) {
+    let msg = 'too heavy to preview live';
+    try {
+      msg = (await res.json()).error ?? msg;
+    } catch {
+      // keep the default message
+    }
+    throw new TooHeavyError(res.status, msg);
+  }
   if (!res.ok) await fail(res);
   const h = res.headers;
   return {
     blob: await res.blob(),
     width: Number(h.get('x-width') ?? 0),
     height: Number(h.get('x-height') ?? 0),
-    decode: (h.get('x-decode') ?? 'clean') as DecodeWord,
-    message: h.get('x-decode-message'),
     ms: Number(h.get('x-render-ms') ?? 0),
   };
 }

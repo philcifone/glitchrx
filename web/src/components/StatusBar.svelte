@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Bottom line: photo facts, decode status, render time, messages.
+  // Bottom line: photo facts, render time, messages.
   import { app } from '../lib/app.svelte';
 
   const mb = (n: number) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`);
@@ -16,13 +16,15 @@
   {:else if app.doc}
     <span class="name" title={app.doc.path ?? app.doc.name}>{app.doc.name}</span>
     <span>{app.doc.width}x{app.doc.height}</span>
-    <span class="wide">{app.doc.subsampling}, {mb(app.doc.payload_len)} data</span>
-    {#if app.decode}
-      <span class="decode {app.decode.word}" title={app.decode.message ?? 'decoded without complaints'}>
-        decode: {app.decode.word}
-      </span>
+    <span class="wide">
+      {app.doc.format}{app.doc.orientation !== 1 ? ', turned upright' : ''}{app.doc.has_icc ? ', ICC' : ''},
+      {mb(app.doc.raw_len)} raw
+    </span>
+    {#if app.heavy}
+      <span class="warn" title={app.heavy}>too heavy live</span>
+    {:else if app.renderMs !== null}
+      <span class="dim">{app.renderMs} ms{app.exact ? ', exact' : ''}</span>
     {/if}
-    {#if app.renderMs !== null}<span class="dim">{app.renderMs} ms</span>{/if}
   {:else}
     <span class="dim">no photo open{app.config ? ` | glitchrx ${app.config.version}` : ''}</span>
   {/if}
@@ -50,17 +52,8 @@
     min-width: 0;
   }
 
-  .decode.clean {
-    color: var(--accent);
-  }
-  .decode.recovered {
-    color: var(--info);
-  }
-  .decode.partial {
+  .warn {
     color: var(--warn);
-  }
-  .decode.failed {
-    color: var(--danger);
   }
 
   .err {
