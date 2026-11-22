@@ -3,6 +3,8 @@
 # from librsvg). The PNGs are committed, so building the app never needs
 # this; rerun it only after changing the SVG.
 #
+# The SVG itself comes from scripts/icon.py.
+#
 #   apple-touch-icon.png   180 px, iOS home screen (iOS rounds the corners)
 #   icon-192.png, -512.png manifest icons
 #   icon-maskable-512.png  artwork shrunk into the central safe circle, for
