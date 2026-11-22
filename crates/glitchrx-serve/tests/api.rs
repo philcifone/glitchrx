@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
-use glitchrx_core::{Recipe, Restart, Step};
+use glitchrx_core::codec::{self, Format};
+use glitchrx_core::{Encoding, Recipe, Step};
 use glitchrx_serve::{AppState, router};
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
@@ -60,11 +61,10 @@ async fn upload(app: &Router, name: &str, bytes: Vec<u8>) -> Value {
 
 fn sample_recipe() -> Value {
     json!({
-        "mode": "safe",
-        "restart": "10%",
+        "encoding": "ulaw",
         "steps": [
-            {"effect": "echo", "seed": "18446744073709551000", "params": {"gain": "0.7"}},
-            {"effect": "shift", "seed": "42"}
+            {"effect": "echo", "seed": "9223372036854775000", "params": {"decay": "0.7"}},
+            {"effect": "shift", "seed": "42", "params": {"encoding": "s16le"}}
         ]
     })
 }
@@ -72,13 +72,20 @@ fn sample_recipe() -> Value {
 /// The same recipe built directly with the core, as the CLI would.
 fn core_recipe() -> Recipe {
     Recipe {
-        restart: Some(Restart::MilliPercent(10_000)),
+        encoding: Encoding::ULaw,
         steps: vec![
-            Step::new("echo", "gain=0.7", 18446744073709551000).unwrap(),
-            Step::new("shift", "", 42).unwrap(),
+            Step::new("echo", "decay=0.7", 9223372036854775000).unwrap(),
+            Step::new("shift", "encoding=s16le", 42).unwrap(),
         ],
         ..Recipe::default()
     }
+}
+
+/// What the CLI writes for `bytes` with [`core_recipe`] in `format`.
+fn cli_output(bytes: &[u8], format: Format) -> Vec<u8> {
+    let mut img = codec::decode(bytes).unwrap();
+    core_recipe().apply(&mut img.raster).unwrap();
+    codec::encode(&img.raster, format, img.icc.as_deref()).unwrap()
 }
 
 #[tokio::test]
@@ -92,7 +99,7 @@ async fn effects_and_config() {
     assert_eq!(s, StatusCode::OK);
     assert!(h.contains_key(header::CONTENT_SECURITY_POLICY));
     let effects = json_of(&b);
-    assert_eq!(effects.as_array().unwrap().len(), 8);
+    assert_eq!(effects.as_array().unwrap().len(), 10);
     assert_eq!(effects[0]["id"], "echo");
 
     let (_, _, b) = send(
@@ -100,7 +107,9 @@ async fn effects_and_config() {
         Request::get("/api/config").body(Body::empty()).unwrap(),
     )
     .await;
-    assert_eq!(json_of(&b)["browse"], false);
+    let config = json_of(&b);
+    assert_eq!(config["browse"], false);
+    assert_eq!(config["encodings"].as_array().unwrap().len(), 8);
 }
 
 #[tokio::test]
@@ -111,7 +120,7 @@ async fn upload_preview_export() {
     let id = doc["id"].as_str().unwrap().to_string();
     assert!(doc["width"].as_u64().unwrap() > 0);
 
-    // Preview: a clean JPEG plus decode headers.
+    // Preview: a JPEG of the bent preview raster.
     let (s, h, b) = send(
         &app,
         post_json(
@@ -122,8 +131,8 @@ async fn upload_preview_export() {
     .await;
     assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
     assert_eq!(h[header::CONTENT_TYPE], "image/jpeg");
-    assert!(h.contains_key("x-decode"));
     assert!(h.contains_key("x-render-ms"));
+    assert!(h["x-width"].to_str().unwrap().parse::<u32>().unwrap() <= 200);
     assert!(b.starts_with(&[0xFF, 0xD8]));
 
     // Original (before/after).
@@ -137,51 +146,77 @@ async fn upload_preview_export() {
     .await;
     assert_eq!(s, StatusCode::OK);
 
-    // Export of the glitched file equals what the CLI's core call writes.
-    let (s, h, b) = send(
-        &app,
-        post_json(
-            &format!("/api/docs/{id}/export"),
-            json!({"recipe": sample_recipe(), "format": "jpeg"}),
+    // Every export format equals what the CLI writes.
+    for (format, f, name, mime) in [
+        (
+            "tiff",
+            Format::Tiff,
+            "baseline-420-glitch.tif",
+            "image/tiff",
         ),
-    )
-    .await;
-    assert_eq!(s, StatusCode::OK);
-    assert!(
-        h[header::CONTENT_DISPOSITION]
-            .to_str()
-            .unwrap()
-            .contains("baseline-420-glitch.jpg")
-    );
-    assert_eq!(b, core_recipe().apply(bytes).unwrap());
-
-    // Baked PNG.
-    let (s, h, b) = send(
-        &app,
-        post_json(
-            &format!("/api/docs/{id}/export"),
-            json!({"recipe": sample_recipe(), "format": "png"}),
+        ("png", Format::Png, "baseline-420-glitch.png", "image/png"),
+        (
+            "jpeg",
+            Format::Jpeg,
+            "baseline-420-glitch.jpg",
+            "image/jpeg",
         ),
-    )
-    .await;
-    assert_eq!(s, StatusCode::OK);
-    assert_eq!(h[header::CONTENT_TYPE], "image/png");
-    assert!(b.starts_with(b"\x89PNG"));
+        // The 2a name, still accepted.
+        (
+            "jpeg-baked",
+            Format::Jpeg,
+            "baseline-420-glitch.jpg",
+            "image/jpeg",
+        ),
+    ] {
+        let (s, h, b) = send(
+            &app,
+            post_json(
+                &format!("/api/docs/{id}/export"),
+                json!({"recipe": sample_recipe(), "format": format}),
+            ),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{format}");
+        assert_eq!(h[header::CONTENT_TYPE], mime);
+        assert!(
+            h[header::CONTENT_DISPOSITION]
+                .to_str()
+                .unwrap()
+                .contains(name)
+        );
+        assert_eq!(b, cli_output(&bytes, f), "{format}");
+    }
 }
 
 #[tokio::test]
 async fn errors_are_json_with_useful_codes() {
     let app = app(None, None);
-    // Not a JPEG.
+    // Not an image we read.
     let (s, _, b) = send(
         &app,
-        Request::post("/api/docs?name=x.png")
-            .body(Body::from(&b"\x89PNG...."[..]))
+        Request::post("/api/docs?name=x.gif")
+            .body(Body::from(&b"GIF89a...."[..]))
             .unwrap(),
     )
     .await;
     assert_eq!(s, StatusCode::UNSUPPORTED_MEDIA_TYPE);
-    assert!(json_of(&b)["error"].as_str().unwrap().contains("JPEG"));
+    assert!(
+        json_of(&b)["error"]
+            .as_str()
+            .unwrap()
+            .contains("JPEG, PNG or TIFF")
+    );
+
+    // A broken PNG.
+    let (s, _, _) = send(
+        &app,
+        Request::post("/api/docs?name=x.png")
+            .body(Body::from(&b"\x89PNG\r\n\x1a\n...."[..]))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNPROCESSABLE_ENTITY);
 
     // Bad parameter names the effect.
     let doc = upload(&app, "g.jpg", fixture("grayscale.jpg")).await;
@@ -190,7 +225,7 @@ async fn errors_are_json_with_useful_codes() {
         &app,
         post_json(
             &format!("/api/docs/{id}/preview"),
-            json!({"recipe": {"steps": [{"effect": "echo", "seed": "1", "params": {"gain": "9"}}]},
+            json!({"recipe": {"steps": [{"effect": "echo", "seed": "1", "params": {"decay": "9"}}]},
                    "max_w": 100, "max_h": 100}),
         ),
     )
@@ -225,8 +260,8 @@ async fn recipe_toml_round_trip() {
     .await;
     assert_eq!(s, StatusCode::OK);
     let back = json_of(&b);
-    assert_eq!(back["steps"][0]["seed"], "18446744073709551000");
-    assert_eq!(back["restart"], "10%");
+    assert_eq!(back["steps"][0]["seed"], "9223372036854775000");
+    assert_eq!(back["encoding"], "ulaw");
 }
 
 #[tokio::test]
@@ -284,7 +319,7 @@ async fn browse_open_and_save_never_overwrite() {
     let id = doc["id"].as_str().unwrap();
 
     // Two saves: auto-numbered, the second does not overwrite the first.
-    let save = json!({"recipe": sample_recipe(), "format": "jpeg", "with_recipe": true});
+    let save = json!({"recipe": sample_recipe(), "format": "tiff", "with_recipe": true});
     let (s, _, b) = send(
         &app,
         post_json(&format!("/api/docs/{id}/save"), save.clone()),
@@ -293,10 +328,10 @@ async fn browse_open_and_save_never_overwrite() {
     assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
     assert_eq!(
         json_of(&b)["saved"],
-        json!(["trip/photo-glitch.jpg", "trip/photo-glitch.recipe.toml"])
+        json!(["trip/photo-glitch.tif", "trip/photo-glitch.recipe.toml"])
     );
     let (_, _, b) = send(&app, post_json(&format!("/api/docs/{id}/save"), save)).await;
-    assert_eq!(json_of(&b)["saved"][0], "trip/photo-glitch-1.jpg");
+    assert_eq!(json_of(&b)["saved"][0], "trip/photo-glitch-1.tif");
     let (_, _, b) = send(
         &app,
         post_json(
@@ -310,8 +345,8 @@ async fn browse_open_and_save_never_overwrite() {
     // The original is untouched; the saved file is the CLI's output.
     assert_eq!(fs::read(root.join("trip/photo.jpg")).unwrap(), original);
     assert_eq!(
-        fs::read(root.join("trip/photo-glitch.jpg")).unwrap(),
-        core_recipe().apply(original).unwrap()
+        fs::read(root.join("trip/photo-glitch.tif")).unwrap(),
+        cli_output(&original, Format::Tiff)
     );
 }
 

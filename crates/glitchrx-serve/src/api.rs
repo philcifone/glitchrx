@@ -1,7 +1,7 @@
 //! HTTP routes.
 //!
 //! Everything under `/api` is JSON in, JSON or image bytes out. Image work
-//! (parsing, glitching, decoding) is CPU-bound, so it runs on tokio's
+//! (decoding, bending, encoding) is CPU-bound, so it runs on tokio's
 //! blocking pool and never stalls the async workers.
 
 use std::path::PathBuf;
@@ -15,8 +15,8 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use glitchrx_core::io::{Suffix, auto_output, base_stem, write_output};
-use glitchrx_core::turbo::{self, Scale};
+use glitchrx_core::codec;
+use glitchrx_core::io::{auto_output, base_stem, write_output};
 use glitchrx_core::{Error, Recipe};
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +25,8 @@ use crate::docs::{Doc, Store, random_hex};
 use crate::dto::{self, DocDto, RecipeDto};
 use crate::render::{self, Format};
 
-/// Largest upload accepted. Full-frame camera JPEGs are 10-40 MB.
+/// Largest upload accepted. Full-frame camera JPEGs are 10-40 MB, and
+/// uncompressed TIFFs of the same photos 70-150 MB.
 const MAX_UPLOAD: usize = 256 << 20;
 /// How many photos stay open at once (least recently used is closed).
 const MAX_DOCS: usize = 4;
@@ -110,7 +111,7 @@ impl IntoResponse for ApiError {
 impl From<Error> for ApiError {
     fn from(e: Error) -> ApiError {
         let code = match e {
-            Error::NotJpeg | Error::Unsupported(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            Error::UnknownFormat | Error::Unsupported(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             Error::Malformed(_) => StatusCode::UNPROCESSABLE_ENTITY,
             _ => StatusCode::BAD_REQUEST,
         };
@@ -161,7 +162,7 @@ fn doc_dto(st: &AppState, doc: &Doc) -> DocDto {
         (Some(r), Some(s)) => Some(browse::relative(r, s)),
         _ => None,
     };
-    DocDto::new(&doc.id, &doc.name, path, &doc.info)
+    DocDto::new(&doc.id, &doc.name, path, doc.file_len, &doc.image)
 }
 
 // ---------------------------------------------------------------------------
@@ -261,6 +262,8 @@ struct ConfigDto {
     /// Name of the root directory, for display.
     root_name: Option<String>,
     max_preview_side: u32,
+    /// Sample encodings for the encoding pickers.
+    encodings: Vec<dto::EncodingDto>,
 }
 
 async fn config(State(st): State<Shared>) -> Json<ConfigDto> {
@@ -274,6 +277,7 @@ async fn config(State(st): State<Shared>) -> Json<ConfigDto> {
             )
         }),
         max_preview_side: render::MAX_PREVIEW_SIDE,
+        encodings: dto::encodings(),
     })
 }
 
@@ -299,7 +303,7 @@ async fn upload(
         .unwrap_or_else(|| "photo.jpg".into());
     let st2 = st.clone();
     blocking(move || {
-        let doc = Doc::new(random_hex(8), name, None, body.to_vec())?;
+        let doc = Doc::new(random_hex(8), name, None, &body)?;
         let doc = st2.store.insert(doc);
         Ok(Json(doc_dto(&st2, &doc)))
     })
@@ -335,7 +339,7 @@ async fn open(State(st): State<Shared>, Json(req): Json<OpenRequest>) -> ApiResu
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let doc = Doc::new(random_hex(8), name, Some(path), bytes)?;
+        let doc = Doc::new(random_hex(8), name, Some(path), &bytes)?;
         let doc = st2.store.insert(doc);
         Ok(Json(doc_dto(&st2, &doc)))
     })
@@ -359,9 +363,9 @@ struct PreviewRequest {
     original: bool,
 }
 
-/// Render a preview. Answers `image/jpeg` with the decode status in
-/// `X-Decode` / `X-Decode-Message` and timing in `X-Render-Ms`, or 204 when
-/// a newer request for the same photo has already arrived (latest wins).
+/// Render a preview. Answers `image/jpeg` with timing in `X-Render-Ms`, or
+/// 204 when a newer request for the same photo has arrived (latest wins):
+/// a render in progress notices within a block of samples and stops.
 async fn preview(
     State(st): State<Shared>,
     Path(id): Path<String>,
@@ -373,30 +377,32 @@ async fn preview(
     } else {
         Some(req.recipe.to_recipe()?)
     };
-    // Only glitch renders compete; an original (before/after) request must
-    // not cancel the glitch render it is being compared with.
+    // Only bend renders compete; an original (before/after) request must
+    // not cancel the render it is being compared with.
     let generation = recipe.as_ref().map(|_| doc.begin());
+    let max_w = req.max_w.clamp(16, render::MAX_PREVIEW_SIDE) as usize;
+    let max_h = req.max_h.clamp(16, render::MAX_PREVIEW_SIDE) as usize;
     blocking(move || {
         let t0 = Instant::now();
-        let glitched = match &recipe {
-            None => doc.original.to_vec(),
-            Some(r) => {
-                // A newer request queued behind us: skip the work entirely.
-                if generation.is_some_and(|g| !doc.is_current(g)) {
-                    return Ok(StatusCode::NO_CONTENT.into_response());
+        let raster = match (&recipe, generation) {
+            (Some(r), Some(g)) => {
+                let superseded = || !doc.is_current(g);
+                match doc.preview(r, max_w, max_h, &superseded) {
+                    Ok(raster) => raster,
+                    Err(Error::Cancelled) => return Ok(StatusCode::NO_CONTENT.into_response()),
+                    Err(e) => return Err(e.into()),
                 }
-                doc.glitch(r)?
             }
+            _ => doc.original(max_w, max_h),
         };
-        let p = render::preview(&glitched, &doc.info.frame, req.max_w, req.max_h)
-            .map_err(|m| ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, m))?;
+        let jpeg = render::preview_jpeg(&raster, 88).map_err(ApiError::internal)?;
         let ms = t0.elapsed().as_millis();
         let mut res = (
             [
                 (header::CONTENT_TYPE, "image/jpeg".to_string()),
                 (header::CACHE_CONTROL, "no-store".to_string()),
             ],
-            p.jpeg,
+            jpeg,
         )
             .into_response();
         let h = res.headers_mut();
@@ -405,17 +411,9 @@ async fn preview(
                 h.insert(k, v);
             }
         };
-        set("x-decode", p.status.word().into());
-        // Header values must be visible ASCII; decoder messages are.
-        if let Some(m) = p.status.message() {
-            set(
-                "x-decode-message",
-                m.replace(|c: char| !c.is_ascii() || c.is_control(), " "),
-            );
-        }
         set("x-render-ms", ms.to_string());
-        set("x-width", p.width.to_string());
-        set("x-height", p.height.to_string());
+        set("x-width", raster.width.to_string());
+        set("x-height", raster.height.to_string());
         Ok(res)
     })
     .await
@@ -430,23 +428,28 @@ struct ExportRequest {
     with_recipe: bool,
 }
 
-/// File name for a download: `photo.jpg` -> `photo-glitch.jpg`.
+/// File name for a download: `photo.jpg` -> `photo-glitch.tif`.
 fn export_name(doc_name: &str, format: Format) -> String {
-    let p = std::path::Path::new(doc_name);
-    let stem = p
+    let stem = std::path::Path::new(doc_name)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let ext = format
-        .extension()
-        .map(str::to_string)
-        .or_else(|| p.extension().map(|e| e.to_string_lossy().into_owned()))
-        .unwrap_or_else(|| "jpg".into());
+    let ext = codec::Format::from(format).extension();
     format!("{}-glitch.{ext}", base_stem(&stem))
 }
 
-/// Full-resolution export as a download. Runs the recipe from scratch with
-/// [`Recipe::apply`], the same call the CLI makes.
+/// Bend the full image and encode it, keeping the colour profile.
+fn export_bytes(doc: &Doc, recipe: &Recipe, format: Format) -> ApiResult<Vec<u8>> {
+    let raster = doc.render_full(recipe)?;
+    Ok(codec::encode(
+        &raster,
+        format.into(),
+        doc.image.icc.as_deref(),
+    )?)
+}
+
+/// Full-resolution export as a download. Runs the recipe on the full image
+/// with [`Recipe::apply`], the same call the CLI makes.
 async fn export(
     State(st): State<Shared>,
     Path(id): Path<String>,
@@ -455,8 +458,7 @@ async fn export(
     let doc = find(&st, &id)?;
     let recipe = req.recipe.to_recipe()?;
     blocking(move || {
-        let glitched = recipe.apply(doc.original.to_vec())?;
-        let bytes = render::export(glitched, req.format).map_err(ApiError::internal)?;
+        let bytes = export_bytes(&doc, &recipe, req.format)?;
         let name = export_name(&doc.name, req.format);
         // RFC 6266: an ASCII fallback plus the exact UTF-8 name.
         let ascii: String = name
@@ -475,7 +477,10 @@ async fn export(
         );
         Ok((
             [
-                (header::CONTENT_TYPE, req.format.mime().to_string()),
+                (
+                    header::CONTENT_TYPE,
+                    codec::Format::from(req.format).mime().to_string(),
+                ),
                 (header::CONTENT_DISPOSITION, disposition),
                 (header::CACHE_CONTROL, "no-store".to_string()),
             ],
@@ -521,14 +526,9 @@ async fn save(
     };
     let recipe = req.recipe.to_recipe()?;
     blocking(move || {
-        let glitched = recipe.apply(doc.original.to_vec())?;
-        let bytes = render::export(glitched, req.format).map_err(ApiError::internal)?;
-        let auto =
-            auto_output(&source, Suffix::Glitch).map_err(|e| ApiError::internal(e.to_string()))?;
-        let out = match req.format.extension() {
-            Some(ext) => auto.with_extension(ext),
-            None => auto,
-        };
+        let bytes = export_bytes(&doc, &recipe, req.format)?;
+        let ext = codec::Format::from(req.format).extension();
+        let out = auto_output(&source, ext).map_err(|e| ApiError::internal(e.to_string()))?;
         let write = |path: &std::path::Path, data: &[u8]| {
             write_output(&source, path, data, false)
                 .map_err(|e| ApiError::new(StatusCode::CONFLICT, e.to_string()))
@@ -584,26 +584,8 @@ async fn thumb(State(st): State<Shared>, Query(q): Query<PathQuery>) -> ApiResul
     blocking(move || {
         let bytes =
             std::fs::read(&path).map_err(|_| ApiError::new(StatusCode::NOT_FOUND, "not found"))?;
-        let frame = glitchrx_core::Jpeg::parse(bytes.clone(), glitchrx_core::Mode::Safe)?
-            .info()
-            .frame
-            .clone();
-        let scale = Scale::to_fit(frame.width as u32, frame.height as u32, 240, 240);
-        let (img, status) = turbo::decode(&bytes, scale);
-        let img = img.ok_or_else(|| {
-            ApiError::new(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                status.message().unwrap_or("decode failed").to_string(),
-            )
-        })?;
-        let jpeg = turbo::encode(
-            &img,
-            turbo::EncodeOptions {
-                quality: 75,
-                ..Default::default()
-            },
-        )
-        .ok_or_else(|| ApiError::internal("thumbnail encode failed"))?;
+        let img = codec::decode_scaled(&bytes, Some((240, 240)))?;
+        let jpeg = render::preview_jpeg(&img.raster, 75).map_err(ApiError::internal)?;
         Ok((
             [
                 (header::CONTENT_TYPE, "image/jpeg"),
@@ -624,12 +606,12 @@ mod tests {
     fn names() {
         assert_eq!(sanitize_name("../../etc/passwd"), "passwd");
         assert_eq!(sanitize_name("C:\\x\\photo.JPG"), "photo.JPG");
-        assert_eq!(export_name("photo.JPG", Format::Jpeg), "photo-glitch.JPG");
+        assert_eq!(export_name("photo.JPG", Format::Tiff), "photo-glitch.tif");
         assert_eq!(
             export_name("photo-glitch-3.jpg", Format::Png),
             "photo-glitch.png"
         );
-        assert_eq!(export_name("a b.jpeg", Format::JpegBaked), "a b-glitch.jpg");
+        assert_eq!(export_name("a b.tiff", Format::Jpeg), "a b-glitch.jpg");
         assert_eq!(percent_encode("a b.jpg"), "a%20b.jpg");
     }
 

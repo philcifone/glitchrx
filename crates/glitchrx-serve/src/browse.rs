@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 /// File extensions offered in the browser (case-insensitive).
-const PHOTO_EXTENSIONS: &[&str] = &["jpg", "jpeg", "jpe", "jfif"];
+const PHOTO_EXTENSIONS: &[&str] = &["jpg", "jpeg", "jpe", "jfif", "png", "tif", "tiff"];
 
 #[derive(Debug, Serialize)]
 pub struct Listing {
