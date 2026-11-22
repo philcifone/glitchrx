@@ -190,8 +190,27 @@ fn every_effect_keeps_dimensions_and_stays_in_its_windows() {
     let base = decode("baseline-444.jpg").raster;
     let units = Units::full(base.width, base.height);
     for e in REGISTRY {
-        for enc in [Encoding::U8, Encoding::S16Be, Encoding::S24Le] {
-            let r = recipe(e.id, "hits=5,len=3%", 7, enc);
+        // Masked runs too: a mask and opacity only soften a step's own
+        // change, so they never write outside its windows either.
+        for (enc, masked) in [
+            (Encoding::U8, false),
+            (Encoding::S16Be, false),
+            (Encoding::S24Le, false),
+            (Encoding::U8, true),
+        ] {
+            let mut r = recipe(
+                e.id,
+                if masked {
+                    "hits=5,len=3%,opacity=0.8"
+                } else {
+                    "hits=5,len=3%"
+                },
+                7,
+                enc,
+            );
+            if masked {
+                r.steps[0].mask = Some(busy_mask());
+            }
             let step = &r.prepare_all().unwrap()[0];
             let mut out = base.clone();
             r.apply(&mut out).unwrap();
@@ -203,11 +222,15 @@ fn every_effect_keeps_dimensions_and_stays_in_its_windows() {
             for (i, (a, b)) in base.bytes.iter().zip(&out.bytes).enumerate() {
                 assert!(
                     inside[i] || a == b,
-                    "{} ({enc}) wrote byte {i} outside its windows",
+                    "{} ({enc}, masked {masked}) wrote byte {i} outside its windows",
                     e.id
                 );
             }
-            assert_ne!(out, base, "{} ({enc}) changed nothing", e.id);
+            assert_ne!(
+                out, base,
+                "{} ({enc}, masked {masked}) changed nothing",
+                e.id
+            );
         }
     }
 }
