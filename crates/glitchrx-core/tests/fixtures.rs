@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use glitchrx_core::codec::{self, Format};
 use glitchrx_core::effects::REGISTRY;
-use glitchrx_core::mask::{Mask, MaskOp, Mode};
+use glitchrx_core::mask::{Mask, MaskOp, Mode, Stroke};
 use glitchrx_core::{Encoding, Raster, Recipe, Step, Units};
 
 fn fixture_dir() -> PathBuf {
@@ -66,11 +66,22 @@ fn busy_mask() -> Mask {
                 high: 0.9,
                 soft: 0.1,
             },
-            MaskOp::Stroke {
+            MaskOp::Brush {
                 mode: Mode::Add,
-                size: 0.08,
-                hardness: 0.4,
-                points: vec![0.1, 0.1, 0.4, 0.5, 0.9, 0.6],
+                strokes: vec![
+                    Stroke {
+                        erase: false,
+                        size: 0.08,
+                        hardness: 0.4,
+                        points: vec![0.1, 0.1, 0.4, 0.5, 0.9, 0.6],
+                    },
+                    Stroke {
+                        erase: true,
+                        size: 0.03,
+                        hardness: 0.7,
+                        points: vec![0.35, 0.45, 0.45, 0.55],
+                    },
+                ],
             },
             MaskOp::Linear {
                 mode: Mode::Intersect,

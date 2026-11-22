@@ -282,8 +282,8 @@ pub fn markdown_reference() -> String {
 \
          - `opacity` (0 to 1, default 1): blend the step's result over the picture it \
          received, as with a layer's opacity. Example: `--echo opacity=0.5`.\n\
-         - A mask (recipe files and the GUI): where the result shows, made of brush \
-         strokes, gradients and brightness ranges. See `[step.mask]` in SPEC section 8.\n\n",
+         - A mask (recipe files and the GUI): where the result shows, made of \
+         brushes, gradients, circles and brightness ranges. See `[step.mask]` in SPEC section 8.\n\n",
     );
     for e in REGISTRY {
         s.push_str(&format!(
