@@ -67,7 +67,9 @@
     <div class="empty">
       <p>Open a photo to start: JPEG, PNG or TIFF.</p>
       <button class="primary" onclick={onopen}>Open a photo</button>
-      <p class="dim hint">Or drop one here. Photos go to this glitchrx server only.</p>
+      <p class="dim hint">
+        {app.desktop ? 'Or drop one here.' : 'Or drop one here. Photos go to this glitchrx server only.'}
+      </p>
     </div>
   {/if}
 

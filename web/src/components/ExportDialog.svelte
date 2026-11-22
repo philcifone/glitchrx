@@ -65,16 +65,28 @@
       </div>
       <p class="dim small">{formats.find((f) => f.id === format)?.note}</p>
       <div class="buttons">
-        <button class="primary" onclick={() => run(() => app.download(format))} disabled={!app.doc}>
-          <Download size={18} strokeWidth={2} /> Download
-        </button>
-        {#if app.doc?.path}
+        {#if app.desktop}
+          <button class="primary" onclick={() => run(() => app.saveAs(format, withRecipe))} disabled={!app.doc}>
+            <Save size={18} strokeWidth={2} /> Save as...
+          </button>
+        {:else}
+          <button class="primary" onclick={() => run(() => app.download(format))} disabled={!app.doc}>
+            <Download size={18} strokeWidth={2} /> Download
+          </button>
+        {/if}
+        {#if app.doc?.path && !app.desktop}
           <button onclick={() => run(() => app.saveOnServer(format, withRecipe))}>
             <Save size={18} strokeWidth={1.75} /> Save next to original
           </button>
         {/if}
       </div>
-      {#if app.doc?.path}
+      {#if app.desktop}
+        <label class="opt">
+          <span>Also save the recipe beside it</span>
+          <input class="switch" type="checkbox" bind:checked={withRecipe} />
+        </label>
+        <p class="dim small">Suggests the next free -glitch name next to the original. The original is never written.</p>
+      {:else if app.doc?.path}
         <label class="opt">
           <span>Also save the recipe there</span>
           <input class="switch" type="checkbox" bind:checked={withRecipe} />
@@ -90,7 +102,9 @@
         <code>glitchrx --recipe FILE photo.jpg</code> or load it here.
       </p>
       <div class="buttons">
-        <button onclick={() => run(() => app.downloadRecipe())} disabled={app.recipe.steps.length === 0}>Download recipe</button>
+        {#if !app.desktop}
+          <button onclick={() => run(() => app.downloadRecipe())} disabled={app.recipe.steps.length === 0}>Download recipe</button>
+        {/if}
         <button onclick={() => recipeInput.click()}>Load recipe</button>
         <input bind:this={recipeInput} type="file" accept=".toml,text/plain,application/toml" class="visually-hidden" onchange={loadRecipe} tabindex="-1" />
       </div>
