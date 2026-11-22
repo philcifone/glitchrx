@@ -15,6 +15,8 @@ Shared terms for glitcharaxia, so we can name things precisely. Grouped by topic
 - **Marker.** A two-byte signal starting with `FF` that labels the next part of the file (`FF D8` start, `FF DA` scan, `FF D9` end, and so on).
 - **MCU.** Minimum Coded Unit, the 8x8 or 16x16 pixel tile that JPEG encodes one at a time, left to right and top to bottom. An **MCU row** is one horizontal strip of them.
 - **Progressive JPEG.** A JPEG stored as several scans that refine the image in passes. A **baseline** JPEG has a single scan.
+- **Restart interval.** How often restart markers appear, counted in MCUs or MCU rows. The `DRI` header segment stores it. In glitchrx it sets the **band height**: how far one glitch can spread down the image before the decoder recovers.
+- **Lossless transform.** Rewriting a JPEG by moving its DCT coefficients into a new file, without decoding to pixels and re-compressing. Adding restart markers this way changes the bytes but not the image.
 - **RST marker.** Restart marker, `FF D0` to `FF D7`. It appears every N MCUs when the encoder enables a restart interval, and lets a decoder recover from damage. That makes glitches more contained.
 - **SOS.** Start Of Scan marker, `FF DA`. The scan data follows its short header.
 - **Subsampling.** Storing color (chroma) at lower resolution than brightness. Written as 4:2:0 (half width and half height), 4:2:2 (half width) or 4:4:4 (full).
@@ -25,6 +27,7 @@ Shared terms for glitcharaxia, so we can name things precisely. Grouped by topic
 
 - **Backwards.** The effect that reverses byte order inside each hit, like playing audio in reverse. It is not called "reverse", because `--reverse` is the undo option.
 - **Bake.** Decoding the glitched file and saving the result as a clean PNG. Different viewers render a broken JPEG differently; a baked PNG looks the same everywhere.
+- **Band.** The horizontal strip a glitch damages, from the hit down to the next restart marker. Its height is controlled by `--restart`.
 - **Chain.** Several effects applied in order. On the CLI, the order of the effect flags is the chain order.
 - **Contact sheet.** A grid image showing one effect at a range of parameter values, side by side. Used to tune defaults.
 - **Decode status.** The verdict from the decoder: `clean`, `recovered` (warned, but produced a full image), `partial` (stopped part way; the top part is kept) or `failed`.
@@ -34,6 +37,7 @@ Shared terms for glitcharaxia, so we can name things precisely. Grouped by topic
 - **Invert / reverse.** Running an effect's math backwards to recover the exact input. Possible only for reversible effects.
 - **Mask.** A grayscale image saying where an effect shows (Phase 3).
 - **Mode: safe / raw.** In **safe** mode (the default), effects see de-stuffed bytes, so they can never forge a marker. In **raw** mode, effects see the bytes exactly as stored, like Audacity did, so they can forge markers and truncate the image.
+- **Prepared input.** The file the effects actually run on: the input, losslessly rewritten with restart markers when `restart` is set. `--reverse` restores this file, not the original bytes.
 - **Payload.** The de-stuffed scan data of the main image, the buffer every byte effect edits.
 - **Recipe.** A TOML file that lists the effects, parameters and seeds. Replaying it on the same input gives the same output.
 - **Region.** The part of the payload where hits may land, for example `5%:100%`. Payload percent is not image percent: busy, detailed areas take up far more bytes than smooth ones, so `50%` of the payload is rarely halfway down the picture.

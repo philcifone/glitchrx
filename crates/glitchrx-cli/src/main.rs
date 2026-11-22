@@ -15,7 +15,7 @@ use glitchrx_core::io::{Suffix, WriteError, auto_output, write_output};
 use glitchrx_core::turbo::{Scale, decode, to_png};
 use glitchrx_core::{Error, Jpeg, Mode, Recipe, Step};
 
-use args::{Cli, EffectArg, ModeArg};
+use args::{Cli, EffectArg, ModeArg, RestartArg};
 
 /// Why the program stopped, mapped onto the documented exit codes.
 enum Fail {
@@ -162,6 +162,11 @@ fn run(cli: &Cli, effects: &[EffectArg]) -> Result<(), Fail> {
     }
 }
 
+/// Restart interval used when `--restart` is not given. Without restart
+/// markers, a single hit on a large photo usually turns everything below it
+/// into a flat wash, so effect-flag runs add them by default (SPEC D-15).
+const DEFAULT_RESTART: glitchrx_core::Restart = glitchrx_core::Restart::MilliPercent(10_000);
+
 /// Build the recipe from `--recipe` or the effect flags.
 /// Returns the recipe and the master seed (None when replaying a recipe
 /// file's own seeds).
@@ -185,6 +190,11 @@ fn build_recipe(cli: &Cli, effects: &[EffectArg]) -> Result<(Recipe, Option<u64>
         if let Some(seed) = cli.seed {
             r.reseed(seed);
         }
+        match cli.restart {
+            Some(RestartArg::Keep) => r.restart = None,
+            Some(RestartArg::Set(x)) => r.restart = Some(x),
+            None => {} // the recipe's own setting
+        }
         return Ok((r, cli.seed));
     }
     if effects.is_empty() {
@@ -201,6 +211,11 @@ fn build_recipe(cli: &Cli, effects: &[EffectArg]) -> Result<(Recipe, Option<u64>
     Ok((
         Recipe {
             mode,
+            restart: match cli.restart {
+                Some(RestartArg::Keep) => None,
+                Some(RestartArg::Set(x)) => Some(x),
+                None => Some(DEFAULT_RESTART),
+            },
             steps,
             ..Recipe::default()
         },

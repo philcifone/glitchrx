@@ -5,6 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use glitchrx_core::turbo::{Scale, decode};
 use tempfile::TempDir;
 
 fn fixture() -> PathBuf {
@@ -107,31 +108,37 @@ fn input_is_refused_even_with_force() {
 
 #[test]
 fn reverse_restores_the_original_bytes() {
-    let d = workdir();
-    let original = fs::read(d.path().join("photo.jpg")).unwrap();
-    let o = run(
-        d.path(),
-        &[
-            "--echo",
-            "delay=300,taps=2",
-            "--shuffle",
-            "--seed",
-            "4242",
-            "photo.jpg",
-        ],
-    );
-    assert_eq!(code(&o), 0, "{}", stderr(&o));
-    // The printed undo command must be exactly what works.
-    let out = stdout(&o);
-    let undo = out
-        .lines()
-        .find_map(|l| l.trim().strip_prefix("undo: glitchrx "))
-        .expect("undo hint printed");
-    let args: Vec<&str> = undo.split_whitespace().collect();
-    let o = run(d.path(), &args);
-    assert_eq!(code(&o), 0, "{}", stderr(&o));
-    let restored = fs::read(d.path().join("photo-restored.jpg")).unwrap();
-    assert!(restored == original, "restored file differs");
+    // Default run: restart markers are added first, so the restored file has
+    // the original pixels exactly, but not the original bytes (it keeps the
+    // markers). With `--restart keep` the bytes come back exactly too.
+    for keep in [false, true] {
+        let d = workdir();
+        let original = fs::read(d.path().join("photo.jpg")).unwrap();
+        let mut args = vec!["--echo", "delay=300,taps=2", "--shuffle", "--seed", "4242"];
+        if keep {
+            args.extend(["--restart", "keep"]);
+        }
+        args.push("photo.jpg");
+        let o = run(d.path(), &args);
+        assert_eq!(code(&o), 0, "{}", stderr(&o));
+        // The printed undo command must be exactly what works.
+        let out = stdout(&o);
+        let undo = out
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("undo: glitchrx "))
+            .expect("undo hint printed");
+        let args: Vec<&str> = undo.split_whitespace().collect();
+        let o = run(d.path(), &args);
+        assert_eq!(code(&o), 0, "{}", stderr(&o));
+        let restored = fs::read(d.path().join("photo-restored.jpg")).unwrap();
+        if keep {
+            assert!(restored == original, "restored bytes differ");
+        } else {
+            let px = |b: &[u8]| decode(b, Scale::Full).0.unwrap().rgba;
+            assert!(px(&restored) == px(&original), "restored pixels differ");
+            assert!(restored != original, "expected restart markers to be added");
+        }
+    }
 }
 
 #[test]
