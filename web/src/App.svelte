@@ -48,12 +48,24 @@
     }
   }
 
-  /** Painting shortcuts, Photoshop style: [ and ] size the brush. */
+  /**
+   * Mask editing shortcuts, Photoshop style: B and E paint and erase with
+   * a brush (the active one, else the last, else a new one), [ and ] size
+   * it, Enter or Esc finish.
+   */
   function maskKey(e: KeyboardEvent) {
-    const tools: Record<string, 'brush' | 'eraser' | 'linear' | 'radial'> = { b: 'brush', e: 'eraser', g: 'linear', r: 'radial' };
+    const uid = app.masking!;
     const k = e.key.toLowerCase();
-    if (k in tools) app.setTool({ tool: tools[k] });
-    else if (e.key === '[') app.setTool({ size: Math.max(0.005, Math.round(app.tool.size * 0.85 * 10000) / 10000) });
+    if (k === 'b' || k === 'e') {
+      const ops = app.maskTarget?.step.mask?.op ?? [];
+      if (app.activeOp === null || ops[app.activeOp]?.shape !== 'brush') {
+        let last = ops.length - 1;
+        while (last >= 0 && ops[last].shape !== 'brush') last--;
+        if (last >= 0) app.selectComponent(uid, last);
+        else app.addComponent(uid, 'brush');
+      }
+      app.setTool({ tool: k === 'e' ? 'erase' : 'paint' });
+    } else if (e.key === '[') app.setTool({ size: Math.max(0.005, Math.round(app.tool.size * 0.85 * 10000) / 10000) });
     else if (e.key === ']') app.setTool({ size: Math.min(0.3, Math.round(app.tool.size * 1.18 * 10000) / 10000) });
     else if (e.key === 'Escape' || e.key === 'Enter') app.stopMasking();
     else return;
