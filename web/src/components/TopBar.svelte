@@ -38,7 +38,7 @@
   {:else}
     <h1>glitchrx</h1>
     <div class="actions">
-      <button class="plain" onclick={onopen} title="Open a photo">
+      <button class="plain" onclick={onopen} title="Open a photo" aria-label="Open">
         <FolderOpen size={18} strokeWidth={1.75} />
         <span class="label">Open</span>
       </button>
@@ -53,7 +53,7 @@
       <button class="icon" onclick={() => app.redo()} disabled={!app.canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
         <Redo2 size={18} strokeWidth={1.75} />
       </button>
-      <button class="primary" onclick={onexport} disabled={!app.doc} title="Export">
+      <button class="primary" onclick={onexport} disabled={!app.doc} title="Export" aria-label="Export">
         <Download size={18} strokeWidth={2} />
         <span class="label">Export</span>
       </button>
@@ -87,8 +87,14 @@
     z-index: 2;
   }
 
+  /* The title gives way first, so the buttons never leave the screen. */
   h1 {
     font-size: 1.3rem;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .mode {
@@ -98,7 +104,13 @@
     min-width: 0;
   }
 
+  /* While masking, the step name gives way, never the title. */
+  .mode h1 {
+    flex: none;
+  }
+
   .what {
+    min-width: 0;
     color: var(--fg-dim);
     font-size: 0.95rem;
     white-space: nowrap;
@@ -107,6 +119,7 @@
   }
 
   .actions {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 2px;
@@ -118,12 +131,43 @@
     padding: 6px 16px;
   }
 
-  @media (max-width: 420px) {
+  /* Text labels only where there is room: tablets and desktops. Every
+     phone, up to a Pro Max at 430 px, gets icons. */
+  @media (max-width: 599px) {
     .label {
       display: none;
     }
     .actions .primary {
       padding: 6px 12px;
+    }
+  }
+
+  /* Narrow phones (mini, SE, Display Zoom): tighter, still tappable. */
+  @media (max-width: 389px) {
+    header {
+      gap: 8px;
+      padding-left: 12px;
+      padding-right: 6px;
+    }
+    .actions .icon,
+    .actions .plain {
+      min-width: 38px;
+      padding-left: 4px;
+      padding-right: 4px;
+    }
+    .actions .primary {
+      margin: 0 3px;
+      padding: 6px 10px;
+    }
+  }
+
+  @media (max-width: 340px) {
+    h1 {
+      font-size: 1.12rem;
+    }
+    .actions .icon,
+    .actions .plain {
+      min-width: 34px;
     }
   }
 </style>
