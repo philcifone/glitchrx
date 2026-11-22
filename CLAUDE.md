@@ -15,9 +15,9 @@ Report the real output. Never assume success.
 
 ## Git
 
-- `main` holds the bootstrap only. Work happens on the phase branch (`phase-1-cli`, ...) and on feature branches cut from it.
+- `main` holds the phases Phil has reviewed (1 to 3 so far). Work happens on the phase branch (`phase-4-tools`, ...) cut from `main`, and on feature branches cut from that.
 - Merge feature branches back into the phase branch once the gate is green.
-- Never push. Never merge into `main`; Phil does that after review.
+- Never push (there is no remote yet). Never merge into `main` unless Phil asks; he reviews first.
 - Commit small and often. Use Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`). No AI attribution lines.
 - At each phase boundary, stop and summarize: what was built, test results, deviations from the spec, open questions, next step, and the effort-level outlook. Do not start the next phase without Phil's go-ahead.
 
