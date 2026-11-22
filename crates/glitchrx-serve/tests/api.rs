@@ -631,3 +631,84 @@ async fn desktop_routes_are_absent_in_the_browser_server() {
     let (s, _, _) = send(&app, post_json("/api/desktop/open", json!({}))).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
+
+/// Decode an RGBA PNG into (width, height, pixels).
+fn rgba(png_bytes: &[u8]) -> (usize, usize, Vec<u8>) {
+    let dec = png::Decoder::new(std::io::Cursor::new(png_bytes));
+    let mut reader = dec.read_info().unwrap();
+    let mut buf = vec![0; reader.output_buffer_size().unwrap()];
+    let info = reader.next_frame(&mut buf).unwrap();
+    assert_eq!(info.color_type, png::ColorType::Rgba);
+    buf.truncate(info.buffer_size());
+    (info.width as usize, info.height as usize, buf)
+}
+
+#[tokio::test]
+async fn masks_travel_and_show() {
+    let app = app(None, None);
+    let doc = upload(&app, "baseline-420.jpg", fixture("baseline-420.jpg")).await;
+    let id = doc["id"].as_str().unwrap().to_string();
+    // A left-to-right gradient on the second step, at half opacity.
+    let recipe = json!({"steps": [
+        {"effect": "invert", "seed": "1", "params": {"hits": "0"}},
+        {"effect": "bitcrush", "seed": "2", "params": {"opacity": "0.5"},
+         "mask": {"feather": 0.01, "op": [
+            {"shape": "linear", "from": [0.0, 0.5], "to": [1.0, 0.5]}]}}]});
+
+    // The mask survives TOML both ways.
+    let (s, _, toml) = send(&app, post_json("/api/recipe/to-toml", recipe.clone())).await;
+    assert_eq!(s, StatusCode::OK);
+    let toml = String::from_utf8(toml).unwrap();
+    assert!(
+        toml.contains("[[step.mask.op]]") && toml.contains("version = 3"),
+        "{toml}"
+    );
+    let req = Request::post("/api/recipe/from-toml")
+        .body(Body::from(toml))
+        .unwrap();
+    let (s, _, back) = send(&app, req).await;
+    assert_eq!(s, StatusCode::OK);
+    // Defaults come back written out (`mode = "add"`), so they read clearly.
+    let mut expected = recipe["steps"][1]["mask"].clone();
+    expected["op"][0]["mode"] = json!("add");
+    assert_eq!(json_of(&back)["steps"][1]["mask"], expected);
+
+    // Preview renders with it.
+    let (s, _, b) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/preview"),
+            json!({"recipe": recipe, "max_w": 200, "max_h": 200}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+
+    // The mask view: tinted, opaque on the left, clear on the right.
+    let ask = |step: usize| {
+        post_json(
+            &format!("/api/docs/{id}/mask"),
+            json!({"recipe": recipe, "step": step, "max_w": 200, "max_h": 200,
+                   "tint": [10, 20, 30]}),
+        )
+    };
+    let (s, h, b) = send(&app, ask(1)).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(h[header::CONTENT_TYPE], "image/png");
+    let (w, hgt, px) = rgba(&b);
+    assert!(w <= 200 && hgt <= 200);
+    let alpha = |x: usize| px[((hgt / 2) * w + x) * 4 + 3];
+    assert_eq!(&px[..3], &[10, 20, 30]);
+    assert!(
+        alpha(2) > 230 && alpha(w - 3) < 25,
+        "{} {}",
+        alpha(2),
+        alpha(w - 3)
+    );
+
+    // A step without a mask shows everywhere; a missing step is an error.
+    let (_, _, b) = send(&app, ask(0)).await;
+    assert!(rgba(&b).2.chunks(4).all(|p| p[3] == 255));
+    let (s, _, _) = send(&app, ask(5)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}

@@ -84,7 +84,15 @@
   </ol>
 </div>
 
-<button class="primary fab" onclick={() => sheet.showModal()} disabled={!app.config} aria-label="Add an effect" title="Add an effect">
+<!-- Hidden while painting a mask: it would sit on the painting tools. -->
+<button
+  class="primary fab"
+  class:away={!!app.masking}
+  onclick={() => sheet.showModal()}
+  disabled={!app.config}
+  aria-label="Add an effect"
+  title="Add an effect"
+>
   <Plus size={26} strokeWidth={2} />
 </button>
 </div>
@@ -236,6 +244,10 @@
       border-radius: 50%;
       box-shadow: 0 4px 14px rgb(0 0 0 / 0.3);
       z-index: 2;
+    }
+
+    .fab.away {
+      display: none;
     }
   }
 

@@ -78,6 +78,7 @@ pub fn router(state: AppState) -> Router {
         .route("/docs/open", post(open))
         .route("/docs/{id}", get(doc_info))
         .route("/docs/{id}/preview", post(preview))
+        .route("/docs/{id}/mask", post(mask_view))
         .route("/docs/{id}/export", post(export))
         .route("/docs/{id}/save", post(save))
         .route("/docs/{id}/save-as", post(save_as))
@@ -548,6 +549,63 @@ async fn preview(
         set("x-width", raster.width.to_string());
         set("x-height", raster.height.to_string());
         Ok(res)
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct MaskRequest {
+    recipe: RecipeDto,
+    /// Which step's mask, from 0.
+    step: usize,
+    max_w: u32,
+    max_h: u32,
+    /// Overlay colour; the GUI passes its theme's.
+    #[serde(default = "mask_tint")]
+    tint: [u8; 3],
+}
+
+fn mask_tint() -> [u8; 3] {
+    [204, 36, 29]
+}
+
+/// Show a step's mask: an RGBA PNG at preview size, the tint with the
+/// mask's coverage as alpha. It reuses the preview's cache for the picture
+/// arriving at the step, but does not take part in the preview's
+/// latest-wins rule: the GUI asks for both at once after each stroke, and
+/// they must not cancel each other.
+async fn mask_view(
+    State(st): State<Shared>,
+    Path(id): Path<String>,
+    Json(req): Json<MaskRequest>,
+) -> ApiResult<Response> {
+    let doc = find(&st, &id)?;
+    let recipe = req.recipe.to_recipe()?;
+    let max_w = req.max_w.clamp(16, render::MAX_PREVIEW_SIDE) as usize;
+    let max_h = req.max_h.clamp(16, render::MAX_PREVIEW_SIDE) as usize;
+    let budget = st.preview_budget;
+    blocking(move || {
+        let t0 = Instant::now();
+        let stop = || t0.elapsed() > budget;
+        let (w, h, coverage) = match doc.mask(&recipe, req.step, max_w, max_h, &stop) {
+            Ok(m) => m,
+            Err(Error::Cancelled) => {
+                return Err(ApiError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "too heavy to show the mask live".to_string(),
+                ));
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let png = render::mask_png(w, h, &coverage, req.tint).map_err(ApiError::internal)?;
+        Ok((
+            [
+                (header::CONTENT_TYPE, "image/png".to_string()),
+                (header::CACHE_CONTROL, "no-store".to_string()),
+            ],
+            png,
+        )
+            .into_response())
     })
     .await
 }

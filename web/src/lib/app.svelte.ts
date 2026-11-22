@@ -9,6 +9,7 @@ import * as api from './api';
 import { ApiError, TooHeavyError } from './api';
 import { History } from './history';
 import { LatestOnly } from './latest';
+import { DEFAULT_TOOL, MASK_TINT, emptyMask, insertOp, withMode, type ToolState } from './mask';
 import { usesSeed } from './seed';
 import { shakeParams } from './shake';
 import type {
@@ -16,6 +17,9 @@ import type {
   DocInfo,
   EffectInfo,
   ExportFormat,
+  Mask,
+  MaskMode,
+  MaskOp,
   RecipeDto,
   RecipeState,
   ServerConfig,
@@ -27,6 +31,8 @@ export const DEFAULT_ENCODING = 'u8';
 /** Step parameter keys that override the recipe's encoding and channels. */
 export const ENCODING_KEY = 'encoding';
 export const CHANNELS_KEY = 'channels';
+/** Step key for how strongly the result is blended over the step's input. */
+export const OPACITY_KEY = 'opacity';
 /** How long the region band stays on the preview after a drag ends. */
 const REGION_LINGER_MS = 900;
 /** After the last change, wait this long before a sharper render (SPEC 10.2). */
@@ -37,6 +43,16 @@ const RECIPE_KEY = 'glitchrx.recipe';
 /** The open photo's server id, so a reload (iOS discards background tabs
  * often) can pick the same photo up again while the server still has it. */
 const DOC_KEY = 'glitchrx.doc';
+const TOOL_KEY = 'glitchrx.maskTool';
+
+function loadTool(): ToolState {
+  try {
+    const saved = JSON.parse(storageGet(TOOL_KEY) ?? 'null');
+    return { ...DEFAULT_TOOL, ...(saved && typeof saved === 'object' ? saved : {}) };
+  } catch {
+    return { ...DEFAULT_TOOL };
+  }
+}
 
 let uidCounter = 0;
 /** Unique within this page. (crypto.randomUUID needs HTTPS; LAN use is HTTP.) */
@@ -116,8 +132,25 @@ export class App {
   canUndo = $state(false);
   canRedo = $state(false);
 
+  /** The step whose mask is being painted on the preview, by uid. */
+  masking = $state<string | null>(null);
+  /** Brush and gradient settings for painting masks. */
+  tool = $state<ToolState>(loadTool());
+  /** Blob URL of the mask overlay for the step being painted. */
+  maskUrl = $state<string | null>(null);
+  /**
+   * Revisions: `revision` counts recipe changes; the others say which
+   * revision the shown preview and mask overlay were rendered from. The
+   * painter keeps a fresh stroke on screen until a render includes it.
+   */
+  revision = $state(0);
+  imageRevision = $state(0);
+  maskRevision = $state(0);
+
   private history = new History(JSON.stringify(emptyRecipe()));
   private queue = new LatestOnly(() => (this.busy = false));
+  private maskQueue = new LatestOnly();
+  private maskKey = '';
   private box: Box = { w: 0, h: 0, dpr: 1 };
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private originalKey = '';
@@ -212,6 +245,8 @@ export class App {
       storageSet(DOC_KEY, doc.id);
       this.setImage(null);
       this.setOriginal(null, '');
+      this.setMaskUrl(null);
+      this.maskKey = '';
       this.heavy = null;
       this.error = null;
       this.render('full');
@@ -234,11 +269,12 @@ export class App {
       channels: r.channels,
       steps: r.steps
         .filter((s) => s.enabled)
-        .map(({ effect, effect_version, seed, params }) => ({
+        .map(({ effect, effect_version, seed, params, mask }) => ({
           effect,
           ...(effect_version === undefined ? {} : { effect_version }),
           seed,
           params,
+          ...(mask ? { mask } : {}),
         })),
     };
   }
@@ -249,6 +285,7 @@ export class App {
 
   /** Call after every recipe mutation. */
   changed(commit = true): void {
+    this.revision++;
     this.render('fast');
     if (commit) this.commit();
   }
@@ -276,6 +313,9 @@ export class App {
     this.canUndo = this.history.canUndo;
     this.canRedo = this.history.canRedo;
     storageSet(RECIPE_KEY, snap);
+    // Undoing past "Add mask" ends painting.
+    if (this.masking && !this.step(this.masking)?.mask) this.stopMasking();
+    this.revision++;
     this.render('fast');
   }
 
@@ -289,6 +329,7 @@ export class App {
   }
 
   removeStep(uid: string): void {
+    if (this.masking === uid) this.stopMasking();
     this.recipe.steps = this.recipe.steps.filter((s) => s.uid !== uid);
     this.changed();
   }
@@ -380,6 +421,147 @@ export class App {
     this.setParam(uid, CHANNELS_KEY, channels === null ? null : String(channels));
   }
 
+  /** A step's opacity, 0..1 (1 unless set). */
+  opacity(step: StepState): number {
+    const v = Number(step.params[OPACITY_KEY]);
+    return Number.isFinite(v) && v >= 0 && v <= 1 ? v : 1;
+  }
+
+  /** Set a step's opacity; 1 removes the key. */
+  setOpacity(uid: string, value: number, commit = true): void {
+    const v = Math.round(Math.min(1, Math.max(0, value)) * 100) / 100;
+    this.setParam(uid, OPACITY_KEY, v >= 1 ? null : String(v), commit);
+  }
+
+  // -------------------------------------------------------------------------
+  // Masks. Each stroke or gradient is one history entry, so undo takes
+  // back the last one.
+
+  /** Give a step a mask and start painting it. */
+  addMask(uid: string): void {
+    const s = this.step(uid);
+    if (!s || s.mask) return;
+    s.mask = emptyMask();
+    this.changed();
+    this.startMasking(uid);
+  }
+
+  removeMask(uid: string): void {
+    const s = this.step(uid);
+    if (!s?.mask) return;
+    if (this.masking === uid) this.stopMasking();
+    delete s.mask;
+    this.changed();
+  }
+
+  /** Change mask-wide settings (invert, feather). */
+  updateMask(uid: string, patch: Partial<Mask>, commit = true): void {
+    const s = this.step(uid);
+    if (!s?.mask) return;
+    Object.assign(s.mask, patch);
+    this.changed(commit);
+  }
+
+  addMaskOp(uid: string, op: MaskOp): void {
+    const s = this.step(uid);
+    if (!s) return;
+    s.mask ??= emptyMask();
+    s.mask.op = insertOp(s.mask.op ?? [], op);
+    this.changed();
+  }
+
+  /** Change one operation's values (a brightness range, say). */
+  updateMaskOp(uid: string, index: number, patch: Partial<MaskOp>, commit = true): void {
+    const ops = this.step(uid)?.mask?.op;
+    if (!ops?.[index]) return;
+    Object.assign(ops[index], patch);
+    this.changed(commit);
+  }
+
+  setMaskOpMode(uid: string, index: number, mode: MaskMode): void {
+    const m = this.step(uid)?.mask;
+    if (!m?.op?.[index]) return;
+    m.op = withMode(m.op, index, mode);
+    this.changed();
+  }
+
+  removeMaskOps(uid: string, indices: number[]): void {
+    const m = this.step(uid)?.mask;
+    if (!m?.op) return;
+    m.op = m.op.filter((_, i) => !indices.includes(i));
+    this.changed();
+  }
+
+  /** Paint this step's mask on the preview. */
+  startMasking(uid: string): void {
+    this.masking = uid;
+    this.maskKey = '';
+    this.refreshMask();
+  }
+
+  stopMasking(): void {
+    this.masking = null;
+    this.maskKey = '';
+    this.setMaskUrl(null);
+  }
+
+  setTool(patch: Partial<ToolState>): void {
+    Object.assign(this.tool, patch);
+    storageSet(TOOL_KEY, JSON.stringify($state.snapshot(this.tool)));
+    if (patch.show !== undefined) {
+      this.maskKey = '';
+      if (patch.show) this.refreshMask();
+      else this.setMaskUrl(null);
+    }
+  }
+
+  /** The revision the painter should compare its fresh strokes with. */
+  get paintedRevision(): number {
+    return this.tool.show && this.maskUrl ? this.maskRevision : this.imageRevision;
+  }
+
+  /**
+   * Fetch the overlay for the step being painted. The mask comes from the
+   * server, so what is shown is exactly what renders; the request shares
+   * the preview's cache for the picture arriving at the step.
+   */
+  private refreshMask(): void {
+    const doc = this.doc;
+    const uid = this.masking;
+    if (!doc || !uid || !this.tool.show) return;
+    const recipe = this.dto();
+    // The step's position among the steps sent (enabled ones only).
+    const index = this.recipe.steps.filter((s) => s.enabled).findIndex((s) => s.uid === uid);
+    if (index < 0) {
+      this.setMaskUrl(null);
+      return;
+    }
+    const { w, h } = this.target('fast');
+    const key = JSON.stringify([doc.id, index, w, h, recipe]);
+    if (key === this.maskKey) return;
+    this.maskKey = key;
+    const rev = this.revision;
+    this.maskQueue.request(async () => {
+      try {
+        const blob = await api.maskView(doc.id, recipe, index, w, h, MASK_TINT);
+        if (this.doc?.id !== doc.id || this.masking !== uid) return;
+        const url = URL.createObjectURL(blob);
+        await preload(url);
+        this.setMaskUrl(url);
+        this.maskRevision = rev;
+      } catch (e) {
+        // A mask too heavy to show live is not worth an error banner.
+        if (!(e instanceof ApiError && e.status === 503)) this.fail(e);
+        this.maskKey = '';
+      }
+    });
+  }
+
+  private setMaskUrl(url: string | null): void {
+    if (this.maskUrl) URL.revokeObjectURL(this.maskUrl);
+    this.maskUrl = url;
+  }
+
   /** Draw a region band on the preview while it is being dragged. */
   showRegion(s: number, e: number): void {
     clearTimeout(this.regionTimer);
@@ -442,9 +624,11 @@ export class App {
     const recipe = this.dto();
     const exact = quality === 'exact';
     const { w, h } = this.target(exact ? 'full' : quality);
+    const rev = this.revision;
     this.busy = true;
     if (exact) this.working = 'Rendering at full resolution';
-    this.queue.request(() => this.runPreview(doc.id, recipe, w, h, exact));
+    this.queue.request(() => this.runPreview(doc.id, recipe, w, h, exact, rev));
+    if (this.masking) this.refreshMask();
     if (!exact && this.needsExact) {
       // Approximate while things change; exact once they stop.
       this.idleTimer = setTimeout(() => this.render('exact'), EXACT_IDLE_MS);
@@ -460,6 +644,7 @@ export class App {
     w: number,
     h: number,
     exact: boolean,
+    rev: number,
   ): Promise<void> {
     try {
       const res = await api.preview(docId, recipe, w, h, exact);
@@ -467,6 +652,7 @@ export class App {
       const url = URL.createObjectURL(res.blob);
       await preload(url);
       this.setImage(url);
+      this.imageRevision = rev;
       this.renderMs = res.ms;
       this.exact = exact;
       this.heavy = null;

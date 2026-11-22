@@ -15,6 +15,7 @@
   import { CHANNEL_CHOICES, channelName } from '../lib/channels';
   import type { Channels, StepState } from '../lib/types';
   import ParamField from './ParamField.svelte';
+  import BlendSection from './BlendSection.svelte';
 
   let { step, index, count }: { step: StepState; index: number; count: number } = $props();
 
@@ -27,6 +28,7 @@
   // Empty string = follow the recipe.
   const stepEncoding = $derived(step.params[ENCODING_KEY] ?? '');
   const stepChannels = $derived(step.params[CHANNELS_KEY] ?? '');
+  const opacity = $derived(app.opacity(step));
   // Open when first added; collapsing is per card and not part of history.
   let open = $state(true);
 
@@ -44,6 +46,8 @@
       <span class="glyph"><Icon size={18} strokeWidth={1.75} /></span>
       <span class="label serif">{step.effect}</span>
       {#if stepEncoding}<span class="enc">{stepEncoding}</span>{/if}
+      {#if step.mask}<span class="enc" class:live={app.masking === step.uid}>mask</span>{/if}
+      {#if opacity < 1}<span class="enc">{Math.round(opacity * 100)}%</span>{/if}
     </button>
     <label class="toggle" title={step.enabled ? 'Turn this step off' : 'Turn this step on'}>
       <input class="switch" type="checkbox" checked={step.enabled} onchange={() => app.toggleStep(step.uid)} />
@@ -107,6 +111,7 @@
             <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
           {/each}
         </section>
+        <BlendSection {step} />
       {:else}
         <p class="err">Unknown effect `{step.effect}`.</p>
       {/if}
@@ -199,6 +204,11 @@
     background: var(--fill);
     padding: 1px 6px;
     border-radius: 5px;
+  }
+
+  .enc.live {
+    color: var(--accent-fg);
+    background: var(--accent);
   }
 
   .toggle {
