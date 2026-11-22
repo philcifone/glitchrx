@@ -13,7 +13,7 @@ export interface Group {
   effects: EffectInfo[];
 }
 
-const AUDIO = ['echo', 'delay', 'reverb', 'amplify', 'stutter'];
+const AUDIO = ['echo', 'delay', 'reverb', 'phaser', 'wahwah', 'amplify', 'distort', 'speed', 'stutter'];
 const DATA = ['invert', 'bitcrush', 'backwards', 'shift', 'shuffle'];
 
 /**

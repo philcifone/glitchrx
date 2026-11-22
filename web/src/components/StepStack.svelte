@@ -7,7 +7,7 @@
   import Plus from '@lucide/svelte/icons/plus';
   import { tick } from 'svelte';
   import { app } from '../lib/app.svelte';
-  import type { Channels } from '../lib/types';
+  import { CHANNEL_CHOICES } from '../lib/channels';
   import EffectPalette from './EffectPalette.svelte';
   import StepCard from './StepCard.svelte';
 
@@ -42,15 +42,15 @@
         {/each}
       </select>
       <div class="segmented" role="radiogroup" aria-label="Channels">
-        {#each [1, 2] as n (n)}
+        {#each CHANNEL_CHOICES as [n, name, title] (n)}
           <button
             role="radio"
             aria-checked={app.recipe.channels === n}
             class:on={app.recipe.channels === n}
-            onclick={() => app.setChannels(n as Channels)}
-            title={n === 1 ? 'Mono: every sample in one stream' : 'Stereo: alternate samples are left and right, processed separately'}
+            onclick={() => app.setChannels(n)}
+            {title}
           >
-            {n === 1 ? 'Mono' : 'Stereo'}
+            {name}
           </button>
         {/each}
       </div>

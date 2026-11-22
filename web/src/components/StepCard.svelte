@@ -11,6 +11,7 @@
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import { app, CHANNELS_KEY, ENCODING_KEY } from '../lib/app.svelte';
   import { iconFor } from '../lib/icons';
+  import { CHANNEL_CHOICES, channelName } from '../lib/channels';
   import type { Channels, StepState } from '../lib/types';
   import ParamField from './ParamField.svelte';
 
@@ -90,9 +91,10 @@
                 app.setStepChannels(step.uid, v ? (Number(v) as Channels) : null);
               }}
             >
-              <option value="">Recipe ({app.recipe.channels === 2 ? 'stereo' : 'mono'})</option>
-              <option value="1">Mono</option>
-              <option value="2">Stereo</option>
+              <option value="">Recipe ({channelName(app.recipe.channels)})</option>
+              {#each CHANNEL_CHOICES as [n, name] (n)}
+                <option value={String(n)}>{name}</option>
+              {/each}
             </select>
           </label>
         </div>

@@ -9,6 +9,7 @@ const effect = (hits: string, random_within = false): EffectInfo => ({
   summary: '',
   details: '',
   random_within,
+  exact_preview: false,
   params: [
     { name: 'hits', kind: 'int', min: 0, max: 1000, default: hits, help: '', placement: true },
   ],

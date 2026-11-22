@@ -23,6 +23,8 @@ export interface EffectInfo {
   audacity: string;
   /** Draws random numbers inside each window, so the seed matters even with hits=0. */
   random_within: boolean;
+  /** A scaled preview cannot match the export; render exactly when idle. */
+  exact_preview: boolean;
   params: ParamInfo[];
 }
 
@@ -59,8 +61,11 @@ export interface ServerConfig {
   encodings: EncodingInfo[];
 }
 
-/** Mono or stereo: how many interleaved channels the samples form. */
-export type Channels = 1 | 2;
+/**
+ * How many interleaved channels the samples form: mono, stereo, or three
+ * (with 8-bit samples, one per colour, so R, G and B are processed alone).
+ */
+export type Channels = 1 | 2 | 3;
 
 /** A step as sent to the server. Seeds are strings: they are full u64s. */
 export interface StepDto {
