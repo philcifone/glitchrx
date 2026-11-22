@@ -491,14 +491,6 @@ export class App {
     else this.activeOp = index;
   }
 
-  removeMask(uid: string): void {
-    const s = this.step(uid);
-    if (!s?.mask) return;
-    if (this.masking === uid) this.stopMasking();
-    delete s.mask;
-    this.changed();
-  }
-
   /** Change mask-wide settings (invert, feather). */
   updateMask(uid: string, patch: Partial<Mask>, commit = true): void {
     const s = this.step(uid);
@@ -532,11 +524,21 @@ export class App {
     this.changed();
   }
 
+  /**
+   * Remove components. Removing the last one removes the mask itself (an
+   * empty mask would hide the step everywhere), which ends editing.
+   */
   removeMaskOps(uid: string, indices: number[]): void {
-    const m = this.step(uid)?.mask;
-    if (!m?.op) return;
+    const s = this.step(uid);
+    const m = s?.mask;
+    if (!s || !m?.op) return;
     m.op = m.op.filter((_, i) => !indices.includes(i));
-    if (this.masking === uid) this.activeOp = afterRemoval(this.activeOp, indices);
+    if (m.op.length === 0) {
+      if (this.masking === uid) this.stopMasking();
+      delete s.mask;
+    } else if (this.masking === uid) {
+      this.activeOp = afterRemoval(this.activeOp, indices);
+    }
     this.changed();
   }
 

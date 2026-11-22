@@ -4,7 +4,8 @@
   // shown: it is where most of the variety comes from), seed and
   // arrangement buttons.
   import Dices from '@lucide/svelte/icons/dices';
-  import WandSparkles from '@lucide/svelte/icons/wand-sparkles';
+  import Shuffle from '@lucide/svelte/icons/shuffle';
+  import VenetianMask from '@lucide/svelte/icons/venetian-mask';
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import Copy from '@lucide/svelte/icons/copy';
@@ -46,7 +47,11 @@
       <span class="glyph"><Icon size={18} strokeWidth={1.75} /></span>
       <span class="label serif">{step.effect}</span>
       {#if stepEncoding}<span class="enc">{stepEncoding}</span>{/if}
-      {#if step.mask}<span class="enc" class:live={app.masking === step.uid}>mask</span>{/if}
+      {#if step.mask}
+        <span class="enc tag-icon" class:live={app.masking === step.uid} title="Masked" aria-label="Masked">
+          <VenetianMask size={14} strokeWidth={1.75} />
+        </span>
+      {/if}
       {#if opacity < 1}<span class="enc">{Math.round(opacity * 100)}%</span>{/if}
     </button>
     <label class="toggle" title={step.enabled ? 'Turn this step off' : 'Turn this step on'}>
@@ -54,7 +59,7 @@
       <span class="visually-hidden">Enabled</span>
     </label>
     <button class="icon" onclick={() => app.shake(step.uid)} disabled={!info} title="Shake: random settings for this step (placement stays)" aria-label="Shake settings">
-      <WandSparkles size={18} strokeWidth={1.75} />
+      <Shuffle size={18} strokeWidth={1.75} />
     </button>
     <button
       class="icon"
@@ -204,6 +209,12 @@
     background: var(--fill);
     padding: 1px 6px;
     border-radius: 5px;
+  }
+
+  .enc.tag-icon {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 5px;
   }
 
   .enc.live {
