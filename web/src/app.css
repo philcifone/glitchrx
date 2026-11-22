@@ -163,8 +163,24 @@ button {
     opacity 0.15s;
 }
 
-button:hover:not(:disabled) {
-  background: var(--fill-strong);
+/* Hover effects only where a pointer really hovers. On touch screens,
+   Safari keeps a tapped element in :hover until the next tap elsewhere,
+   which would leave buttons looking pressed (or, worse, hide a segmented
+   control's selection). */
+@media (hover: hover) {
+  button:hover:not(:disabled) {
+    background: var(--fill-strong);
+  }
+
+  button.primary:hover:not(:disabled) {
+    background: var(--accent);
+    filter: brightness(1.08);
+  }
+
+  button.icon:hover:not(:disabled),
+  button.plain:hover:not(:disabled) {
+    background: var(--fill);
+  }
 }
 
 button:active:not(:disabled) {
@@ -182,10 +198,6 @@ button.primary {
   font-weight: 600;
 }
 
-button.primary:hover:not(:disabled) {
-  background: var(--accent);
-  filter: brightness(1.08);
-}
 
 button.icon,
 button.plain {
@@ -203,10 +215,6 @@ button.plain {
   padding: 4px 8px;
 }
 
-button.icon:hover:not(:disabled),
-button.plain:hover:not(:disabled) {
-  background: var(--fill);
-}
 
 button.danger {
   color: var(--danger);
@@ -376,7 +384,9 @@ input[type='radio'] {
   background: none;
 }
 
-.segmented button.on {
+/* Listed with :hover too, so the selection always wins. */
+.segmented button.on,
+.segmented button.on:hover:not(:disabled) {
   background: var(--card);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
   font-weight: 600;
