@@ -3,8 +3,10 @@
 //! A thin front end over `glitchrx-core`: parse arguments, build a recipe,
 //! run it over each input, write outputs safely, print one summary line per
 //! file. All the real work lives in the core so the GUI can share it.
+//! `glitchrx serve` hands off to the web GUI (`glitchrx-serve`).
 
 mod args;
+mod serve_cmd;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -67,7 +69,12 @@ impl From<WriteError> for Fail {
 }
 
 fn main() -> ExitCode {
-    let (effects, rest) = args::split_effects(std::env::args_os().skip(1).collect());
+    let mut argv: Vec<_> = std::env::args_os().skip(1).collect();
+    if argv.first().is_some_and(|a| a == "serve") {
+        argv.remove(0);
+        return serve_cmd::main(argv);
+    }
+    let (effects, rest) = args::split_effects(argv);
     let cmd = Cli::command()
         .after_help(args::after_help())
         .arg_required_else_help(effects.is_empty());
