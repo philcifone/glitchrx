@@ -86,7 +86,8 @@ pub enum ModeArg {
     override_usage = "glitchrx [--EFFECT [k=v,...]]... [OPTIONS] INPUT [OUTPUT]\n       \
                       glitchrx [--EFFECT [k=v,...]]... [OPTIONS] --batch INPUT...\n       \
                       glitchrx --info INPUT...\n       \
-                      glitchrx --list",
+                      glitchrx --list\n       \
+                      glitchrx serve [--host ADDR] [--port N] [--root DIR] [--token[=SECRET]]",
     disable_help_subcommand = true
 )]
 pub struct Cli {
@@ -173,7 +174,8 @@ pub fn after_help() -> String {
          glitchrx --echo delay=4096 --shift by=200 photo.jpg\n  \
          glitchrx --reverse --echo delay=4096 --seed 81723 photo-glitch.jpg\n  \
          glitchrx --shuffle --batch *.jpg\n  \
-         glitchrx --info photo.jpg\n\
+         glitchrx --info photo.jpg\n  \
+         glitchrx serve --root ~/Pictures               web GUI (see glitchrx serve --help)\n\
          \nOriginals are never modified, and existing files are never overwritten without --force.",
     );
     s

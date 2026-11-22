@@ -44,6 +44,15 @@ Shared terms for glitcharaxia, so we can name things precisely. Grouped by topic
 - **Seed.** The number that drives all randomness. The same seed always gives the same result.
 - **Target.** Choosing a byte region by image position, for example "rows 40-60%" (Phase 3). It is approximate, because damage bleeds downward.
 - **Undo hint.** The `undo: glitchrx --reverse ...` line printed after a reversible run. Copy and paste it to restore the input exactly.
+- **Bottom sheet.** On a phone, the step panel sits under the preview and can be pulled taller with its handle. A common mobile pattern.
+- **Compare.** Holding the "original" button (or the `\` key) in the GUI to see the untouched photo in place of the glitch.
+- **Document (doc).** A photo open in `glitchrx serve`. The server keeps up to four, closing the least recently used.
+- **Latest wins.** The preview scheduling rule: at most one render runs and one waits, and a new request replaces the waiting one. While a slider moves, the preview keeps up with the newest value instead of falling behind.
+- **Preview.** The GUI's on-screen render: decoded on the server at a size that covers the screen, then sent as a clean JPEG. Exports are full resolution.
+- **Render cache / step cache.** What the server keeps per document so re-renders are fast: the prepared input, and the payload after each step. Changing step 3 re-runs steps 3 onwards only.
+- **Root (`--root`).** The one folder `glitchrx serve` may browse, open from and save into. Paths outside it are refused.
+- **Step switch.** The on/off box on a GUI step. A switched-off step stays in the stack but is left out of renders and recipes.
+- **Token.** The shared secret of `glitchrx serve --token`. Opening the printed URL once stores it in a cookie.
 - **Window.** The bytes a single hit covers (`len`). Some parameters (`shuffle` block, `stutter` chunk) can be a percent of the window.
 
 ## Math and audio terms
@@ -67,4 +76,10 @@ Shared terms for glitcharaxia, so we can name things precisely. Grouped by topic
 - **proptest.** Property-based testing: it throws thousands of random inputs at a rule (such as "invert undoes apply") and shrinks any failure to the smallest example.
 - **Svelte.** The frontend framework for the web GUI (Phase 2). It compiles to small plain JavaScript.
 - **Tauri.** A toolkit for wrapping a web UI in a native desktop window (optional, Phase 2b).
+- **Content-Security-Policy (CSP).** A response header telling the browser where a page may load things from. `glitchrx serve` allows only itself, which enforces "no external requests" in the browser.
+- **Embedding.** Building the compiled web GUI into the `glitchrx` binary (`build.rs` + `include_bytes!`), so it runs with nothing on disk.
+- **Lucide.** The open-source icon set used, sparingly, in the GUI.
+- **svelte-check / vitest.** The frontend's type checker and unit-test runner. Both are part of the gate once web dependencies are installed.
+- **tokio.** The async runtime under axum.
+- **Vite.** The frontend build tool: it compiles the Svelte app into `web/dist` and runs the hot-reload dev server.
 - **WireGuard.** The VPN Phil uses to reach the home network. `glitchrx serve` is reached through it.

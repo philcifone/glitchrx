@@ -9,6 +9,7 @@ Run `just check` (or `scripts/check.sh` if `just` is not installed) before calli
 - `cargo fmt --check`
 - `cargo clippy --workspace --all-targets -- -D warnings`
 - `cargo test --workspace`
+- `svelte-check` and `vitest` in `web/`, when `web/node_modules` exists (`just web` installs it)
 
 Report the real output. Never assume success.
 

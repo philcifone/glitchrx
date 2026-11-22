@@ -9,7 +9,7 @@ Glitch art from photographs, by applying audio-style effects (echo, reverb, shuf
 
 Everything runs locally. No image is ever uploaded anywhere.
 
-Status: Phase 1, a command-line tool (`glitchrx`) for JPEG. A web GUI with live preview, usable from a phone over your LAN or VPN, is Phase 2. See `SPEC.md` for the roadmap and `VOCAB.md` for terminology.
+Status: Phase 2. A command-line tool (`glitchrx`) and a web GUI (`glitchrx serve`) with live preview, usable from a phone over your LAN or VPN. JPEG only for now; more formats are planned. See `SPEC.md` for the roadmap and `VOCAB.md` for terminology.
 
 ## Install
 
@@ -18,10 +18,12 @@ Requirements:
 - libjpeg-turbo with its TurboJPEG headers. On Arch Linux this is the `libjpeg-turbo` package; on Debian and Ubuntu, `libturbojpeg0-dev`.
 
 ```
-cargo build --release -p glitchrx-cli
-# binary: target/release/glitchrx
+just build-all          # builds the web GUI (needs Node.js and npm), then the binary
+# binary: target/release/glitchrx, with the GUI embedded
 cp target/release/glitchrx ~/.local/bin/    # optional
 ```
+
+Without Node.js, `cargo build --release -p glitchrx-cli` builds everything except the GUI; `glitchrx serve` then shows a page explaining how to add it. Node is only needed to build. The finished binary contains the whole GUI and needs nothing else at runtime.
 
 On macOS or Windows without a system libjpeg-turbo, build with `--features glitchrx-core/vendored`. That needs cmake, and nasm for the SIMD code.
 
@@ -78,6 +80,26 @@ All parameters are documented in `docs/effects.md`, which is generated from the 
   - 3: refused (for safety)
   - 4: unsupported file
 
+## Web GUI
+
+```
+glitchrx serve                                   # http://127.0.0.1:7878, this machine only
+glitchrx serve --root ~/Pictures                 # also browse, open and save photos there
+glitchrx serve --host 0.0.0.0 --token --root ~/Pictures   # from a phone over LAN or WireGuard
+```
+
+`--host 0.0.0.0` listens on every interface and prints a URL for each address. There is no login, so anyone who can reach the port can use the server. `--token` adds a generated secret to the printed URL; open that URL once per browser, and a cookie keeps you signed in. `--token=SECRET` sets your own.
+
+In the GUI:
+- **Open** a photo from your device (it is sent to your own server, nowhere else) or, with `--root`, from the server's folders.
+- **Add steps** from the effect list. Steps run top to bottom. Each one can be switched off, re-rolled (new seed), moved, duplicated or removed. Shared placement settings (`region`, `hits`, `len`) are under "Placement".
+- **Bands** sets the restart interval (the CLI's `--restart`); see below.
+- **Hold "original"** (or the `\` key) to compare with the untouched photo.
+- **Undo and redo** with the buttons or Ctrl+Z / Ctrl+Shift+Z. History holds recipes, not images.
+- **Export** at full resolution: a baked PNG or JPEG (what the preview shows), or the glitched JPEG itself. With `--root`, results can be saved next to the original using the CLI's `-glitch`, `-glitch-1` naming. Nothing is overwritten. The recipe can be downloaded, then loaded again later or replayed with `glitchrx --recipe`.
+
+The preview is decoded on the server with libjpeg-turbo, the same decoder browsers use, and sent to the page as a clean image. What you see is the baked result, whatever browser you use. On a 24 MP photo, a preview takes roughly 150-250 ms.
+
 ## How it works
 
 A JPEG is a header (dimensions, colour tables, metadata) followed by compressed image data. Changing the header breaks the file, while changing the image data produces glitches. `glitchrx` parses the file, finds the image data, and lets the effects edit only that.
@@ -106,17 +128,22 @@ In Audacity, you chose between little endian and big endian when importing raw d
 just check        # fmt, clippy (warnings denied), all tests; or scripts/check.sh
 just fixtures     # regenerate tests/fixtures (procedural, CC0)
 just sheets       # parameter-sweep contact sheets into out/sheets
+just web          # install web deps and build the GUI into web/dist
+just web-check    # svelte-check and vitest (also part of `just check` once web deps exist)
+just web-dev      # GUI with hot reload on :5173, proxying /api to `glitchrx serve` on :7878
 ```
 
 Layout:
 - `crates/glitchrx-core`: the engine
 - `crates/glitchrx-cli`: the `glitchrx` command
+- `crates/glitchrx-serve`: the web server behind `glitchrx serve`
+- `web/`: the Svelte GUI, embedded into the binary at build time
 - `tools/`: fixture generator, contact sheets
 - `docs/`: effect reference and decision records
 
 ## Privacy
 
-`glitchrx` makes no network connections. Test images in this repository are generated procedurally. Personal sample photos belong in `samples/`, which is ignored by git.
+`glitchrx` makes no outgoing network connections. `glitchrx serve` only answers the browser that connects to it. Every font, script and icon of the GUI is built into the binary, and a Content-Security-Policy stops the page from loading anything from elsewhere. Test images in this repository are generated procedurally. Personal sample photos belong in `samples/`, which is ignored by git.
 
 ## License
 

@@ -4,3 +4,6 @@
 /out/
 *.recipe.toml
 !tests/fixtures/*.recipe.toml
+# Web GUI: dependencies and build output (embedded into the binary by build.rs)
+/web/node_modules/
+/web/dist/
