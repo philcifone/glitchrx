@@ -35,3 +35,14 @@ serve root="samples/jpeg": build-all
 # Frontend hot-reload server on :5173 (0.0.0.0); needs `glitchrx serve` on :7878.
 web-dev:
     cd web && npm run dev
+
+# Run the desktop app (debug build; prints its internal server URL).
+desktop: web
+    cargo run -p glitchrx-desktop
+
+# Build the desktop app and install it for this user (~/.local); `just uninstall-desktop` removes it.
+install-desktop:
+    scripts/install-desktop.sh
+
+uninstall-desktop:
+    scripts/install-desktop.sh --remove
