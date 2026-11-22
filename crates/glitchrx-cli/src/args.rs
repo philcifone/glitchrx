@@ -118,6 +118,12 @@ pub struct Cli {
     #[arg(long, value_enum, default_value = "safe")]
     pub mode: ModeArg,
 
+    /// Before glitching, losslessly add restart markers every ROWS MCU rows or
+    /// every PERCENT% of the image height, so each glitch stays in a band of
+    /// that height. `0` removes them, `keep` leaves the file as it is.
+    #[arg(long, value_name = "ROWS|PERCENT%|keep", value_parser = parse_restart)]
+    pub restart: Option<RestartArg>,
+
     /// Also write the decoded result as PNG [default: OUTPUT-STEM.png]
     #[arg(long, value_name = "FILE", num_args = 0..=1, require_equals = true)]
     pub bake: Option<Option<PathBuf>>,
@@ -259,4 +265,20 @@ mod tests {
         assert!(e.is_empty());
         assert_eq!(rest, os(&["--", "--echo"]));
     }
+}
+
+/// `--restart` value: an interval, or `keep` to leave the file as it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestartArg {
+    Keep,
+    Set(glitchrx_core::Restart),
+}
+
+fn parse_restart(s: &str) -> Result<RestartArg, String> {
+    if s == "keep" {
+        return Ok(RestartArg::Keep);
+    }
+    glitchrx_core::Restart::parse(s)
+        .map(RestartArg::Set)
+        .map_err(|e| e.to_string())
 }

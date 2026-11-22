@@ -233,3 +233,33 @@ fn golden_hashes() {
     }
     insta::assert_yaml_snapshot!(hashes);
 }
+
+/// Adding restart markers is lossless on every fixture: same pixels, same
+/// thumbnail and trailing data, and the markers are really there. Then a
+/// glitch on the prepared file reverses back to the prepared file exactly.
+#[test]
+fn restart_markers_are_lossless_and_round_trip() {
+    use glitchrx_core::Restart;
+    for (name, bytes) in fixtures() {
+        let before = Jpeg::parse(bytes.clone(), Mode::Safe).unwrap();
+        let r = Recipe {
+            restart: Some(Restart::MilliPercent(10_000)),
+            ..recipe("echo", "", 9, Mode::Safe)
+        };
+        let prepared = r.prepare_input(bytes.clone()).unwrap();
+        let after = Jpeg::parse(prepared.clone(), Mode::Safe).unwrap();
+        let (bi, ai) = (before.info(), after.info());
+        assert!(ai.restart_interval > 0 && ai.restart_markers > 0, "{name}");
+        assert_eq!(ai.has_exif_thumbnail, bi.has_exif_thumbnail, "{name}");
+        assert_eq!(ai.trailing_len, bi.trailing_len, "{name}");
+        assert!(
+            prepared.ends_with(&bytes[bytes.len() - bi.trailing_len..]),
+            "{name}: trailing data changed"
+        );
+        let px = |b: &[u8]| decode(b, Scale::Full).0.unwrap().rgba;
+        assert!(px(&prepared) == px(&bytes), "{name}: pixels changed");
+
+        let glitched = r.apply(bytes.clone()).unwrap();
+        assert_eq!(r.invert(glitched).unwrap(), prepared, "{name}");
+    }
+}

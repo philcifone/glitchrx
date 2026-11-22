@@ -67,6 +67,19 @@ impl Frame {
         self.sof == 0xC2
     }
 
+    /// Height in pixels of one MCU row: 8 x the largest vertical sampling
+    /// factor (8 for 4:4:4 and 4:2:2, 16 for 4:2:0).
+    pub fn mcu_height(&self) -> u32 {
+        let v = self
+            .components
+            .iter()
+            .map(|c| c.2)
+            .max()
+            .unwrap_or(1)
+            .max(1);
+        8 * v as u32
+    }
+
     /// Human-readable chroma subsampling.
     pub fn subsampling(&self) -> String {
         match self.components.as_slice() {

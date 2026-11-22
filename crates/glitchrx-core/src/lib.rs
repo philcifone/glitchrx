@@ -13,6 +13,7 @@ pub mod formats;
 pub mod params;
 pub mod placement;
 pub mod recipe;
+pub mod restart;
 pub mod rng;
 
 #[cfg(feature = "fs")]
@@ -23,3 +24,4 @@ pub mod turbo;
 pub use error::{Error, Result};
 pub use formats::jpeg::{Jpeg, Mode};
 pub use recipe::{Recipe, Step};
+pub use restart::Restart;

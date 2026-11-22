@@ -22,7 +22,7 @@ Report the real output. Never assume success.
 
 ## Invariants (tests enforce these)
 
-- **Header-safe.** In safe mode, every byte outside the entropy-coded data is identical to the input.
+- **Header-safe.** In safe mode, every byte outside the entropy-coded data is identical to the *prepared input* (the input itself, or its lossless restart-marker rewrite when `restart` is set; SPEC D-15).
 - **Length-preserving.** Byte effects never change the payload length.
 - **Inputs are never written,** even with `--force`. Outputs are never overwritten without `--force`.
 - **Determinism:**

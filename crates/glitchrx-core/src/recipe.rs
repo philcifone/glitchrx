@@ -28,6 +28,7 @@ use crate::error::{Error, Result};
 use crate::formats::jpeg::{Jpeg, Mode};
 use crate::params::{Params, parse_list};
 use crate::placement::{Placement, hit_rng};
+use crate::restart::Restart;
 use crate::rng::derive;
 
 /// Magic string identifying a recipe file.
@@ -128,6 +129,12 @@ pub struct Recipe {
     pub version: u32,
     #[serde(default)]
     pub mode: Mode,
+    /// Before glitching, losslessly rewrite the file with a restart marker
+    /// every N MCU rows or N% of the image height (`0` removes them; absent
+    /// leaves the file as is). This sets how far down the image one glitch
+    /// can spread. See [`crate::restart`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart: Option<Restart>,
     #[serde(rename = "step", default)]
     pub steps: Vec<Step>,
 }
@@ -138,6 +145,7 @@ impl Default for Recipe {
             format: FORMAT.into(),
             version: VERSION,
             mode: Mode::Safe,
+            restart: None,
             steps: Vec::new(),
         }
     }
@@ -200,8 +208,24 @@ impl Recipe {
         Ok(out)
     }
 
+    /// The file the effects actually run on: the input itself, or the input
+    /// rewritten with restart markers when `restart` is set. The GUI caches
+    /// this, since it only changes when the input or `restart` does.
+    pub fn prepare_input(&self, input: Vec<u8>) -> Result<Vec<u8>> {
+        match self.restart {
+            None => Ok(input),
+            Some(r) => with_restarts(input, r),
+        }
+    }
+
     /// Glitch a JPEG file's bytes.
     pub fn apply(&self, input: Vec<u8>) -> Result<Vec<u8>> {
+        let input = self.prepare_input(input)?;
+        self.apply_prepared(input)
+    }
+
+    /// Glitch a file that already went through [`Recipe::prepare_input`].
+    pub fn apply_prepared(&self, input: Vec<u8>) -> Result<Vec<u8>> {
         let steps = self.prepare_all()?;
         let mut jpeg = Jpeg::parse(input, self.mode)?;
         for s in &steps {
@@ -211,6 +235,10 @@ impl Recipe {
     }
 
     /// Undo the recipe on a glitched file: steps inverted, last step first.
+    ///
+    /// `restart` is ignored here: the glitched file already carries the
+    /// markers, and the restored file keeps them (its pixels are identical to
+    /// the original, its bytes are those of the prepared input).
     pub fn invert(&self, input: Vec<u8>) -> Result<Vec<u8>> {
         let bad = self.irreversible_parts()?;
         if !bad.is_empty() {
@@ -223,6 +251,28 @@ impl Recipe {
         }
         Ok(jpeg.finish())
     }
+}
+
+/// Rewrite `input` with restart markers at the given interval, keeping any
+/// trailing data after the image. Lossless: the pixels do not change.
+#[cfg(feature = "turbo")]
+pub fn with_restarts(input: Vec<u8>, restart: Restart) -> Result<Vec<u8>> {
+    // Parse first: it validates the file, gives the frame size for a percent
+    // interval, and finds the trailing bytes, which the transform would
+    // otherwise drop.
+    let info = Jpeg::parse(input.clone(), Mode::Safe)?.info().clone();
+    let rows = restart.rows_for(&info.frame);
+    let (image, trailing) = input.split_at(input.len() - info.trailing_len);
+    crate::turbo::set_restarts(image, rows, trailing)
+        .map_err(|e| Error::Malformed(format!("adding restart markers failed: {e}")))
+}
+
+/// Without libjpeg-turbo there is no lossless transform.
+#[cfg(not(feature = "turbo"))]
+pub fn with_restarts(_input: Vec<u8>, _restart: Restart) -> Result<Vec<u8>> {
+    Err(Error::Unsupported(
+        "restart markers need the `turbo` feature".into(),
+    ))
 }
 
 /// TOML (de)serialization of parameter values.
@@ -285,7 +335,9 @@ mod tests {
         r.steps
             .push(Step::new("echo", "delay=4096,gain=0.7,region=5%:100%,len=4k", 81723).unwrap());
         r.steps.push(Step::new("backwards", "", 5).unwrap());
+        r.restart = Some(Restart::MilliPercent(8000));
         let text = r.to_toml();
+        assert!(text.contains("restart = \"8%\""), "{text}");
         assert!(text.contains("delay = 4096"), "{text}");
         assert!(text.contains("gain = 0.7"), "{text}");
         assert!(text.contains("region = \"5%:100%\""), "{text}");

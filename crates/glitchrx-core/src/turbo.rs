@@ -207,6 +207,62 @@ pub fn decode(jpeg: &[u8], scale: Scale) -> (Option<Image>, DecodeStatus) {
     }
 }
 
+/// Losslessly rewrite a JPEG with a restart marker every `rows` MCU rows
+/// (`rows = 0` removes all restart markers).
+///
+/// Why this matters for glitching: without restart markers, one damaged
+/// spot desyncs the Huffman decoder and shifts the DC (average colour) of
+/// every later block, so everything below it turns into a flat wash. A
+/// restart marker resets both, so damage stops at the next marker. The
+/// interval therefore sets how tall each glitch band can grow.
+///
+/// This is a *lossless transform*: libjpeg-turbo moves the DCT coefficients
+/// into a new file without decoding to pixels, so the image is pixel-for-pixel
+/// identical to the input. Header markers (EXIF, ICC, thumbnail) are copied.
+/// Bytes after the primary EOI (gain maps, MPF images) are not part of the
+/// transform, so the caller re-appends them (`trailing`).
+pub fn set_restarts(jpeg: &[u8], rows: u16, trailing: &[u8]) -> Result<Vec<u8>, String> {
+    let h = Handle::new(tj::TJINIT_TJINIT_TRANSFORM).ok_or("could not initialise libjpeg-turbo")?;
+    h.set(tj::TJPARAM_TJPARAM_RESTARTROWS, rows as c_int);
+    // A transform reads the header itself, but reading it first gives a
+    // clear error for files libjpeg-turbo will not accept.
+    // SAFETY: valid handle, pointer and length describe the caller's slice.
+    let rc = unsafe { tj::tj3DecompressHeader(h.0, jpeg.as_ptr(), jpeg.len() as tj::size_t) };
+    if rc != 0 && h.error().0 {
+        return Err(h.error().1);
+    }
+    // All-zero = no crop, TJXOP_NONE, no options, no callback.
+    // SAFETY: tjtransform is a plain C struct; zero is valid for every field.
+    let xform: tj::tjtransform = unsafe { std::mem::zeroed() };
+    let mut out: *mut u8 = std::ptr::null_mut();
+    let mut size: tj::size_t = 0;
+    // SAFETY: n = 1 with one destination pointer, size and transform; a null
+    // destination makes TurboJPEG allocate it, and we free it with tj3Free.
+    unsafe {
+        let rc = tj::tj3Transform(
+            h.0,
+            jpeg.as_ptr(),
+            jpeg.len() as tj::size_t,
+            1,
+            &mut out,
+            &mut size,
+            &xform,
+        );
+        let fatal = rc != 0 && h.error().0;
+        if fatal || out.is_null() {
+            let msg = h.error().1;
+            if !out.is_null() {
+                tj::tj3Free(out.cast());
+            }
+            return Err(msg);
+        }
+        let mut v = std::slice::from_raw_parts(out, size as usize).to_vec();
+        tj::tj3Free(out.cast());
+        v.extend_from_slice(trailing);
+        Ok(v)
+    }
+}
+
 /// Chroma subsampling for [`encode`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Subsampling {
@@ -353,6 +409,21 @@ mod tests {
         assert_eq!(Scale::to_fit(6000, 4000, 700, 700), Scale::Eighth);
         assert_eq!(Scale::to_fit(6000, 4000, 1200, 800), Scale::Quarter);
         assert_eq!(Scale::to_fit(640, 480, 1000, 1000), Scale::Full);
+    }
+
+    #[test]
+    fn restarts_are_lossless() {
+        let jpg = encode(&gradient(160, 96), EncodeOptions::default()).unwrap();
+        let with = set_restarts(&jpg, 1, b"TRAILER").unwrap();
+        assert!(with.ends_with(b"TRAILER"));
+        assert!(with.windows(2).any(|w| w == [0xFF, 0xD0]), "no RST0 found");
+        let (a, _) = decode(&jpg, Scale::Full);
+        let (b, sb) = decode(&with, Scale::Full);
+        assert_eq!(sb, DecodeStatus::Clean);
+        assert_eq!(a.unwrap().rgba, b.unwrap().rgba, "pixels changed");
+        // And back to none.
+        let without = set_restarts(&with[..with.len() - 7], 0, b"").unwrap();
+        assert!(!without.windows(2).any(|w| w == [0xFF, 0xD0]));
     }
 
     #[test]

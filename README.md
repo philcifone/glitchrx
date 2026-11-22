@@ -33,6 +33,8 @@ glitchrx --echo photo.jpg                       # again: photo-glitch-1.jpg
 glitchrx --echo photo.jpg out.jpg               # explicit output name
 glitchrx --echo delay=4096,gain=0.7 --shift by=200 photo.jpg
 glitchrx --shuffle --bake photo.jpg             # also writes photo-glitch.png
+glitchrx --echo hits=8 --restart 20% photo.jpg   # taller glitch bands
+glitchrx --echo --restart keep photo.jpg        # no bands: damage runs to the bottom
 glitchrx --stutter --batch *.jpg                # every file, automatic names
 glitchrx --info photo.jpg                       # what is inside the file
 glitchrx --list                                 # every effect and parameter
@@ -81,6 +83,16 @@ All parameters are documented in `docs/effects.md`, which is generated from the 
 A JPEG is a header (dimensions, colour tables, metadata) followed by compressed image data. Changing the header breaks the file, while changing the image data produces glitches. `glitchrx` parses the file, finds the image data, and lets the effects edit only that.
 
 One detail the Audacity method missed: inside the image data, the byte value 255 (`FF`) always appears as `FF 00`. Any other `FF xx` pair is a control marker, and an accidental `FF D9` means "end of image", which turns everything after it flat gray. `glitchrx` removes those `00`s before the effects run and puts them back afterwards, so no effect can forge a marker. `--mode raw` turns this protection off if you want the Audacity behaviour, truncations included.
+
+### Glitch bands and restart markers
+
+When the decoder hits damaged data, it loses its place, and the colour of every following block drifts. Left alone, one glitch near the top turns the rest of the picture into a flat wash. That is what most viewers show as a gray block.
+
+JPEG has a built-in fix: *restart markers*, checkpoints where the decoder resets. Most cameras and phones do not write them. By default `glitchrx` first rewrites the file with a marker every 10% of the image height (`--restart 10%`), so each glitch stays in a band, and the rest of the photo survives. This rewrite is lossless: the pixels do not change.
+
+- `--restart 3%` gives thin streaks, and `--restart 25%` gives large chunks.
+- `--restart 0` removes all markers, and `--restart keep` leaves the file exactly as it was. Either way you get the wash-to-the-bottom look.
+- Because of the rewrite, `--reverse` gives back the original *pixels* exactly, but not byte for byte. Add `--restart keep` to both runs if you need the exact original bytes back.
 
 ### About endianness
 

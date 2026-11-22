@@ -22,6 +22,7 @@ Keywords: **must** means required for the phase to be done. **Should** means exp
 | D-12 | 16-bit sample view | Deferred from Phase 1 to **later**. It adds a generic layer to every effect for little visual payoff before the GUI exists. |
 | D-13 | `reverse` effect renamed `backwards` | Found during implementation: an effect flag `--reverse` would collide with the `--reverse` (undo) option. |
 | D-14 | Window-relative sizes | `shuffle` `block` and `stutter` `chunk` accept a percent of the hit window (defaults `5%` and `12%`). The byte-count defaults were larger than the hit window on small images, which made both effects do nothing. A test now fails if any effect's defaults leave an image unchanged. |
+| D-15 | Restart markers by default (Phase 2 start) | Phil's first real photos (6240x4160, no restart markers) showed the Phase 1 defaults turning everything below the first hit into a flat wash. Fix: before glitching, the file is losslessly rewritten with a restart marker every `--restart` interval (MCU rows, or a percent of the image height). Each glitch then stays in a band. CLI default `10%`; `--restart keep` restores the old behaviour. Consequences: the output's header differs from the *input* (a DRI segment is added) but stays byte-identical to the *prepared* file, and `--reverse` restores the original pixels exactly, not the original bytes (exact bytes still come back with `--restart keep`). Recipes carry `restart`; the core default is still "keep". |
 
 ## 0. Review of the brief (v0.1, kept for reference)
 
@@ -204,6 +205,7 @@ glitchrx --list
 | `--recipe FILE` | Apply a saved recipe instead of effect flags. |
 | `--save-recipe[=FILE]` | Write the recipe used. Default `<output-stem>.recipe.toml`. |
 | `--mode safe\|raw` | `raw` skips de-stuffing (Audacity-faithful, may truncate, not reversible). |
+| `--restart ROWS\|PCT%\|keep` | Before glitching, losslessly add restart markers every ROWS MCU rows or PCT% of the image height, which caps how tall each glitch band grows. `0` removes markers. Default `10%`; `keep` leaves the file as is (D-15). |
 | `--bake[=FILE.png]` | Also write the decoded result as PNG. Default `<output-stem>.png`. |
 | `--force` | Allow overwriting an existing output. Never the input. |
 | `--batch` | Treat every positional as an input. |
@@ -245,6 +247,7 @@ TOML. Both the CLI and the GUI accept it.
 format = "glitcharaxia-recipe"
 version = 1
 mode = "safe"
+restart = "10%"          # optional; absent = leave the file's markers as they are
 
 [[step]]
 effect = "echo"
