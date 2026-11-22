@@ -1,5 +1,6 @@
 //! Audio building blocks shared by the effects: delay lines, Freeverb's comb
-//! and allpass filters, and a deterministic `exp`.
+//! and allpass filters, a slow sweep oscillator (LFO), and deterministic
+//! `exp` and sine.
 //!
 //! Everything here uses only `+ - * /` and comparisons on `f64` (SPEC D-25).
 //! The platform's `exp`, `sin` and `pow` may differ in the last bit between
@@ -27,6 +28,79 @@ pub fn exp(x: f64) -> f64 {
     let n = n as i64;
     let two_n = f64::from_bits(((n + 1023) as u64) << 52);
     sum * two_n
+}
+
+/// `sin(2 pi t)`, with `t` in turns (1.0 is a full circle), from basic
+/// operations only.
+///
+/// Working in turns makes range reduction exact: `t - round(t)` loses
+/// nothing, where reducing radians by a rounded 2 pi would. The symmetry
+/// `sin(x) = sin(pi - x)` then folds the angle into a quarter circle,
+/// where the Taylor series to x^19 is accurate to about 1e-16.
+pub fn sin_turns(t: f64) -> f64 {
+    const TAU: f64 = std::f64::consts::TAU;
+    let mut r = t - t.round(); // -0.5 ..= 0.5
+    if r > 0.25 {
+        r = 0.5 - r;
+    } else if r < -0.25 {
+        r = -0.5 - r;
+    }
+    let x = r * TAU; // -pi/2 ..= pi/2
+    let x2 = x * x;
+    // Horner form of x - x^3/3! + x^5/5! - ... - x^19/19!, innermost first.
+    let mut sum = 0.0;
+    for k in (1..=9).rev() {
+        let n = (2 * k + 1) as f64;
+        sum = (1.0 - sum) * x2 / (n * (n - 1.0));
+    }
+    x * (1.0 - sum)
+}
+
+/// `cos(2 pi t)`, with `t` in turns.
+pub fn cos_turns(t: f64) -> f64 {
+    sin_turns(t + 0.25)
+}
+
+/// How often (in samples) an [`Lfo`] yields a new value. Effects recompute
+/// their swept coefficients only then, which is what makes them fast: the
+/// exponentials and sines cost far more than the filtering. Audacity does
+/// the same (every 20 samples in its phaser, 30 in its wahwah); a sweep
+/// lasts thousands of samples, so the steps never show.
+pub const LFO_EVERY: u64 = 16;
+
+/// A low-frequency oscillator, as Audacity's phaser and wahwah use, with
+/// its period in samples rather than Hz. Yields `(1 + cos)/2`, a smooth
+/// sweep between 0 and 1, every [`LFO_EVERY`] samples.
+pub struct Lfo {
+    period: f64,
+    start: f64,
+    n: u64,
+}
+
+impl Lfo {
+    /// `period` in samples (at least 1); `start` in turns.
+    pub fn new(period: usize, start: f64) -> Lfo {
+        Lfo {
+            period: period.max(1) as f64,
+            start,
+            n: 0,
+        }
+    }
+
+    /// Advance one sample. Every [`LFO_EVERY`] samples (starting with the
+    /// first) returns the sweep's value there, 0 ..= 1; otherwise `None`,
+    /// and the caller keeps using the last value.
+    pub fn tick(&mut self) -> Option<f64> {
+        let n = self.n;
+        self.n += 1;
+        if !n.is_multiple_of(LFO_EVERY) {
+            return None;
+        }
+        // Phase from the sample count each time, not by adding up a step,
+        // so rounding never drifts over millions of samples.
+        let t = self.start + (n % self.period as u64) as f64 / self.period;
+        Some((1.0 + cos_turns(t)) * 0.5)
+    }
 }
 
 /// Decibels to a linear gain factor: `10^(db/20)`.
@@ -126,6 +200,38 @@ mod tests {
             assert!(rel < 1e-14, "exp({x}): {} vs {}", exp(x), x.exp());
         }
         assert_eq!(exp(0.0), 1.0);
+    }
+
+    #[test]
+    fn sine_matches_std_closely() {
+        for i in -400..=400 {
+            let t = i as f64 / 97.0;
+            let want = (t * std::f64::consts::TAU).sin();
+            assert!((sin_turns(t) - want).abs() < 1e-14, "sin_turns({t})");
+            let want = (t * std::f64::consts::TAU).cos();
+            assert!((cos_turns(t) - want).abs() < 1e-14, "cos_turns({t})");
+        }
+        assert_eq!(sin_turns(0.0), 0.0);
+        assert!((sin_turns(0.25) - 1.0).abs() < 1e-15);
+        assert!((cos_turns(0.0) - 1.0).abs() < 1e-15);
+    }
+
+    #[test]
+    fn lfo_sweeps_between_zero_and_one() {
+        let p = 8 * LFO_EVERY as usize;
+        let mut lfo = Lfo::new(p, 0.0);
+        let all: Vec<Option<f64>> = (0..=p).map(|_| lfo.tick()).collect();
+        // A value every LFO_EVERY samples, nothing in between.
+        assert!(
+            all.iter()
+                .enumerate()
+                .all(|(i, v)| v.is_some() == (i as u64).is_multiple_of(LFO_EVERY))
+        );
+        let v: Vec<f64> = all.into_iter().flatten().collect();
+        assert!((v[0] - 1.0).abs() < 1e-15); // starts at the top
+        assert!(v[4].abs() < 1e-15); // bottom half a period later
+        assert_eq!(v[8], v[0]); // and repeats
+        assert!(v.iter().all(|x| (0.0..=1.0).contains(x)));
     }
 
     #[test]

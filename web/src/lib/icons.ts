@@ -14,6 +14,10 @@ import Rewind from '@lucide/svelte/icons/rewind';
 import MoveHorizontal from '@lucide/svelte/icons/move-horizontal';
 import Orbit from '@lucide/svelte/icons/orbit';
 import Drum from '@lucide/svelte/icons/drum';
+import Tornado from '@lucide/svelte/icons/tornado';
+import Footprints from '@lucide/svelte/icons/footprints';
+import Zap from '@lucide/svelte/icons/zap';
+import Rabbit from '@lucide/svelte/icons/rabbit';
 import Sparkles from '@lucide/svelte/icons/sparkles';
 
 export type IconComponent = typeof Mountain;
@@ -29,6 +33,12 @@ const ICONS: Record<string, IconComponent> = {
   shift: MoveHorizontal,
   shuffle: Orbit,
   stutter: Drum,
+  // Second batch (2d): a swirl for the phaser, a foot pedal for the wah,
+  // a spark for distortion, a rabbit for speed.
+  phaser: Tornado,
+  wahwah: Footprints,
+  distort: Zap,
+  speed: Rabbit,
 };
 
 /** The effect's icon; effects added later fall back to sparkles. */

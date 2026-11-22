@@ -64,7 +64,7 @@ Audacity's Import Raw Data dialog asks how to read the bytes as samples. That ch
 | `s24le`, `s24be` | One sample per pixel; posterized two-tone fields |
 | `ulaw`, `alaw` | Posterized neon blocks with hard edges |
 
-`--channels 2` reads the bytes as stereo, as Audacity did when you imported stereo: alternate samples are left and right, and each side is processed on its own.
+`--channels 2` reads the bytes as stereo, as Audacity did when you imported stereo: alternate samples are left and right, and each side is processed on its own. `--channels 3` does the same with three channels; with `u8` those are exactly red, green and blue, so filters that blend neighbouring samples (`wahwah`, `reverb`) keep the colours instead of turning them grey.
 
 ### Sizes
 
@@ -86,6 +86,10 @@ A distance of whole pixels keeps colours. `phase=1` or `phase=2` adds one or two
 | `shift` | cut and paste | Slides bands sideways |
 | `shuffle` | cut and paste | Swaps blocks around |
 | `stutter` | Repeat | Repeats a strip down the picture |
+| `phaser` | Phaser | Combed, wavy bands from swept all-pass filters |
+| `wahwah` | Wahwah | A swept resonant filter: pulsing smears and ringing fringes |
+| `distort` | Distortion | Hard clip, soft saturation, or folding highlights into bands |
+| `speed` | Change Speed | Squeezes or stretches parts of the picture: shears |
 
 All parameters are documented in `docs/effects.md`, which is generated from the code. Where an effect lands is set by `region`, `hits` and `len`, shared by every effect.
 
@@ -113,7 +117,7 @@ glitchrx serve --host 0.0.0.0 --token --root ~/Pictures   # from a phone over LA
 
 In the GUI:
 - **Open** a photo from your device (it is sent to your own server, nowhere else) or, with `--root`, from the server's folders.
-- **Pick the encoding** for the whole recipe (and mono or stereo) at the top. Any step can override both.
+- **Pick the encoding** for the whole recipe (and mono, stereo or RGB) at the top. Any step can override both.
 - **Add steps** by tapping an effect in the palette, grouped into audio effects (echo, delay, reverb, amplify, stutter) and data effects (invert, bitcrush, backwards, shift, shuffle). On a phone the palette sits behind the floating + button. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
 - **Placement** (`region`, `hits`, `len`) is always shown on each step. Dragging the region's two handles shades the preview outside the band it covers.
 - **Shake** (the wand) rolls a step's own settings at random, within the useful range; placement and encoding stay. **Re-roll** (the dice) picks a new seed, which moves where hits land; it is greyed out when a step has nothing random (`hits=0`, except for `shuffle`).

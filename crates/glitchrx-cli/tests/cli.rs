@@ -251,7 +251,7 @@ fn usage_errors() {
         2
     );
     assert_eq!(
-        code(&run(d.path(), &["--echo", "--channels", "3", "photo.jpg"])),
+        code(&run(d.path(), &["--echo", "--channels", "4", "photo.jpg"])),
         2
     );
     assert_eq!(

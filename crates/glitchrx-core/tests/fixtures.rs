@@ -202,7 +202,7 @@ fn seeds_matter_exactly_when_something_is_random() {
 }
 
 /// BLAKE3 of decode-then-bend for every effect at its defaults in every
-/// encoding (and stereo `u8`). Any change here means the output for an
+/// encoding (and `u8` in stereo and in three channels). Any change here means the output for an
 /// existing recipe changed: bump that effect's `version`.
 #[test]
 fn golden_hashes() {
@@ -229,6 +229,14 @@ fn golden_hashes() {
             format!("{}/u8-stereo", e.id),
             blake3::hash(&out.bytes).to_hex().to_string(),
         );
+        let mut out = base.clone();
+        let mut r = recipe(e.id, "", 0xC0FFEE, Encoding::U8);
+        r.channels = 3;
+        r.apply(&mut out).unwrap();
+        hashes.insert(
+            format!("{}/u8-rgb", e.id),
+            blake3::hash(&out.bytes).to_hex().to_string(),
+        );
     }
     insta::assert_yaml_snapshot!(hashes);
 }
@@ -242,7 +250,8 @@ fn golden_hashes() {
 /// end of a row moves its ghost down one row, and a preview row stands for
 /// several full rows, so long feedback chains (`reverb`) drift. And sizes
 /// below a preview row (`shuffle` blocks of half a row) leave fewer pieces
-/// in the preview, so a seeded permutation of them cannot match.
+/// in the preview, so a seeded permutation of them cannot match. Effects
+/// that cannot be previewed at scale at all set `exact_preview`.
 #[test]
 fn previews_resemble_the_export() {
     let full = decode("baseline-444.jpg").raster;
@@ -268,9 +277,19 @@ fn previews_resemble_the_export() {
         let strength = mean_diff(&small, &export);
         let error = mean_diff(&preview, &export);
         println!(
-            "{:>10}: strength {strength:6.2}  preview error {error:6.2}",
-            e.id
+            "{:>10}: strength {strength:6.2}  preview error {error:6.2}{}",
+            e.id,
+            if e.exact_preview {
+                "  (previewed exactly)"
+            } else {
+                ""
+            }
         );
+        if e.exact_preview {
+            // Flagged effects are rendered at full resolution by the GUI
+            // once the user pauses; see `EffectInfo::exact_preview`.
+            continue;
+        }
         assert!(
             error < 12.0,
             "{}: preview error {error:.2} vs strength {strength:.2}",

@@ -3,7 +3,8 @@
 //! Each effect follows one of Audacity's (SPEC 6). It works on one *window*
 //! of the raster at a time, in one of two ways:
 //!
-//! - **Filters** (echo, delay, reverb, amplify, invert, bitcrush) read the
+//! - **Filters** (echo, delay, reverb, amplify, invert, bitcrush, phaser,
+//!   wahwah, distort) read the
 //!   window's bytes as audio samples in the step's encoding, process them as
 //!   floating point, and clip them back to bytes ([`Window::filter`]). They
 //!   stream in blocks, so even a whole 26 MP photo never sits in memory as
@@ -11,6 +12,8 @@
 //! - **Edits** (backwards, shift, shuffle, stutter) move whole samples
 //!   around, like cut and paste in Audacity. They never change a sample's
 //!   value, so they work on the bytes directly, a whole frame at a time.
+//!   `speed` is in between: it reads samples at a new rate and
+//!   interpolates, so it needs the whole window at once, like an edit.
 //!
 //! Effects only ever write inside their window.
 
@@ -23,12 +26,16 @@ mod amplify;
 mod backwards;
 mod bitcrush;
 mod delay;
+mod distort;
 mod echo;
 mod invert;
+mod phaser;
 mod reverb;
 mod shift;
 mod shuffle;
+mod speed;
 mod stutter;
+mod wahwah;
 
 /// Samples processed per block by [`Window::filter`]; also how often a
 /// render checks whether it has been cancelled.
@@ -51,7 +58,8 @@ pub struct Window<'a> {
     /// The window's bytes, a whole number of frames.
     pub bytes: &'a mut [u8],
     pub encoding: Encoding,
-    /// 1 (mono) or 2 (stereo, samples alternate left/right).
+    /// 1 (mono), 2 (stereo: samples alternate left/right) or 3 (one channel
+    /// per colour: with 8-bit samples, R, G and B each processed alone).
     pub channels: usize,
     /// Converts sizes for this raster (full resolution or a preview).
     pub units: &'a Units,
@@ -131,6 +139,12 @@ pub struct EffectInfo {
     /// nothing: there is one window over the whole region and nothing to
     /// pick. Front ends use this to say when re-rolling a seed is pointless.
     pub random_within: bool,
+    /// True if a scaled preview cannot resemble the export, so front ends
+    /// should render it at full resolution once the user pauses. The
+    /// phaser is the case: its all-pass stages act as delays of a few
+    /// samples, and which colour channels they mix depends on that delay
+    /// modulo 3, which no smaller raster can reproduce.
+    pub exact_preview: bool,
     pub example: &'static str,
     pub build: fn(&Params) -> Result<Box<dyn Effect>>,
 }
@@ -173,6 +187,10 @@ pub static REGISTRY: &[&EffectInfo] = &[
     &shift::INFO,
     &shuffle::INFO,
     &stutter::INFO,
+    &phaser::INFO,
+    &wahwah::INFO,
+    &distort::INFO,
+    &speed::INFO,
 ];
 
 /// Find an effect by id.
@@ -233,6 +251,12 @@ pub fn markdown_reference() -> String {
             "Follows Audacity's {}. Version: {}.\n\n",
             e.audacity, e.version
         ));
+        if e.exact_preview {
+            s.push_str(
+                "Live previews of this effect are approximate; the GUI renders it at full \
+                 resolution when you pause.\n\n",
+            );
+        }
         s.push_str(if e.random_within {
             "The seed picks where hits land and what happens inside each window.\n\n"
         } else {
@@ -299,6 +323,31 @@ pub(crate) mod testutil {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn three_channels_filter_each_colour_alone() {
+        // A pure red picture through a wahwah: mono blends R, G and B into
+        // grey-ish values; three channels leave G and B untouched at zero.
+        let red: Vec<u8> = [255u8, 0, 0].repeat(400);
+        let units = Units::full(20, 20);
+        let e = testutil::make(lookup("wahwah").unwrap(), "");
+        for (channels, keeps_red) in [(1, false), (3, true)] {
+            let mut b = red.clone();
+            let mut w = Window {
+                bytes: &mut b,
+                encoding: Encoding::U8,
+                channels,
+                units: &units,
+                cancel: &|| false,
+            };
+            e.run(&mut w, &mut Rng::new(1)).unwrap();
+            let pure = b
+                .chunks(3)
+                .skip(50)
+                .all(|p| p[1] < 4 && p[2] < 4 && p[0] > 250);
+            assert_eq!(pure, keeps_red, "channels={channels}");
+        }
+    }
 
     #[test]
     fn stereo_filters_process_channels_separately() {

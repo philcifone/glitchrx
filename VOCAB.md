@@ -6,18 +6,18 @@ Shared terms for glitcharaxia, so we can name things precisely. Grouped by topic
 
 - **A-law / U-law.** Two telephone audio encodings that squeeze a 16-bit sample into one byte along a curve. Reading pixel bytes this way and back gives posterized, neon colour blocks.
 - **Channel phase.** How many extra bytes (0, 1 or 2) a delay adds beyond whole pixels. Phase 0 keeps a ghost's colours; 1 or 2 rotates red into green into blue.
-- **Channels (mono / stereo).** In stereo, samples alternate left and right, and effects treat each side separately, as Audacity does.
+- **Channels (mono / stereo / RGB).** With 2 or 3 channels, samples alternate between them, and effects treat each channel separately, as Audacity does. With `u8` and 3 channels, the channels are exactly red, green and blue ("RGB" in the GUI).
 - **Clipping.** Clamping samples to the encoding's range after an effect. It loses information, which is why effects can no longer be reversed exactly, and it gives the bright, saturated look.
 - **Databending.** Opening a file as the wrong kind of data (here: an image as audio), editing it with that kind of tool, and opening it as an image again.
 - **Encoding (sample encoding).** How bytes are read as audio samples: `u8`, `s8`, `s16le`, `s16be`, `s24le`, `s24be`, `ulaw`, `alaw`. The choice from Audacity's Import Raw Data dialog.
 - **Effect palette.** The GUI's grid of effect buttons; one tap adds a step. Each effect has an icon picked for feel rather than literally (a mountain for echo, a drum for stutter). Grouped into **audio** effects (behave like their Audacity namesakes: echo, delay, reverb, amplify, stutter) and **data** effects (treat the bytes as data: invert, bitcrush, backwards, shift, shuffle). On phones it opens from a floating + button as an **add sheet**.
 - **Sticky hover.** iOS Safari keeps a tapped element in the CSS `:hover` state until the next tap elsewhere. The GUI applies hover styles only under `@media (hover: hover)` so tapped buttons never stay highlighted.
-- **Exact preview.** A preview bent at full resolution and then shrunk, so it is exactly the export. Slower than the scaled preview; the "Make exact" button.
-- **Filter vs edit.** The two kinds of effect. **Filters** (echo, delay, reverb, amplify, invert, bitcrush) turn bytes into samples, process them, and clip them back. **Edits** (backwards, shift, shuffle, stutter) only move whole samples, like cut and paste.
+- **Exact preview.** A preview bent at full resolution and then shrunk, so it is exactly the export. Slower than the scaled preview; the "Make exact" button. Effects flagged `exact_preview` (the phaser) get one automatically, 600 ms after the last change, because no scaled preview can resemble them.
+- **Filter vs edit.** The two kinds of effect. **Filters** (echo, delay, reverb, amplify, invert, bitcrush, phaser, wahwah, distort) turn bytes into samples, process them, and clip them back. **Edits** (backwards, shift, shuffle, stutter) only move whole samples, like cut and paste. `speed` resamples, so it is in between.
 - **Fit / resize.** `fit` picks the largest size inside a box that keeps the aspect ratio; `resize` shrinks to an exact size. They differ because fitting twice can round differently (480x320 into 200x200 is 200x133, but into 200x133 is 199x133).
 - **Frame.** One sample for every channel: `encoding width x channels` bytes. Windows start and end on whole frames, so samples line up with the start of the raster.
 - **Freeverb.** A classic open reverb design (damped feedback combs plus allpass filters) that Audacity's Reverb is based on.
-- **LFO.** Low-frequency oscillator: a slow wave that sweeps a filter, as in phaser and wahwah.
+- **LFO.** Low-frequency oscillator: a slow wave that sweeps a filter, as in phaser and wahwah. Here its period is a picture size (`4rows`), not Hz, and it updates the filter every 16 samples.
 - **Raster.** The decoded image as raw bytes: R, G, B for each pixel, row after row, top to bottom. What an uncompressed TIFF stores, and what every effect now edits.
 - **Full-resolution mapping (Units).** How a preview stays faithful: every size and position is worked out at full resolution first, then mapped into the smaller raster, with whole rows scaled by height, the rest of a row by width, and the 0-2 byte channel phase kept.
 - **Preview budget / too heavy.** A live preview that runs over 3 s (an exact one, 30 s) stops, and the GUI says it is too heavy to preview live instead of showing an error. Export has no limit.
@@ -90,7 +90,11 @@ Terms from Phase 1 and 2a, when effects edited the compressed data inside a JPEG
 
 ## Math and audio terms
 
+- **All-pass filter.** A filter that keeps every frequency's loudness but delays some more than others. Mixed with the dry signal, a chain of them cancels some frequencies: the phaser's notches.
+- **Biquad.** A two-pole, two-zero filter, the standard building block of equalisers; the wahwah is one, set as a resonant low-pass.
 - **Comb filter.** An echo fed back into itself at a fixed delay. Several in series make a cheap reverb.
+- **Waveshaping / fold.** Passing each sample through a fixed curve (`distort`). Hard clipping flattens at full scale, soft clipping rounds off before it, and folding reflects anything past full scale back in, so highlights turn into stacked bands.
+- **Resampling.** Reading a signal at a different rate, interpolating between samples (`speed`).
 - **Endianness.** The order in which a multi-byte number is stored. Big endian puts the most significant byte first; little endian puts it last. It only matters for 16- and 24-bit encodings, where it decides which colour byte is the loud part.
 - **Feed-forward vs feedback.** A feed-forward echo adds delayed copies of the *input*. A feedback echo adds delayed copies of its own *output*, so the echoes repeat and decay.
 - **Basic IEEE operations.** `+ - * /` and square root on floating-point numbers are exactly specified, so they give identical bits on every machine; library functions like `exp` and `sin` are not. Effects use only the former (`dsp.rs` has its own `exp`).

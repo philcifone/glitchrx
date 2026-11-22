@@ -9,6 +9,7 @@ const echo: EffectInfo = {
   summary: '',
   details: '',
   random_within: false,
+  exact_preview: false,
   params: [
     { name: 'delay', kind: 'size', default: '0.33rows', help: '', placement: false },
     { name: 'phase', kind: 'int', min: 0, max: 5, default: '1', help: '', placement: false },

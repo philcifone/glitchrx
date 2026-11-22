@@ -31,6 +31,8 @@ export const CHANNELS_KEY = 'channels';
 const REGION_LINGER_MS = 900;
 /** After the last change, wait this long before a sharper render (SPEC 10.2). */
 const IDLE_MS = 250;
+/** ...or this long before an exact one, for effects that need it. */
+const EXACT_IDLE_MS = 600;
 const RECIPE_KEY = 'glitchrx.recipe';
 /** The open photo's server id, so a reload (iOS discards background tabs
  * often) can pick the same photo up again while the server still has it. */
@@ -53,7 +55,7 @@ const emptyRecipe = (): RecipeState => ({ encoding: DEFAULT_ENCODING, channels: 
 function normalize(r: Partial<RecipeState>, known: (effect: string) => boolean): RecipeState {
   return {
     encoding: typeof r.encoding === 'string' ? r.encoding : DEFAULT_ENCODING,
-    channels: r.channels === 2 ? 2 : 1,
+    channels: r.channels === 2 || r.channels === 3 ? r.channels : 1,
     steps: (r.steps ?? []).filter((s) => known(s.effect)),
   };
 }
@@ -153,6 +155,14 @@ export class App {
   /** Whether a new seed would change this step's result. */
   seeded(step: StepState): boolean {
     return usesSeed(step.params, this.effect(step.effect));
+  }
+
+  /**
+   * Whether the preview should settle to an exact render: some enabled
+   * step's effect cannot be previewed at scale (the phaser).
+   */
+  get needsExact(): boolean {
+    return this.recipe.steps.some((s) => s.enabled && this.effect(s.effect)?.exact_preview);
   }
 
   /** Whether "re-roll all" would change anything. */
@@ -412,7 +422,10 @@ export class App {
     this.busy = true;
     if (exact) this.working = 'Rendering at full resolution';
     this.queue.request(() => this.runPreview(doc.id, recipe, w, h, exact));
-    if (quality === 'fast' && this.box.dpr > 1) {
+    if (!exact && this.needsExact) {
+      // Approximate while things change; exact once they stop.
+      this.idleTimer = setTimeout(() => this.render('exact'), EXACT_IDLE_MS);
+    } else if (quality === 'fast' && this.box.dpr > 1) {
       this.idleTimer = setTimeout(() => this.render('full'), IDLE_MS);
     }
     if (this.comparing) void this.loadOriginal();
