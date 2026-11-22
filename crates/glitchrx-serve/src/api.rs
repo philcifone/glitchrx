@@ -18,7 +18,7 @@ use axum::{Json, Router};
 use glitchrx_core::codec;
 use glitchrx_core::io::{auto_output, base_stem, write_output};
 use glitchrx_core::recipe::NEVER;
-use glitchrx_core::{Error, Recipe};
+use glitchrx_core::{Error, Raster, Recipe};
 use serde::{Deserialize, Serialize};
 
 use crate::browse::{self, BrowseError};
@@ -494,6 +494,44 @@ struct PreviewRequest {
     /// Bend at full resolution, then shrink: exactly the export, slower.
     #[serde(default)]
     exact: bool,
+    /// Only this part of the picture (a zoomed view). Always exact: a crop
+    /// is cut from the full-resolution render, since effects run along the
+    /// whole raster and no part can be bent on its own.
+    #[serde(default)]
+    crop: Option<Crop>,
+}
+
+/// Part of the picture, as fractions of its width and height.
+#[derive(Deserialize, Clone, Copy, Debug)]
+struct Crop {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
+impl Crop {
+    /// The whole pixels covering it in a `width` x `height` picture, as
+    /// `(x, y, w, h)`: at least one pixel, never past the edges.
+    fn pixels(&self, width: usize, height: usize) -> ApiResult<(usize, usize, usize, usize)> {
+        let finite = [self.x, self.y, self.w, self.h]
+            .iter()
+            .all(|v| v.is_finite());
+        if !finite || self.w <= 0.0 || self.h <= 0.0 {
+            return Err(ApiError::bad(
+                "a crop needs a finite position and a positive size",
+            ));
+        }
+        // Outward to whole pixels, so the crop covers everything asked for.
+        let span = |start: f64, len: f64, n: usize| {
+            let s = ((start.clamp(0.0, 1.0) * n as f64).floor() as usize).min(n - 1);
+            let e = (((start + len).clamp(0.0, 1.0) * n as f64).ceil() as usize).clamp(s + 1, n);
+            (s, e - s)
+        };
+        let (x, w) = span(self.x, self.w, width);
+        let (y, h) = span(self.y, self.h, height);
+        Ok((x, y, w, h))
+    }
 }
 
 /// How long a live preview may run before it gives up (SPEC 9.2). Export
@@ -516,29 +554,49 @@ async fn preview(
     } else {
         Some(req.recipe.to_recipe()?)
     };
+    let crop = match req.crop {
+        Some(c) => Some(c.pixels(doc.image.raster.width, doc.image.raster.height)?),
+        None => None,
+    };
     // Only bend renders compete; an original (before/after) request must
-    // not cancel the render it is being compared with.
-    let generation = recipe.as_ref().map(|_| doc.begin());
+    // not cancel the render it is being compared with. Crops compete only
+    // with crops.
+    let zoom = crop.is_some();
+    let generation = recipe
+        .as_ref()
+        .map(|_| if zoom { doc.begin_zoom() } else { doc.begin() });
+    let current = move |doc: &Doc, g: u64| {
+        if zoom {
+            doc.is_current_zoom(g)
+        } else {
+            doc.is_current(g)
+        }
+    };
     let max_w = req.max_w.clamp(16, render::MAX_PREVIEW_SIDE) as usize;
     let max_h = req.max_h.clamp(16, render::MAX_PREVIEW_SIDE) as usize;
-    let exact = req.exact;
+    let exact = req.exact || zoom;
     let budget = st.preview_budget * if exact { 10 } else { 1 };
+    // Cut the crop (if any) from a full-resolution raster, then shrink it.
+    let shown = move |full: &Raster| match crop {
+        Some((x, y, w, h)) => full.crop(x, y, w, h).downscale(max_w, max_h),
+        None => {
+            let (w, h) = full.fit(max_w, max_h);
+            full.resize(w, h)
+        }
+    };
     blocking(move || {
         let t0 = Instant::now();
         let raster = match (&recipe, generation) {
             (Some(r), Some(g)) => {
-                let stop = || !doc.is_current(g) || t0.elapsed() > budget;
+                let stop = || !current(&doc, g) || t0.elapsed() > budget;
                 let result = if exact {
-                    doc.render_full(r, &stop).map(|full| {
-                        let (w, h) = full.fit(max_w, max_h);
-                        full.resize(w, h)
-                    })
+                    doc.render_full(r, &stop).map(|full| shown(&full))
                 } else {
                     doc.preview(r, max_w, max_h, &stop)
                 };
                 match result {
                     Ok(raster) => raster,
-                    Err(Error::Cancelled) if !doc.is_current(g) => {
+                    Err(Error::Cancelled) if !current(&doc, g) => {
                         return Ok(StatusCode::NO_CONTENT.into_response());
                     }
                     Err(Error::Cancelled) => {
@@ -558,6 +616,7 @@ async fn preview(
                     Err(e) => return Err(e.into()),
                 }
             }
+            _ if crop.is_some() => shown(&doc.image.raster),
             _ => doc.original(max_w, max_h),
         };
         let jpeg = render::preview_jpeg(&raster, 88).map_err(ApiError::internal)?;
@@ -579,6 +638,10 @@ async fn preview(
         set("x-render-ms", ms.to_string());
         set("x-width", raster.width.to_string());
         set("x-height", raster.height.to_string());
+        if let Some((x, y, w, h)) = crop {
+            // The full-resolution pixels it shows, so the GUI can place it.
+            set("x-crop", format!("{x},{y},{w},{h}"));
+        }
         Ok(res)
     })
     .await
