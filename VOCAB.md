@@ -73,6 +73,9 @@ Background, mostly from the archived JPEG byte engine (`archive/jpeg-bytes`). JP
 - **Render cache / step cache.** What the server keeps per document so re-renders are fast: the screen-sized raster, and the raster after each step. Changing step 3 re-runs steps 3 onwards only.
 - **Root (`--root`).** The one folder `glitchrx serve` may browse, open from and save into. Paths outside it are refused.
 - **Step switch.** The on/off box on a GUI step. A switched-off step stays in the stack but is left out of renders and recipes.
+- **Desktop app.** `glitchrx-desktop`: the GUI in a native window (Tauri). It runs its own server on 127.0.0.1 and uses the system's Open and Save dialogs.
+- **Tauri / web view.** Tauri is the framework behind the desktop app: a small native shell around the system's web engine (the web view; WebKitGTK on Linux, WebKit on macOS), instead of bundling a browser.
+- **Native dialogs (`Dialogs`).** The system's file choosers. The server asks for them through the `Dialogs` trait, which only the desktop app supplies.
 - **Token.** The shared secret of `glitchrx serve --token`. Opening the printed URL once stores it in a cookie; without it, a browser gets the sign-in page to paste it into.
 - **PWA (home-screen app).** The GUI added to a phone's home screen: it opens full screen with its own icon, from the web app manifest and iOS meta tags. Nothing is installed; it still talks to your server.
 - **Share sheet.** The phone's system menu for sending a file somewhere (Save Image, Save to Files, AirDrop). Exports on touch devices go through it.

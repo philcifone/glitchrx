@@ -129,6 +129,19 @@ In the GUI:
 
 The preview runs the recipe on a copy of the photo shrunk to your screen, with every size scaled to match, so even a 26 MP photo previews quickly. It is close to the full-resolution export but not identical: long reverb tails and very fine shuffles differ most. The phaser cannot be previewed at a smaller size at all, so with a phaser in the recipe the preview turns exact by itself once you stop for a moment. **Make exact** renders the current recipe at full resolution and shrinks the result, which is exactly what export will give; it takes about a second on a 26 MP photo. A newer slider position cancels a render that is still running, and a live preview that runs over 3 s stops with a "too heavy to preview live" notice (export, and usually Make exact, still work).
 
+## Desktop app
+
+The same GUI in a native window, for working on this machine. It runs its own copy of the server on `127.0.0.1` (a free port, a new token each launch), so everything behaves as in the browser, except that **Open** and **Export** use the system's file dialogs. Export suggests the next free `-glitch` name next to the original; replacing a file you confirmed in the dialog is allowed, but the original photo is never written.
+
+Linux (needs `webkit2gtk-4.1`; on Arch: `pacman -S webkit2gtk-4.1`):
+
+```
+scripts/install-desktop.sh            # or: just install-desktop
+scripts/install-desktop.sh --remove   # or: just uninstall-desktop
+```
+
+This builds the app and installs it for your user only: `~/.local/bin/glitchrx-desktop`, a launcher entry and icons under `~/.local/share`. `just desktop` runs a debug build instead, which prints its internal URL so you can open the same session in a browser's developer tools. macOS is planned.
+
 ## How it works
 
 1. **Decode** the photo to a *raster*: R, G, B for each pixel, row after row, exactly what an uncompressed TIFF stores. A sideways phone photo is turned upright first, so rows are the rows you see.
@@ -160,6 +173,7 @@ Layout:
 - `crates/glitchrx-core`: the engine
 - `crates/glitchrx-cli`: the `glitchrx` command
 - `crates/glitchrx-serve`: the web server behind `glitchrx serve`
+- `crates/glitchrx-desktop`: the desktop app (Tauri), which embeds that server
 - `web/`: the Svelte GUI, embedded into the binary at build time
 - `tools/`: fixture generator, contact sheets (`just sheets photo.jpg`)
 - `docs/`: effect reference and decision records

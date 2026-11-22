@@ -538,3 +538,96 @@ async fn index_is_served() {
     let (s, _, _) = send(&app, Request::get("/nope.js").body(Body::empty()).unwrap()).await;
     assert_eq!(s, StatusCode::NOT_FOUND);
 }
+
+/// Stand-in for the desktop app's native dialogs: answers from a script
+/// and records where each dialog was asked to start.
+struct FakeDialogs {
+    pick: std::sync::Mutex<Vec<Option<PathBuf>>>,
+    save: std::sync::Mutex<Vec<Option<PathBuf>>>,
+    asked: std::sync::Mutex<Vec<(Option<PathBuf>, String)>>,
+}
+
+impl glitchrx_serve::dialogs::Dialogs for FakeDialogs {
+    fn pick_photo(&self, _dir: Option<&Path>) -> Option<PathBuf> {
+        self.pick.lock().unwrap().remove(0)
+    }
+    fn save_as(&self, dir: Option<&Path>, name: &str) -> Option<PathBuf> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push((dir.map(Path::to_path_buf), name.to_string()));
+        self.save.lock().unwrap().remove(0)
+    }
+}
+
+#[tokio::test]
+async fn desktop_dialogs_open_and_save_as() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().canonicalize().unwrap();
+    let original = fixture("baseline-444.jpg");
+    let photo = dir.join("photo.jpg");
+    fs::write(&photo, &original).unwrap();
+    fs::write(dir.join("photo-glitch.tif"), b"earlier").unwrap();
+    let taken = dir.join("taken.tif");
+    fs::write(&taken, b"replace me").unwrap();
+
+    let fake = std::sync::Arc::new(FakeDialogs {
+        pick: std::sync::Mutex::new(vec![None, Some(photo.clone())]),
+        save: std::sync::Mutex::new(vec![None, Some(taken.clone()), Some(photo.clone())]),
+        asked: std::sync::Mutex::new(Vec::new()),
+    });
+    let app = router(AppState::new(None, None).with_dialogs(fake.clone()));
+
+    let (_, _, b) = send(
+        &app,
+        Request::get("/api/config").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(json_of(&b)["desktop"], true);
+
+    // Cancelled, then chosen.
+    let (s, _, _) = send(&app, post_json("/api/desktop/open", json!({}))).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    let (s, _, b) = send(&app, post_json("/api/desktop/open", json!({}))).await;
+    assert_eq!(s, StatusCode::OK);
+    let id = json_of(&b)["id"].as_str().unwrap().to_string();
+
+    let body = json!({"recipe": sample_recipe(), "format": "tiff", "with_recipe": true});
+    let uri = format!("/api/docs/{id}/save-as");
+    let (s, _, _) = send(&app, post_json(&uri, body.clone())).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    // The dialog starts next to the original with the next free name.
+    assert_eq!(
+        fake.asked.lock().unwrap()[0],
+        (Some(dir.clone()), "photo-glitch-1.tif".to_string())
+    );
+
+    // A file the user confirmed replacing in the dialog is replaced, with
+    // exactly the CLI's bytes, and the recipe lands beside it.
+    let (s, _, b) = send(&app, post_json(&uri, body.clone())).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(
+        fs::read(&taken).unwrap(),
+        cli_output(&original, Format::Tiff)
+    );
+    assert!(dir.join("taken.recipe.toml").exists());
+    assert_eq!(json_of(&b)["saved"].as_array().unwrap().len(), 2);
+
+    // The original is never written, whatever the dialog says.
+    let (s, _, _) = send(&app, post_json(&uri, body)).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert_eq!(fs::read(&photo).unwrap(), original);
+}
+
+#[tokio::test]
+async fn desktop_routes_are_absent_in_the_browser_server() {
+    let app = app(None, None);
+    let (_, _, b) = send(
+        &app,
+        Request::get("/api/config").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(json_of(&b)["desktop"], false);
+    let (s, _, _) = send(&app, post_json("/api/desktop/open", json!({}))).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}

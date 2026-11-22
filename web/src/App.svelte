@@ -13,6 +13,12 @@
   import ExportDialog from './components/ExportDialog.svelte';
 
   let openDialog: OpenDialog;
+
+  /** The system's Open dialog in the desktop app, ours in a browser. */
+  function open() {
+    if (app.desktop) void app.openNative();
+    else openDialog.show();
+  }
   let exportDialog: ExportDialog;
   let sheetExpanded = $state(false);
 
@@ -68,9 +74,9 @@
   }}
   ondrop={onDrop}
 >
-  <TopBar onopen={() => openDialog.show()} onexport={() => exportDialog.show()} />
+  <TopBar onopen={open} onexport={() => exportDialog.show()} />
   <main class="stage">
-    <Preview onopen={() => openDialog.show()} />
+    <Preview onopen={open} />
   </main>
   <aside class="sheet" aria-label="Steps">
     <button

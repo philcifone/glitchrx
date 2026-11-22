@@ -187,6 +187,23 @@ export class App {
     await this.opening(path, () => api.openServerPhoto(path));
   }
 
+  /** Desktop app: pick a photo with the system's Open dialog. */
+  async openNative(): Promise<void> {
+    let doc: DocInfo | null;
+    try {
+      doc = await api.desktopOpen();
+    } catch (e) {
+      this.fail(e);
+      return;
+    }
+    if (doc) await this.opening(doc.name, async () => doc);
+  }
+
+  /** Running inside the desktop app, with the system's file dialogs. */
+  get desktop(): boolean {
+    return this.config?.desktop ?? false;
+  }
+
   private async opening(label: string, load: () => Promise<DocInfo>): Promise<void> {
     this.working = `Opening ${label}`;
     try {
@@ -515,6 +532,24 @@ export class App {
     try {
       const { blob, name } = await api.exportFile(doc.id, this.dto(), format);
       this.deliver(blob, name);
+    } catch (e) {
+      this.fail(e);
+    } finally {
+      this.working = null;
+    }
+  }
+
+  /** Desktop app: the system's Save dialog, then a full-resolution render. */
+  async saveAs(format: ExportFormat, withRecipe: boolean): Promise<void> {
+    const doc = this.doc;
+    if (!doc) return;
+    this.working = 'Rendering full resolution';
+    try {
+      const r = await api.saveAs(doc.id, this.dto(), format, withRecipe);
+      if (r) {
+        const names = r.saved.map((p) => p.split('/').pop());
+        this.flash(`Saved ${names.join(', ')}${r.skipped.length ? `; ${r.skipped.join('; ')}` : ''}`);
+      }
     } catch (e) {
       this.fail(e);
     } finally {

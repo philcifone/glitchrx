@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/glitchrx-core", "crates/glitchrx-cli", "crates/glitchrx-serve", "tools/gen-fixtures", "tools/contact-sheet"]
+members = ["crates/glitchrx-core", "crates/glitchrx-cli", "crates/glitchrx-serve", "crates/glitchrx-desktop", "tools/gen-fixtures", "tools/contact-sheet"]
 
 [workspace.package]
 version = "0.1.0"

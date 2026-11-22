@@ -145,6 +145,31 @@ export async function saveOnServer(
   return (await json<{ saved: string[] }>(res)).saved;
 }
 
+/** Desktop app: what Save as wrote, or skipped (an existing recipe file). */
+export interface SavedAs {
+  saved: string[];
+  skipped: string[];
+}
+
+/** Desktop app: the native Open dialog. `null` if the user cancelled. */
+export async function desktopOpen(): Promise<DocInfo | null> {
+  const res = await postJson('/api/desktop/open', {});
+  if (res.status === 204) return null;
+  return json<DocInfo>(res);
+}
+
+/** Desktop app: the native Save dialog, then render and write. */
+export async function saveAs(
+  docId: string,
+  recipe: RecipeDto,
+  format: ExportFormat,
+  withRecipe: boolean,
+): Promise<SavedAs | null> {
+  const res = await postJson(`/api/docs/${docId}/save-as`, { recipe, format, with_recipe: withRecipe });
+  if (res.status === 204) return null;
+  return json<SavedAs>(res);
+}
+
 export async function recipeToToml(recipe: RecipeDto): Promise<string> {
   const res = await postJson('/api/recipe/to-toml', recipe);
   if (!res.ok) await fail(res);

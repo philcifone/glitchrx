@@ -7,3 +7,6 @@
 # Web GUI: dependencies and build output (embedded into the binary by build.rs)
 /web/node_modules/
 /web/dist/
+
+# Tauri regenerates these on every build of the desktop app.
+crates/glitchrx-desktop/gen/

@@ -54,6 +54,8 @@ export interface EncodingInfo {
 }
 
 export interface ServerConfig {
+  /** Running in the desktop app: native Open and Save dialogs. */
+  desktop: boolean;
   version: string;
   browse: boolean;
   root_name: string | null;

@@ -121,15 +121,17 @@
     padding: 12px 14px;
   }
 
+  /* Wraps the channel control onto its own line when the panel is narrow. */
   .row {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
   }
 
   .row select {
-    flex: 1;
-    min-width: 0;
+    flex: 1 1 96px;
+    min-width: 96px;
   }
 
   .sample label {
