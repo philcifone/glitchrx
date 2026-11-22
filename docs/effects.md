@@ -21,6 +21,11 @@ Sizes take units: `%` of the image (which runs top to bottom), `rows` (a fractio
 
 Set once per recipe (`--encoding`, `--channels`), or per step with `encoding=` and `channels=` in the step's parameters.
 
+## Every step
+
+- `opacity` (0 to 1, default 1): blend the step's result over the picture it received, as with a layer's opacity. Example: `--echo opacity=0.5`.
+- A mask (recipe files and the GUI): where the result shows, made of brush strokes, gradients and brightness ranges. See `[step.mask]` in SPEC section 8.
+
 ## echo
 
 Feedback delay: every sample adds a fading copy of the output `delay` earlier.

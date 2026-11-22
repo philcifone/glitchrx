@@ -37,6 +37,8 @@ glitchrx --echo --format jpeg photo.jpg         # photo-glitch.jpg
 glitchrx --echo delay=0.33rows,decay=0.6 --reverb photo.jpg
 glitchrx --echo --encoding ulaw photo.jpg       # read the pixels as mu-law audio
 glitchrx --shift by=0.5rows,phase=2,hits=12 photo.jpg
+glitchrx --pixelsort low=0.3 photo.jpg          # melt the bright areas into streaks
+glitchrx --echo opacity=0.5 photo.jpg           # blend the step at half strength
 glitchrx --stutter --batch *.jpg                # every file, automatic names
 glitchrx --info photo.jpg                       # format, size, orientation, colour profile
 glitchrx --list                                 # every effect and parameter
@@ -90,6 +92,9 @@ A distance of whole pixels keeps colours. `phase=1` or `phase=2` adds one or two
 | `wahwah` | Wahwah | A swept resonant filter: pulsing smears and ringing fringes |
 | `distort` | Distortion | Hard clip, soft saturation, or folding highlights into bands |
 | `speed` | Change Speed | Squeezes or stretches parts of the picture: shears |
+| `pixelsort` | (pixel effect) | Sorts runs of pixels by brightness, hue or saturation: streaks down or across the picture |
+
+`pixelsort` is not audio: it works on whole pixels, so the encoding and channels do not apply. Every step also takes `opacity` (0 to 1), which blends its result over the picture it received.
 
 All parameters are documented in `docs/effects.md`, which is generated from the code. Where an effect lands is set by `region`, `hits` and `len`, shared by every effect.
 
@@ -120,14 +125,16 @@ glitchrx serve --host 0.0.0.0 --token --root ~/Pictures   # from a phone over LA
 In the GUI:
 - **Open** a photo from your device (it is sent to your own server, nowhere else) or, with `--root`, from the server's folders.
 - **Pick the encoding** for the whole recipe (and mono, stereo or RGB) at the top. Any step can override both.
-- **Add steps** by tapping an effect in the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter) and data effects (invert, bitcrush, backwards, shift, shuffle). On a phone the palette sits behind the floating + button. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
+- **Add steps** by tapping an effect in the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter), data effects (invert, bitcrush, backwards, shift, shuffle) and pixel effects (pixelsort). On a phone the palette sits behind the floating + button. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
 - **Placement** (`region`, `hits`, `len`) is always shown on each step. Dragging the region's two handles shades the preview outside the band it covers.
 - **Shake** (the wand) rolls a step's own settings at random, within the useful range; placement and encoding stay. **Re-roll** (the dice) picks a new seed, which moves where hits land; it is greyed out when a step has nothing random (`hits=0`, except for `shuffle`).
+- **Blend** each step with its opacity, and **mask** it: Add mask, then paint on the preview. Paint in shows the step only where you paint; Paint out shows it everywhere except there. Tools: brush and eraser (size, hardness), linear and radial gradients, and brightness ranges that limit the mask to light or dark parts. Feather softens every edge. The red overlay shows the mask; Done ends painting. On a desktop, B, E, G and R pick the tool and [ and ] size the brush. Masks are saved in the recipe as strokes and shapes, so they replay exactly at full resolution.
+- **Presets** (the bookmark) are your own saved recipes, kept by the server in `~/.config/glitchrx/presets` (`--presets DIR` to move them), so your phone and desktop share them. Use one to replace the steps, or add its steps to the current recipe. They are ordinary recipe files: `glitchrx --recipe ~/.config/glitchrx/presets/NAME.toml photo.jpg`.
 - **Hold "original"** (or the `\` key) to compare with the untouched photo.
 - **Undo and redo** with the buttons or Ctrl+Z / Ctrl+Shift+Z. History holds recipes, not images.
 - **Export** at full resolution as TIFF, PNG or JPEG. With `--root`, results can be saved next to the original using the CLI's `-glitch`, `-glitch-1` naming. Nothing is overwritten. The recipe can be downloaded, then loaded again later or replayed with `glitchrx --recipe`.
 
-The preview runs the recipe on a copy of the photo shrunk to your screen, with every size scaled to match, so even a 26 MP photo previews quickly. It is close to the full-resolution export but not identical: long reverb tails and very fine shuffles differ most. The phaser cannot be previewed at a smaller size at all, so with a phaser in the recipe the preview turns exact by itself once you stop for a moment. **Make exact** renders the current recipe at full resolution and shrinks the result, which is exactly what export will give; it takes about a second on a 26 MP photo. A newer slider position cancels a render that is still running, and a live preview that runs over 3 s stops with a "too heavy to preview live" notice (export, and usually Make exact, still work).
+The preview runs the recipe on a copy of the photo shrunk to your screen, with every size scaled to match, so even a 26 MP photo previews quickly. It is close to the full-resolution export but not identical: long reverb tails and very fine shuffles differ most. The phaser and pixelsort cannot be previewed at a smaller size, so with either in the recipe the preview turns exact by itself once you stop for a moment. **Make exact** renders the current recipe at full resolution and shrinks the result, which is exactly what export will give; it takes about a second on a 26 MP photo. A newer slider position cancels a render that is still running, and a live preview that runs over 3 s stops with a "too heavy to preview live" notice (export, and usually Make exact, still work).
 
 ## Desktop app
 

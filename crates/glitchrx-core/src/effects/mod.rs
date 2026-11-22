@@ -276,6 +276,15 @@ pub fn markdown_reference() -> String {
         "\nSet once per recipe (`--encoding`, `--channels`), or per step with \
          `encoding=` and `channels=` in the step's parameters.\n\n",
     );
+    s.push_str(
+        "## Every step
+
+\
+         - `opacity` (0 to 1, default 1): blend the step's result over the picture it \
+         received, as with a layer's opacity. Example: `--echo opacity=0.5`.\n\
+         - A mask (recipe files and the GUI): where the result shows, made of brush \
+         strokes, gradients and brightness ranges. See `[step.mask]` in SPEC section 8.\n\n",
+    );
     for e in REGISTRY {
         s.push_str(&format!(
             "## {}\n\n{}\n\n{}\n\n",
