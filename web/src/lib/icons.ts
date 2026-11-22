@@ -18,6 +18,7 @@ import Tornado from '@lucide/svelte/icons/tornado';
 import Footprints from '@lucide/svelte/icons/footprints';
 import Zap from '@lucide/svelte/icons/zap';
 import Rabbit from '@lucide/svelte/icons/rabbit';
+import ArrowDownWideNarrow from '@lucide/svelte/icons/arrow-down-wide-narrow';
 import Sparkles from '@lucide/svelte/icons/sparkles';
 
 export type IconComponent = typeof Mountain;
@@ -39,6 +40,8 @@ const ICONS: Record<string, IconComponent> = {
   wahwah: Footprints,
   distort: Zap,
   speed: Rabbit,
+  // Phase 3: the sort glyph, wide to narrow, as pixels settle by brightness.
+  pixelsort: ArrowDownWideNarrow,
 };
 
 /** The effect's icon; effects added later fall back to sparkles. */

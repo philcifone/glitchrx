@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::effects::{self, Effect, EffectInfo, Window};
+use crate::effects::{self, Effect, EffectInfo, Group, Window};
 use crate::error::{Error, Result};
 use crate::params::{Params, Units, parse_list};
 use crate::placement::{Placement, hit_rng};
@@ -165,9 +165,15 @@ pub struct Prepared {
 }
 
 impl Prepared {
-    /// Bytes per frame (one sample for each channel).
+    /// Bytes per frame (one sample for each channel). Pixel effects work on
+    /// whole pixels, so for them a frame is one pixel, and windows (which
+    /// are whole frames from the start of the raster) cover whole pixels.
     pub fn frame(&self) -> usize {
-        self.encoding.width() * self.channels
+        if self.info.group == Group::Pixel {
+            3
+        } else {
+            self.encoding.width() * self.channels
+        }
     }
 
     /// Apply this step to raster bytes measured by `units`.
@@ -185,8 +191,10 @@ impl Prepared {
             if cancel() {
                 return Err(Error::Cancelled);
             }
+            let start = w.start;
             let mut win = Window {
                 bytes: &mut bytes[w],
+                start,
                 encoding: self.encoding,
                 channels: self.channels,
                 units,

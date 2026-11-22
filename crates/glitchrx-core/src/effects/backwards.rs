@@ -1,12 +1,13 @@
 //! `backwards`: Audacity's Reverse.
 
-use super::{Effect, EffectInfo, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Group, PlacementDefaults, Window};
 use crate::error::Result;
 use crate::params::Params;
 use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "backwards",
+    group: Group::Data,
     version: 1,
     audacity: "Reverse",
     summary: "Play each window backwards.",

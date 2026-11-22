@@ -17,7 +17,7 @@
     <div class="grid">
       {#each g.effects as e (e.id)}
         {@const Icon = iconFor(e.id)}
-        <button onclick={() => onpick(e.id)} title="{e.summary} (Audacity: {e.audacity})" disabled={!app.config}>
+        <button onclick={() => onpick(e.id)} title={e.group === 'pixel' ? e.summary : `${e.summary} (Audacity: ${e.audacity})`} disabled={!app.config}>
           <Icon size={22} strokeWidth={1.75} />
           <span>{e.id}</span>
         </button>

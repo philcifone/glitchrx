@@ -367,3 +367,35 @@ Example:
 glitchrx --speed factor=1.1,hits=6 photo.jpg
 ```
 
+## pixelsort
+
+Sort runs of pixels by brightness, hue or saturation: streaks that melt down or across the picture.
+
+Each column (or row, with `direction=horizontal`) is cut into runs of pixels whose brightness lies between `low` and `high`; pixels outside that band stay put and end the runs. Every run is then sorted by `key`: `descending` puts the highest value first (at the top, or on the left), `ascending` the lowest. Raise `low` to let more shadows hold the picture together; lower it to melt more. `max` caps the length of a run (`%` is of the column or row, so `100%` is no cap), which cuts long smooth areas into repeated streaks.
+
+Version: 1.
+
+A pixel effect: it works on whole RGB pixels, so the encoding and channels do not apply.
+
+Live previews of this effect are approximate; the GUI renders it at full resolution when you pause.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `direction` | `vertical` | sort down the columns or along the rows |
+| `key` | `brightness` | what the pixels in a run are sorted by |
+| `order` | `descending` | descending puts the highest first (top or left) |
+| `low` | `0.25` | darkest brightness that is sorted; darker pixels stay and break runs |
+| `high` | `0.9` | brightest brightness that is sorted; brighter pixels stay and break runs |
+| `max` | `100%` | longest run in px or % of the column or row (100% = no limit) |
+| `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
+| `len` | `10%` | length of each window (%, rows, px or bytes); unused when hits=0 |
+
+Example:
+
+```
+glitchrx --pixelsort low=0.3,region=25%:100% photo.jpg
+```
+

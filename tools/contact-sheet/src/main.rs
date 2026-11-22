@@ -138,6 +138,21 @@ const SWEEPS: &[Sweep] = &[
         rows: ("len", &["3%", "8%", "100%"]),
         cols: ("factor", &["0.5", "0.9", "1.1", "1.5"]),
     },
+    // Phase 3: pixel sorting.
+    Sweep {
+        name: "pixelsort",
+        effect: "pixelsort",
+        fixed: "",
+        rows: ("low", &["0.15", "0.3", "0.5"]),
+        cols: ("max", &["100%", "25%", "8%"]),
+    },
+    Sweep {
+        name: "pixelsort-keys",
+        effect: "pixelsort",
+        fixed: "low=0.3",
+        rows: ("direction", &["vertical", "horizontal"]),
+        cols: ("key", &["brightness", "hue", "saturation"]),
+    },
     // Mono against three channels (R, G, B alone) on the blending filters.
     Sweep {
         name: "rgb",

@@ -1,6 +1,6 @@
 //! `echo`: Audacity's Echo, a feedback delay.
 
-use super::{Effect, EffectInfo, Filter, PHASE, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Filter, Group, PHASE, PlacementDefaults, Window};
 use crate::dsp::Ring;
 use crate::error::Result;
 use crate::params::{Bound, Kind, ParamSpec, Params};
@@ -8,6 +8,7 @@ use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "echo",
+    group: Group::Audio,
     version: 1,
     audacity: "Echo",
     summary: "Feedback delay: every sample adds a fading copy of the output `delay` earlier.",

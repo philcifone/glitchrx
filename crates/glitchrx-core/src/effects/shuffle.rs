@@ -1,13 +1,14 @@
 //! `shuffle`: cut blocks out of each window and paste them back in a
 //! random order.
 
-use super::{Effect, EffectInfo, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Group, PlacementDefaults, Window};
 use crate::error::Result;
 use crate::params::{Bound, Kind, ParamSpec, Params};
 use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "shuffle",
+    group: Group::Data,
     version: 1,
     audacity: "cut and paste",
     summary: "Split each window into blocks and swap a share of them at random.",

@@ -129,6 +129,9 @@ impl RecipeDto {
 pub struct EffectDto {
     pub id: &'static str,
     pub version: u32,
+    /// Picker section: "audio", "data" or "pixel". Pixel effects ignore
+    /// the encoding and channels.
+    pub group: &'static str,
     /// The Audacity effect this one follows.
     pub audacity: &'static str,
     pub summary: &'static str,
@@ -166,6 +169,7 @@ pub fn effects() -> Vec<EffectDto> {
             EffectDto {
                 id: e.id,
                 version: e.version,
+                group: e.group.name(),
                 audacity: e.audacity,
                 summary: e.summary,
                 details: e.details,

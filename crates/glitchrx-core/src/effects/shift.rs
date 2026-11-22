@@ -1,12 +1,13 @@
 //! `shift`: rotate each window, like cutting its end and pasting it first.
 
-use super::{Effect, EffectInfo, PHASE, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Group, PHASE, PlacementDefaults, Window};
 use crate::error::Result;
 use crate::params::{Bound, Kind, ParamSpec, Params};
 use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "shift",
+    group: Group::Data,
     version: 1,
     audacity: "cut and paste",
     summary: "Rotate each window forward by `by`; what falls off the end wraps to the start.",
