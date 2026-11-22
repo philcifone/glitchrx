@@ -44,6 +44,9 @@
       app.redo();
     } else if (e.key === '\\' && !e.repeat) {
       app.compare(true);
+    } else if (!mod && !e.altKey && e.key.toLowerCase() === 'z' && app.doc) {
+      e.preventDefault();
+      app.toggleZoom(); // fit to 100% and back, as in Lightroom
     } else if (app.masking && !mod && !e.altKey) {
       maskKey(e);
     }

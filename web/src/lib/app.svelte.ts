@@ -25,6 +25,7 @@ import {
 import { usesSamples } from './palette';
 import { usesSeed } from './seed';
 import { shakeParams } from './shake';
+import { FIT, clampView, geometry, isZoomed, toggle, visible, type Geometry, type Point, type Rect, type View } from './view';
 import type {
   Channels,
   DocInfo,
@@ -56,6 +57,8 @@ const REGION_LINGER_MS = 900;
 const IDLE_MS = 250;
 /** ...or this long before an exact one, for effects that need it. */
 const EXACT_IDLE_MS = 600;
+/** A zoomed view that holds still this long asks for its sharp patch. */
+const VIEW_SETTLE_MS = 150;
 const RECIPE_KEY = 'glitchrx.recipe';
 /** The open photo's server id, so a reload (iOS discards background tabs
  * often) can pick the same photo up again while the server still has it. */
@@ -126,6 +129,22 @@ interface Box {
   dpr: number;
 }
 
+/**
+ * The zoomed view's sharp patch: part of a full-resolution render (or of
+ * the original) covering what was on screen. `rect` places it, in
+ * fractions of the photo; `rev` is the recipe revision it shows.
+ */
+export interface Patch {
+  url: string;
+  rect: Rect;
+  rev: number;
+}
+
+/** A patch's pixel rectangle as fractions of the photo. */
+function fractions(px: { x: number; y: number; w: number; h: number }, doc: DocInfo): Rect {
+  return { x: px.x / doc.width, y: px.y / doc.height, w: px.w / doc.width, h: px.h / doc.height };
+}
+
 export class App {
   config = $state<ServerConfig | null>(null);
   effects = $state<EffectInfo[]>([]);
@@ -142,8 +161,13 @@ export class App {
   /** A long-running action (upload, export) in progress, for the UI to show. */
   working = $state<string | null>(null);
   renderMs = $state<number | null>(null);
-  /** The shown preview is an exact (full-resolution) render. */
-  exact = $state(false);
+  /** How the whole-picture preview was rendered. */
+  private baseQuality = $state<'fast' | 'full' | 'exact'>('fast');
+  /** Zoom and pan (SPEC 9.6). Zoom 1 fits the picture in the stage. */
+  view = $state<View>(FIT);
+  /** Sharp patches for the zoomed view: the glitch, and the original. */
+  crop = $state<Patch | null>(null);
+  originalCrop = $state<Patch | null>(null);
   /** Set when the last preview ran over the time budget: the message. */
   heavy = $state<string | null>(null);
   /** A region being dragged, in percent, for the preview to draw. */
@@ -196,12 +220,17 @@ export class App {
   maskRevision = $state(0);
 
   private history = new History(JSON.stringify(emptyRecipe()));
-  private queue = new LatestOnly(() => (this.busy = false));
+  private queue = new LatestOnly(() => this.idle());
+  /** Crops have their own lane, so a pan never waits behind a render. */
+  private cropQueue = new LatestOnly(() => this.idle());
   private maskQueue = new LatestOnly();
   private maskKey = '';
-  private box: Box = { w: 0, h: 0, dpr: 1 };
+  private box = $state<Box>({ w: 0, h: 0, dpr: 1 });
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
+  private viewTimer: ReturnType<typeof setTimeout> | undefined;
   private originalKey = '';
+  private cropKey = '';
+  private originalCropKey = '';
   private noticeTimer: ReturnType<typeof setTimeout> | undefined;
   private regionTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -295,6 +324,8 @@ export class App {
       const doc = await load();
       this.doc = doc;
       storageSet(DOC_KEY, doc.id);
+      this.view = FIT;
+      this.dropCrops();
       // Steps from the last photo: keep them, clear them, or ask.
       const carried = this.recipe.steps.length;
       if (carried && this.newPhoto === 'fresh') this.startFresh();
@@ -872,7 +903,146 @@ export class App {
     const old = this.box;
     this.box = { w, h, dpr };
     const grew = w * dpr > old.w * old.dpr * 1.1 || h * dpr > old.h * old.dpr * 1.1;
-    if (this.doc && grew) this.render('full');
+    if (this.zoomed) this.setView(this.view); // keep it valid; a new patch follows
+    else if (this.doc && grew) this.render('full');
+  }
+
+  // -------------------------------------------------------------------------
+  // Zoom (SPEC 9.6)
+
+  /** The stage and photo sizes the zoom works with, once both are known. */
+  get geometry(): Geometry | null {
+    const d = this.doc;
+    if (!d || this.box.w <= 0 || this.box.h <= 0) return null;
+    return geometry(this.box, { w: d.width, h: d.height }, this.box.dpr);
+  }
+
+  get zoomed(): boolean {
+    return isZoomed(this.view);
+  }
+
+  /** What is on screen is exactly the export: an exact render, or a current patch when zoomed. */
+  get exact(): boolean {
+    if (this.zoomed) return this.crop !== null && this.crop.rev >= this.imageRevision;
+    return this.baseQuality === 'exact';
+  }
+
+  /**
+   * Move or zoom the preview. Zoomed in, a sharp patch of what is on
+   * screen is asked for once the view holds still; back at fit, the whole
+   * picture settles as it would after a change.
+   */
+  setView(v: View): void {
+    const g = this.geometry;
+    if (!g) return;
+    const was = this.zoomed;
+    this.view = clampView(v, g);
+    clearTimeout(this.viewTimer);
+    if (this.zoomed) {
+      this.viewTimer = setTimeout(() => this.requestCrop(), VIEW_SETTLE_MS);
+    } else if (was) {
+      this.dropCrops();
+      const want = this.needsExact ? 'exact' : 'full';
+      const current = this.imageRevision === this.revision;
+      if (!current || (this.baseQuality !== 'exact' && this.baseQuality !== want)) this.render(want);
+    }
+  }
+
+  /** The magnifier, a double tap or the Z key: fit to 100% and back, about `p` (default: the middle). */
+  toggleZoom(p?: Point): void {
+    const g = this.geometry;
+    if (g) this.setView(toggle(this.view, p ?? { x: g.box.w / 2, y: g.box.h / 2 }, g));
+  }
+
+  /** The part of the photo on screen and the device-pixel box for its patch, when zoomed. */
+  private cropTarget(): { crop: Rect; w: number; h: number } | null {
+    const g = this.geometry;
+    if (!g || !this.zoomed) return null;
+    const { crop, screen } = visible(this.view, g);
+    const max = this.config?.max_preview_side ?? 4096;
+    const ratio = Math.min(this.box.dpr, 3);
+    const side = (css: number) => Math.min(max, Math.max(16, Math.round(css * ratio)));
+    return { crop, w: side(screen.w), h: side(screen.h) };
+  }
+
+  /** Ask for the sharp, exact patch covering the zoomed view. */
+  private requestCrop(): void {
+    clearTimeout(this.viewTimer);
+    const doc = this.doc;
+    const t = this.cropTarget();
+    if (!doc || !t) return;
+    if (this.comparing) void this.loadOriginalCrop();
+    const recipe = this.dto();
+    const key = JSON.stringify([doc.id, t, recipe]);
+    if (key === this.cropKey) return;
+    this.cropKey = key;
+    const rev = this.revision;
+    this.busy = true;
+    this.cropQueue.request(() => this.runCrop(doc, recipe, t, rev));
+  }
+
+  private async runCrop(
+    doc: DocInfo,
+    recipe: RecipeDto,
+    t: { crop: Rect; w: number; h: number },
+    rev: number,
+  ): Promise<void> {
+    try {
+      const res = await api.preview(doc.id, recipe, t.w, t.h, true, t.crop);
+      if (!res?.crop || this.doc?.id !== doc.id) return;
+      const url = URL.createObjectURL(res.blob);
+      await preload(url);
+      // Zoomed out meanwhile, or a newer change is already on screen.
+      if (!this.zoomed || rev < this.imageRevision || this.doc?.id !== doc.id) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      this.setPatch('crop', { url, rect: fractions(res.crop, doc), rev });
+      this.renderMs = res.ms;
+      this.heavy = null;
+    } catch (e) {
+      this.cropKey = '';
+      if (e instanceof TooHeavyError) this.heavy = e.message;
+      else this.fail(e);
+    }
+  }
+
+  /** The original's patch, for comparing while zoomed. */
+  private async loadOriginalCrop(): Promise<void> {
+    const doc = this.doc;
+    const t = this.cropTarget();
+    if (!doc || !t) return;
+    const key = JSON.stringify([doc.id, t]);
+    if (key === this.originalCropKey) return;
+    this.originalCropKey = key;
+    try {
+      const res = await api.preview(doc.id, null, t.w, t.h, false, t.crop);
+      if (!res?.crop || this.originalCropKey !== key) return;
+      const url = URL.createObjectURL(res.blob);
+      await preload(url);
+      this.setPatch('originalCrop', { url, rect: fractions(res.crop, doc), rev: 0 });
+    } catch (e) {
+      this.originalCropKey = '';
+      this.fail(e);
+    }
+  }
+
+  private setPatch(which: 'crop' | 'originalCrop', patch: Patch | null): void {
+    const old = this[which];
+    if (old) URL.revokeObjectURL(old.url);
+    this[which] = patch;
+  }
+
+  private dropCrops(): void {
+    clearTimeout(this.viewTimer);
+    this.setPatch('crop', null);
+    this.setPatch('originalCrop', null);
+    this.cropKey = '';
+    this.originalCropKey = '';
+  }
+
+  private idle(): void {
+    this.busy = this.queue.busy || this.cropQueue.busy;
   }
 
   /** Device-pixel box to render for; `fast` uses CSS pixels (smaller on phones). */
@@ -893,6 +1063,8 @@ export class App {
     const doc = this.doc;
     if (!doc) return;
     clearTimeout(this.idleTimer);
+    // Zoomed in, settling means a sharp exact patch of what is on screen.
+    if (quality === 'exact' && this.zoomed) return this.requestCrop();
     const recipe = this.dto();
     const exact = quality === 'exact';
     const { w, h } = this.target(exact ? 'full' : quality);
@@ -900,9 +1072,12 @@ export class App {
     // The progress line shows while it works; no message, since settling
     // to exact happens after every change.
     this.busy = true;
-    this.queue.request(() => this.runPreview(doc.id, recipe, w, h, exact, rev));
+    this.queue.request(() => this.runPreview(doc.id, recipe, w, h, quality, rev));
     if (this.masking) this.refreshMask();
-    if (!exact && this.needsExact) {
+    if (!exact && this.zoomed) {
+      // The whole picture stays approximate behind the patch.
+      this.idleTimer = setTimeout(() => this.requestCrop(), EXACT_IDLE_MS);
+    } else if (!exact && this.needsExact) {
       // Approximate while things change; exact once they stop.
       this.idleTimer = setTimeout(() => this.render('exact'), EXACT_IDLE_MS);
     } else if (quality === 'fast' && this.box.dpr > 1) {
@@ -916,18 +1091,18 @@ export class App {
     recipe: RecipeDto,
     w: number,
     h: number,
-    exact: boolean,
+    quality: 'fast' | 'full' | 'exact',
     rev: number,
   ): Promise<void> {
     try {
-      const res = await api.preview(docId, recipe, w, h, exact);
+      const res = await api.preview(docId, recipe, w, h, quality === 'exact');
       if (!res || this.doc?.id !== docId) return; // superseded or switched photo
       const url = URL.createObjectURL(res.blob);
       await preload(url);
       this.setImage(url);
       this.imageRevision = rev;
       this.renderMs = res.ms;
-      this.exact = exact;
+      this.baseQuality = quality;
       this.heavy = null;
       this.error = null;
     } catch (e) {
@@ -940,7 +1115,10 @@ export class App {
   /** Start or stop showing the original. */
   compare(on: boolean): void {
     this.comparing = on;
-    if (on) void this.loadOriginal();
+    if (on) {
+      void this.loadOriginal();
+      if (this.zoomed) void this.loadOriginalCrop();
+    }
   }
 
   private async loadOriginal(): Promise<void> {
@@ -1054,6 +1232,8 @@ export class App {
       // The server restarted or closed the photo to make room.
       this.doc = null;
       this.setImage(null);
+      this.view = FIT;
+      this.dropCrops();
     }
     this.error = e instanceof Error ? e.message : String(e);
   }

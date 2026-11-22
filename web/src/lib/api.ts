@@ -81,6 +81,8 @@ export interface PreviewResult {
   width: number;
   height: number;
   ms: number;
+  /** For a crop: the full-resolution pixels it shows (x, y, w, h). */
+  crop: { x: number; y: number; w: number; h: number } | null;
 }
 
 /**
@@ -88,17 +90,28 @@ export interface PreviewResult {
  * `exact`, the server bends the full-resolution photo and then shrinks it,
  * which is exactly the export but slower. Resolves to null when the server
  * dropped it for a newer request; throws TooHeavyError over the budget.
+ * With `crop` (fractions of the photo), only that part, cut from the
+ * full-resolution render (or the original): the zoomed view's patch.
  */
+function parseCrop(v: string | null): PreviewResult['crop'] {
+  const n = (v ?? '').split(',').map(Number);
+  return n.length === 4 && n.every(Number.isFinite) ? { x: n[0], y: n[1], w: n[2], h: n[3] } : null;
+}
+
 export async function preview(
   docId: string,
   recipe: RecipeDto | null,
   maxW: number,
   maxH: number,
   exact = false,
+  crop?: { x: number; y: number; w: number; h: number },
 ): Promise<PreviewResult | null> {
-  const body = recipe
-    ? { recipe, max_w: maxW, max_h: maxH, exact }
-    : { original: true, max_w: maxW, max_h: maxH };
+  const body = {
+    ...(recipe ? { recipe, exact } : { original: true }),
+    max_w: maxW,
+    max_h: maxH,
+    ...(crop ? { crop } : {}),
+  };
   const res = await postJson(`/api/docs/${docId}/preview`, body);
   if (res.status === 204) return null;
   if (res.headers.get('x-too-heavy')) {
@@ -117,6 +130,7 @@ export async function preview(
     width: Number(h.get('x-width') ?? 0),
     height: Number(h.get('x-height') ?? 0),
     ms: Number(h.get('x-render-ms') ?? 0),
+    crop: parseCrop(h.get('x-crop')),
   };
 }
 

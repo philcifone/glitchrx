@@ -8,6 +8,7 @@
   import Download from '@lucide/svelte/icons/download';
   import Undo2 from '@lucide/svelte/icons/undo-2';
   import Redo2 from '@lucide/svelte/icons/redo-2';
+  import SquareSplitHorizontal from '@lucide/svelte/icons/square-split-horizontal';
   import Sun from '@lucide/svelte/icons/sun';
   import Moon from '@lucide/svelte/icons/moon';
   import { app } from '../lib/app.svelte';
@@ -27,6 +28,23 @@
       <span class="what">Step {t.n}: {t.step.effect}{t.step.enabled ? '' : ' (off)'}</span>
     </div>
     <div class="actions">
+      <!-- Holding the photo paints here, so comparing has its own button. -->
+      <button
+        class="icon"
+        class:on={app.comparing}
+        onpointerdown={(e) => {
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          app.compare(true);
+        }}
+        onpointerup={() => app.compare(false)}
+        onpointercancel={() => app.compare(false)}
+        onlostpointercapture={() => app.compare(false)}
+        oncontextmenu={(e) => e.preventDefault()}
+        title="Hold to see the original (or hold the \ key)"
+        aria-label="Hold to see the original"
+      >
+        <SquareSplitHorizontal size={18} strokeWidth={1.75} />
+      </button>
       <button class="icon" onclick={() => app.undo()} disabled={!app.canUndo} title="Undo the last stroke (Ctrl+Z)" aria-label="Undo">
         <Undo2 size={18} strokeWidth={1.75} />
       </button>
@@ -125,6 +143,17 @@
     gap: 2px;
   }
 
+  /* The compare button while held. */
+  .actions .icon.on {
+    background: var(--accent);
+    color: var(--accent-fg);
+  }
+
+  .actions .icon {
+    touch-action: none;
+    -webkit-touch-callout: none;
+  }
+
   .actions .primary {
     margin: 0 6px;
     border-radius: 999px;
@@ -142,8 +171,8 @@
     }
   }
 
-  /* Narrow phones (mini, SE, Display Zoom): tighter, still tappable. */
-  @media (max-width: 389px) {
+  /* Phones up to the Pro Max (430 px): tighter, still tappable. */
+  @media (max-width: 429px) {
     header {
       gap: 8px;
       padding-left: 12px;
