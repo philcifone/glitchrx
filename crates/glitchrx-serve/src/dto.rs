@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 use glitchrx_core::codec::Image;
 use glitchrx_core::effects::{self, REGISTRY};
+use glitchrx_core::mask::Mask;
 use glitchrx_core::params::Kind;
 use glitchrx_core::{Encoding, Recipe, Result, Step};
 use serde::{Deserialize, Serialize};
@@ -46,9 +47,13 @@ pub struct StepDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effect_version: Option<u32>,
     pub seed: SeedText,
-    /// Parameter overrides as text; defaults are omitted.
+    /// Parameter overrides as text; defaults are omitted. Also carries the
+    /// step keys `encoding`, `channels` and `opacity`.
     #[serde(default)]
     pub params: BTreeMap<String, String>,
+    /// Where the result shows; absent means everywhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask: Option<Mask>,
 }
 
 /// A seed that is written as a JSON string but also accepted as a number.
@@ -93,6 +98,7 @@ impl RecipeDto {
                     effect_version: s.effect_version.unwrap_or(info.version),
                     seed: s.seed.0,
                     params: s.params.clone(),
+                    mask: s.mask.clone(),
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -118,6 +124,7 @@ impl RecipeDto {
                     effect_version: Some(s.effect_version),
                     seed: SeedText(s.seed),
                     params: s.params.clone(),
+                    mask: s.mask.clone(),
                 })
                 .collect(),
         }
@@ -275,6 +282,7 @@ mod tests {
                 effect_version: None,
                 seed: SeedText(big),
                 params: BTreeMap::new(),
+                mask: None,
             }],
             ..RecipeDto::default()
         };
