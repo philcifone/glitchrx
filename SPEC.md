@@ -46,6 +46,7 @@ Decisions from earlier versions keep their numbers. Superseded ones say so.
 | D-30 | **Sizes mapped from full resolution** | Found while measuring preview fidelity in 2b. Scaling byte counts by the area ratio misplaces things twice: a third of a row at full size became a twelfth of one in a quarter-size preview, and the byte remainder (the colour rotation) came out arbitrary, so `reverb` previews had different colours. Every size and hit position is now worked out at full resolution and mapped into the preview by rows (height ratio), the rest of the row (width ratio) and the 0-2 byte phase (kept). Hits are drawn as a fraction of the free space. Measured mean preview error at defaults, quarter size: 1.5-5.8 per byte for every effect except `reverb` (10.3, against an effect strength of 30); `tests/fixtures.rs` prints the table. The remaining gap is inherent: a delay that wraps past a row moves its ghost down one row, and a preview row stands for several full rows, so long feedback tails drift. 2c can offer a full-resolution preview on demand. |
 | D-31 | **2b deviations** | (1) Decoding and encoding live in one `codec.rs` rather than `decode/` plus `encode.rs`; each format is small. (2) `reverb` has no `width`: it only applies to joint stereo processing, and channels are processed separately (section 5). Can be added with a stereo filter in 2d. (3) Screen-resolution previews and cancellation are already in the server (pulled forward from 2c), since the 2a cache did not fit rasters. (4) Fixtures dropped the restart-marker JPEG and added PNG, TIFF, CMYK, ICC and orientation variants. |
 | D-32 | **2c GUI choices** | (1) An effect palette of icon buttons replaces the effect dropdown; Phil picked the icons from a contact sheet (echo mountain, delay copy, reverb iteration-cw, amplify megaphone, invert eclipse, bitcrush blocks, backwards rewind, shift move-horizontal, shuffle orbit, stutter drum). (2) Placement is always shown, not folded away ("that's where the juice is"); the region is one two-handle slider that shades the preview outside its band while dragged. (3) **Shake**: random settings for a step's own parameters, drawn from the middle 80% of each slider (sizes in rows), separate from re-rolling the seed. (4) **Exact preview** on demand (D-26 follow-up): full-resolution bend, then shrink. (5) Over budget, the server answers 503 with `X-Too-Heavy: 1`; the GUI keeps the last image and offers an exact render. (6) The dice is disabled when a step has nothing random (`random_within` in the registry). |
+| D-33 | **2d effects** | (1) `phaser` and `wahwah` follow Audacity's algorithms, with the LFO period in picture units (rows) instead of Hz, and our own sine (`dsp::sin_turns`, range reduction in turns, Taylor to x^19). Swept coefficients are recomputed every 16 samples (Audacity: 20 and 30), which made them 4-9x faster with no visible steps. (2) The phaser cannot be previewed at scale: its all-pass stages act as delays of a few samples, and which colour bytes they mix depends on that delay modulo 3, which a smaller raster cannot reproduce (measured error 28.6 against strength 13.9). Warping the stage frequencies made it no better. Instead the registry flags it (`exact_preview`) and the GUI renders exactly 600 ms after the last change. Wahwah previews well (8.5 against 36.9). (3) Low-pass filters over interleaved R, G, B bytes average the colours into grey, so channels gained a third choice, `3`: with `u8` each colour is its own channel, as in Audacity's raw import with 3 channels. (4) `speed` resamples whole pixels by default (`step=pixel`). (5) Default tuning is postponed. |
 
 ## 1. Goals and non-goals
 
@@ -137,7 +138,7 @@ The recipe sets `encoding` and `channels` once; any step may override them (D-23
 | `s24le`, `s24be` | 3 | One sample per pixel: the whole pixel becomes one number. |
 | `ulaw`, `alaw` | 1 | Posterized neon blocks with hard edges. |
 
-- **Channels:** `1` (mono) or `2` (stereo). In stereo, samples alternate left/right, and effects process each channel separately, as Audacity does.
+- **Channels:** `1` (mono), `2` (stereo) or `3`. Samples alternate between the channels, and effects process each channel separately, as Audacity does. With `u8`, three channels are exactly R, G and B, so a filter that blends neighbouring samples keeps colour instead of greying it (D-33).
 - **Clipping:** after the effect, samples are clamped to the encoding's range and converted back to bytes. For `ulaw`/`alaw`, the companding curve is applied on the way back.
 - **Byte order** only exists for multi-byte samples. It decides which byte the effect treats as the loud part, which is why it mattered in Audacity.
 - **Channel phase.** A delay of a whole number of pixels keeps colours; one or two extra bytes rotate red into green into blue. Delays are therefore given as a size plus a `phase` of 0, 1 or 2 bytes (section 6.2).
@@ -175,9 +176,9 @@ Effects follow Audacity's built-ins in structure and parameters, computed in f64
 | Effect | Audacity counterpart | Notes |
 | --- | --- | --- |
 | `phaser` | Phaser | All-pass stages swept by an LFO (our own sine). Likely source of the wavy look in `Glitchpicturecool-notmine.jpg`. |
-| `wahwah` | Wahwah | Resonant band-pass swept by an LFO. |
+| `wahwah` | Wahwah | Resonant low-pass swept by an LFO (Audacity's biquad). |
 | `distort` | Distortion | Waveshaping curves (hard clip, soft clip, fold). |
-| `speed` | Change Speed | Resample a window to a new rate, then fit it back to length. Shears and stretches the picture. |
+| `speed` | Change Speed | Resample a window to a new rate, wrapping around to keep its length. Shears and stretches the picture. Whole pixels by default (`step=pixel`); `step=sample` drifts across R, G and B like Audacity. |
 
 ### 6.5 Later
 
@@ -208,7 +209,7 @@ glitchrx --recipe moody.toml --batch *.jpg
 | `--recipe FILE` | Apply a saved recipe instead of effect flags. |
 | `--save-recipe[=FILE]` | Write the recipe used. Default `<output-stem>.recipe.toml`. |
 | `--format tiff\|png\|jpeg` | Output format when OUTPUT is not given (default `tiff`); otherwise taken from OUTPUT's extension. |
-| `--encoding E`, `--channels 1\|2` | Recipe-wide sample encoding and channel count (default `u8`, `1`). |
+| `--encoding E`, `--channels 1\|2\|3` | Recipe-wide sample encoding and channel count (default `u8`, `1`). |
 | `--force` | Allow overwriting an existing output. Never the input. |
 | `--batch`, `--info`, `--list`, `-q`, `-v`, `--help` | As before. `--info` reports the format, size, orientation and colour profile. |
 
@@ -271,8 +272,9 @@ Built and tested on `phase-1-cli`; the byte engine is now at `archive/jpeg-bytes
 - **2a `glitchrx serve`:** done (D-16..D-21).
 - **2b Pixel core.** Raster, decoders (JPEG with orientation, PNG, TIFF), encoders, sample encodings, the f64 effect framework, the first-batch effects, recipe v2, CLI changes, removal of the JPEG byte engine. Tests per section 11.
 - **2c GUI on the pixel core.** Section 9.1 and 9.2: scaled previews, cancellation, budget, TIFF export.
-- **2d Second-batch effects and tuning.** Phaser, wahwah, distort, speed; contact sheets against `samples/examples/`; defaults chosen with Phil.
-- **2e Tauri wrapper (optional).**
+- **2d Second-batch effects.** Phaser, wahwah, distort, speed, with contact sheets (D-33). Tuning defaults against `samples/examples/` with Phil is postponed (Phil, 2026-11-22).
+- **2d' PWA pass.** App icon, home-screen install, name and splash, so the GUI feels like an app on iOS.
+- **2e Tauri wrapper.** Linux first; macOS (Apple Silicon) later. Reuses the PWA icon.
 
 ### Phase 3: depth
 

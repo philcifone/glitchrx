@@ -109,6 +109,43 @@ const SWEEPS: &[Sweep] = &[
         rows: ("len", &["2%", "5%", "15%"]),
         cols: ("chunk", &["0.3rows", "1rows", "1.5rows", "4rows"]),
     },
+    // Second batch (2d).
+    Sweep {
+        name: "phaser",
+        effect: "phaser",
+        fixed: "",
+        rows: ("feedback", &["0", "0.5", "0.9"]),
+        cols: ("stages", &["2", "4", "8", "16"]),
+    },
+    Sweep {
+        name: "wahwah",
+        effect: "wahwah",
+        fixed: "",
+        rows: ("resonance", &["1", "2.5", "6"]),
+        cols: ("period", &["1rows", "4rows", "16rows", "50%"]),
+    },
+    Sweep {
+        name: "distort",
+        effect: "distort",
+        fixed: "",
+        rows: ("curve", &["hard", "soft", "fold"]),
+        cols: ("drive", &["6", "12", "24", "36"]),
+    },
+    Sweep {
+        name: "speed",
+        effect: "speed",
+        fixed: "",
+        rows: ("len", &["3%", "8%", "100%"]),
+        cols: ("factor", &["0.5", "0.9", "1.1", "1.5"]),
+    },
+    // Mono against three channels (R, G, B alone) on the blending filters.
+    Sweep {
+        name: "rgb",
+        effect: "wahwah",
+        fixed: "",
+        rows: ("channels", &["1", "3"]),
+        cols: ("resonance", &["1", "2.5", "6"]),
+    },
     // The same echo read through every encoding, with each channel phase.
     Sweep {
         name: "encodings",

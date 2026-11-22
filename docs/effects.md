@@ -261,3 +261,109 @@ Example:
 glitchrx --stutter chunk=0.9rows,hits=5 photo.jpg
 ```
 
+## phaser
+
+All-pass stages swept by a slow oscillator, mixed with the input: wavy, combed bands.
+
+Audacity's phaser: `stages` first-order all-pass filters in series, their coefficient swept between 1 and `1 - depth` by an LFO, with `feedback` from the output back into the input, then mixed with the dry signal. In a picture the sweep runs down the rows, so one LFO `period` is one wave of the banding. Audacity updates the sweep every 20 samples, here every 16.
+
+Follows Audacity's Phaser. Version: 1.
+
+Live previews of this effect are approximate; the GUI renders it at full resolution when you pause.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `stages` | `4` | all-pass stages; more gives more, finer notches |
+| `period` | `6rows` | length of one LFO sweep (rows, px, % or bytes) |
+| `start` | `0` | where in its sweep the LFO starts, in turns (0.5 is half way) |
+| `depth` | `0.4` | how far the sweep reaches |
+| `feedback` | `0.5` | output fed back into the input; negative inverts it |
+| `mix` | `0.5` | share of the phased signal in the output (Audacity's dry/wet) |
+| `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
+| `len` | `10%` | length of each window (%, rows, px or bytes); unused when hits=0 |
+
+Example:
+
+```
+glitchrx --phaser stages=8,period=3rows,feedback=0.8 photo.jpg
+```
+
+## wahwah
+
+A resonant filter whose cutoff an LFO sweeps up and down: smears that pulse down the picture.
+
+Audacity's wahwah: a two-pole resonant low-pass (a biquad) whose cutoff follows an LFO, from `offset` up to `offset + depth` of the range on an exponential scale. Low cutoffs smear each row sideways; high `resonance` rings, which clips into bright fringes. One LFO `period` is one pulse down the rows. Audacity updates the filter every 30 samples, here every 16.
+
+Follows Audacity's Wahwah. Version: 1.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `period` | `4rows` | length of one LFO sweep (rows, px, % or bytes) |
+| `start` | `0` | where in its sweep the LFO starts, in turns (0.5 is half way) |
+| `depth` | `0.7` | how far the cutoff sweeps |
+| `resonance` | `2.5` | peak at the cutoff; high values ring |
+| `offset` | `0.3` | lowest cutoff, as a share of the range |
+| `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
+| `len` | `10%` | length of each window (%, rows, px or bytes); unused when hits=0 |
+
+Example:
+
+```
+glitchrx --wahwah period=8rows,resonance=6 photo.jpg
+```
+
+## distort
+
+Drive the samples into a curve: hard clipping, soft saturation, or folding back.
+
+Each sample is multiplied by `drive` (dB) and bent by a curve. `hard` clips at full scale, like amplify. `soft` rounds off towards full scale (a cubic curve), for posterized but smooth tones. `fold` reflects anything past full scale back in, again and again, so bright areas turn into stacked bands of inverted contour. `mix` blends with the input.
+
+Follows Audacity's Distortion. Version: 1.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `curve` | `fold` | shape of the distortion |
+| `drive` | `12` | gain into the curve, in dB |
+| `mix` | `1` | share of the distorted signal in the output |
+| `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
+| `len` | `10%` | length of each window (%, rows, px or bytes); unused when hits=0 |
+
+Example:
+
+```
+glitchrx --distort curve=fold,drive=18 photo.jpg
+```
+
+## speed
+
+Play each window faster or slower, wrapping around to keep its length: shears and stretches.
+
+Output sample `i` reads the input at `i * factor`, between samples by linear interpolation, wrapping back to the start of the window. Faster than 1 squeezes the window's rows and repeats it, and since a squeezed row no longer lines up with the picture's rows, everything leans into a diagonal shear. Slower than 1 stretches the start of the window across all of it. With `step=pixel` (the default) whole pixels are resampled, so colours hold. `step=sample` resamples each sample like Audacity, which drifts across the R, G and B bytes and blends them into grey stripes.
+
+Follows Audacity's Change Speed. Version: 1.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `factor` | `1.5` | playback speed; above 1 squeezes and repeats, below 1 stretches |
+| `step` | `pixel` | resample whole pixels (colours hold) or single samples (grey stripes) |
+| `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
+| `hits` | `4` | number of windows at seeded places; 0 = one window over the whole region |
+| `len` | `8%` | length of each window (%, rows, px or bytes); unused when hits=0 |
+
+Example:
+
+```
+glitchrx --speed factor=1.1,hits=6 photo.jpg
+```
+
