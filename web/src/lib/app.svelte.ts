@@ -61,6 +61,15 @@ const RECIPE_KEY = 'glitchrx.recipe';
  * often) can pick the same photo up again while the server still has it. */
 const DOC_KEY = 'glitchrx.doc';
 const TOOL_KEY = 'glitchrx.maskTool';
+const NEW_PHOTO_KEY = 'glitchrx.newPhoto';
+
+/** What opening another photo does with the steps already there. */
+export type NewPhotoChoice = 'ask' | 'keep' | 'fresh';
+
+function loadNewPhoto(): NewPhotoChoice {
+  const v = storageGet(NEW_PHOTO_KEY);
+  return v === 'keep' || v === 'fresh' ? v : 'ask';
+}
 
 function loadTool(): ToolState {
   try {
@@ -169,6 +178,10 @@ export class App {
   selected = $state<number[]>([]);
   /** Components copied or cut, ready to paste into any step's mask. */
   maskClipboard = $state<MaskOp[]>([]);
+  /** Opening another photo: ask, keep the steps, or start fresh (per device). */
+  newPhoto = $state<NewPhotoChoice>(loadNewPhoto());
+  /** Steps carried onto a photo just opened, waiting for keep or start fresh (0: not asking). */
+  askNewPhoto = $state(0);
   /** Brush and gradient settings for painting masks. */
   tool = $state<ToolState>(loadTool());
   /** Blob URL of the mask overlay for the step being painted. */
@@ -282,6 +295,10 @@ export class App {
       const doc = await load();
       this.doc = doc;
       storageSet(DOC_KEY, doc.id);
+      // Steps from the last photo: keep them, clear them, or ask.
+      const carried = this.recipe.steps.length;
+      if (carried && this.newPhoto === 'fresh') this.startFresh();
+      else if (carried && this.newPhoto === 'ask') this.askNewPhoto = carried;
       this.setImage(null);
       this.setOriginal(null, '');
       this.setMaskUrl(null);
@@ -294,6 +311,24 @@ export class App {
     } finally {
       this.working = null;
     }
+  }
+
+  /** Clear the steps for a new photo. Undo brings them back. */
+  startFresh(): void {
+    this.askNewPhoto = 0;
+    if (!this.recipe.steps.length) return;
+    this.stopMasking();
+    this.recipe.steps = [];
+    this.changed();
+  }
+
+  keepSteps(): void {
+    this.askNewPhoto = 0;
+  }
+
+  setNewPhotoChoice(choice: NewPhotoChoice): void {
+    this.newPhoto = choice;
+    storageSet(NEW_PHOTO_KEY, choice);
   }
 
   // -------------------------------------------------------------------------
