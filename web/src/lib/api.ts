@@ -6,6 +6,7 @@ import type {
   EffectInfo,
   ExportFormat,
   Listing,
+  PresetInfo,
   RecipeDto,
   ServerConfig,
 } from './types';
@@ -134,6 +135,27 @@ export async function maskView(
   const res = await postJson(`/api/docs/${docId}/mask`, { recipe, step, max_w: maxW, max_h: maxH, tint });
   if (!res.ok) await fail(res);
   return res.blob();
+}
+
+const presetUrl = (name: string) => `/api/presets/${encodeURIComponent(name)}`;
+
+export const listPresets = async () => json<PresetInfo[]>(await fetch('/api/presets'));
+
+export const getPreset = async (name: string) => json<RecipeDto>(await fetch(presetUrl(name)));
+
+/** Save a preset. Throws ApiError 409 when the name is taken and not `replace`. */
+export async function savePreset(name: string, recipe: RecipeDto, replace: boolean): Promise<string> {
+  const res = await fetch(presetUrl(name), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recipe, replace }),
+  });
+  return (await json<{ name: string }>(res)).name;
+}
+
+export async function deletePreset(name: string): Promise<void> {
+  const res = await fetch(presetUrl(name), { method: 'DELETE' });
+  if (!res.ok) await fail(res);
 }
 
 /** Full-resolution export; returns the file and its suggested name. */

@@ -11,6 +11,7 @@
   import StatusBar from './components/StatusBar.svelte';
   import OpenDialog from './components/OpenDialog.svelte';
   import ExportDialog from './components/ExportDialog.svelte';
+  import PresetsDialog from './components/PresetsDialog.svelte';
 
   let openDialog: OpenDialog;
 
@@ -20,6 +21,7 @@
     else openDialog.show();
   }
   let exportDialog: ExportDialog;
+  let presetsDialog: PresetsDialog;
   let sheetExpanded = $state(false);
 
   onMount(() => {
@@ -88,7 +90,7 @@
   }}
   ondrop={onDrop}
 >
-  <TopBar onopen={open} onexport={() => exportDialog.show()} />
+  <TopBar onopen={open} onexport={() => exportDialog.show()} onpresets={() => presetsDialog.show()} />
   <main class="stage">
     <Preview onopen={open} />
   </main>
@@ -108,6 +110,7 @@
 
 <OpenDialog bind:this={openDialog} />
 <ExportDialog bind:this={exportDialog} />
+<PresetsDialog bind:this={presetsDialog} />
 
 <style>
   .app {
