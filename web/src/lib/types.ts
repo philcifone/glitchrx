@@ -78,17 +78,30 @@ export type Channels = 1 | 2 | 3;
 /** How a mask operation combines with the mask so far. */
 export type MaskMode = 'add' | 'subtract' | 'intersect';
 
+/** One stroke of a brush component. */
+export interface Stroke {
+  /** Take back this brush's own paint instead of adding to it. */
+  erase?: boolean;
+  /** Diameter as a share of the picture's longer side. */
+  size: number;
+  hardness: number;
+  /** Flat x, y list, as fractions of the picture. */
+  points: number[];
+}
+
 /**
- * One mask operation (see crates/glitchrx-core/src/mask.rs). Positions are
+ * One mask component (see crates/glitchrx-core/src/mask.rs). Positions are
  * fractions of the picture (x of the width, y of the height); sizes are
  * fractions of its longer side.
  */
 export type MaskOp =
-  | { shape: 'stroke'; mode: MaskMode; size: number; hardness: number; points: number[] }
+  | { shape: 'brush'; mode: MaskMode; stroke: Stroke[] }
   | { shape: 'linear'; mode: MaskMode; from: [number, number]; to: [number, number] }
   /** A circle: centre `from`, edge through `to`. Hard-edged unless `hardness` < 1. */
   | { shape: 'radial'; mode: MaskMode; from: [number, number]; to: [number, number]; hardness?: number }
   | { shape: 'brightness'; mode: MaskMode; low: number; high: number; soft: number };
+
+export type MaskShape = MaskOp['shape'];
 
 /** Where a step's result shows. The server omits empty and default fields. */
 export interface Mask {

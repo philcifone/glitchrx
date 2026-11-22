@@ -528,23 +528,36 @@ mod tests {
 
     #[test]
     fn masks_and_opacity_round_trip_through_toml() {
-        use crate::mask::{MaskOp, Mode};
+        use crate::mask::{MaskOp, Mode, Stroke};
         let mut r = Recipe::default();
         let mut s = masked_invert();
         let m = s.mask.as_mut().unwrap();
         m.feather = 0.01;
-        m.ops.push(MaskOp::Stroke {
+        m.ops.push(MaskOp::Brush {
             mode: Mode::Subtract,
-            size: 0.05,
-            hardness: 0.25,
-            points: vec![0.1, 0.2, 0.3, 0.4],
+            strokes: vec![
+                Stroke {
+                    erase: false,
+                    size: 0.05,
+                    hardness: 0.25,
+                    points: vec![0.1, 0.2, 0.3, 0.4],
+                },
+                Stroke {
+                    erase: true,
+                    size: 0.02,
+                    hardness: 0.5,
+                    points: vec![0.2, 0.3],
+                },
+            ],
         });
         r.steps.push(s);
         r.steps.push(Step::new("backwards", "", 2).unwrap());
         let text = r.to_toml();
         assert!(text.contains("[step.mask]"), "{text}");
         assert!(text.contains("[[step.mask.op]]"), "{text}");
-        assert!(text.contains("shape = \"stroke\""), "{text}");
+        assert!(text.contains("shape = \"brush\""), "{text}");
+        assert!(text.contains("[[step.mask.op.stroke]]"), "{text}");
+        assert!(text.contains("erase = true"), "{text}");
         assert!(text.contains("opacity = 0.5"), "{text}");
         assert_eq!(Recipe::from_toml(&text).unwrap(), r);
     }

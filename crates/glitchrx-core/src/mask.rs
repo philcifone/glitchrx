@@ -6,18 +6,23 @@
 //! short list of operations, not as an image, so they are small, exact at
 //! any resolution, and replay from the command line:
 //!
-//! - **stroke**: a brush stroke (a path of points with a size and hardness);
+//! - **brush**: a set of brush strokes (paths of points with a size and
+//!   hardness); a stroke can also erase the brush's own paint;
 //! - **linear**: a gradient, 1 at `from` fading to 0 at `to`;
 //! - **radial**: a circle centred on `from` and reaching `to`, hard-edged
 //!   unless given a lower `hardness` (soften it with the mask's feather);
 //! - **brightness**: the pixels whose brightness lies in a range, read from
 //!   the picture as it arrives at the step.
 //!
-//! Starting from an empty mask (nothing shows), each operation is combined
-//! in order with its `mode`: **add** paints toward 1 and **subtract** toward
-//! 0, as painting white or black onto a layer mask does (the brush and the
-//! eraser), and **intersect** keeps only what the shape also covers. Then
-//! the whole mask may be inverted and feathered (blurred).
+//! Starting from an empty mask (nothing shows), each operation (a
+//! *component*, in the GUI) is combined in order with its `mode`: **add**
+//! paints toward 1 and **subtract** toward 0, as painting white or black onto
+//! a layer mask does, and **intersect** keeps only what the shape also
+//! covers. Then the whole mask may be inverted and feathered (blurred).
+//!
+//! Each component stays separate, so any of them can be adjusted later: a
+//! brush's eraser only takes back that brush's own paint. To cut into
+//! everything else, add a brush that subtracts.
 //!
 //! Positions are fractions of the image (x of the width, y of the height)
 //! and lengths fractions of its longer side, so the same mask lands on the
@@ -51,27 +56,48 @@ fn hard() -> f64 {
     1.0
 }
 
-/// One operation of a mask. In a recipe file:
+/// One stroke of a brush.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Stroke {
+    /// Take back this brush's own paint instead of adding to it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub erase: bool,
+    /// Diameter, as a share of the longer side.
+    pub size: f64,
+    /// 1 = crisp edge, 0 = soft all the way in.
+    #[serde(default = "default_hardness")]
+    pub hardness: f64,
+    /// Flat list of `x, y` pairs along the stroke.
+    pub points: Vec<f64>,
+}
+
+/// One operation (component) of a mask. In a recipe file:
 ///
 /// ```toml
 /// [[step.mask.op]]
-/// shape = "stroke"
+/// shape = "brush"
 /// mode = "add"
+///
+/// [[step.mask.op.stroke]]
 /// size = 0.06          # brush diameter, share of the longer side
-/// hardness = 0.5       # 1 = crisp edge, 0 = soft all the way in
+/// hardness = 0.5
 /// points = [0.21, 0.40, 0.25, 0.43, 0.30, 0.47]   # x, y, x, y, ...
+///
+/// [[step.mask.op.stroke]]
+/// erase = true
+/// size = 0.02
+/// points = [0.24, 0.42]
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "shape", rename_all = "lowercase")]
 pub enum MaskOp {
-    Stroke {
+    /// Brush strokes, built up (and erased) on their own, then combined
+    /// with the mask as one shape.
+    Brush {
         #[serde(default)]
         mode: Mode,
-        size: f64,
-        #[serde(default = "default_hardness")]
-        hardness: f64,
-        /// Flat list of `x, y` pairs along the stroke.
-        points: Vec<f64>,
+        #[serde(rename = "stroke", default, skip_serializing_if = "Vec::is_empty")]
+        strokes: Vec<Stroke>,
     },
     Linear {
         #[serde(default)]
@@ -107,7 +133,7 @@ pub enum MaskOp {
 impl MaskOp {
     pub fn mode(&self) -> Mode {
         match self {
-            MaskOp::Stroke { mode, .. }
+            MaskOp::Brush { mode, .. }
             | MaskOp::Linear { mode, .. }
             | MaskOp::Radial { mode, .. }
             | MaskOp::Brightness { mode, .. } => *mode,
@@ -157,22 +183,25 @@ impl Mask {
         let mut points = 0;
         for op in &self.ops {
             match op {
-                MaskOp::Stroke {
-                    size,
-                    hardness,
-                    points: p,
-                    ..
-                } => {
-                    if !(size.is_finite() && *size > 0.0 && *size <= 1.0) {
-                        return bad(format!("stroke size {size} must be above 0, at most 1"));
+                MaskOp::Brush { strokes, .. } => {
+                    for Stroke {
+                        size,
+                        hardness,
+                        points: p,
+                        ..
+                    } in strokes
+                    {
+                        if !(size.is_finite() && *size > 0.0 && *size <= 1.0) {
+                            return bad(format!("stroke size {size} must be above 0, at most 1"));
+                        }
+                        if !unit(*hardness) {
+                            return bad(format!("stroke hardness {hardness} must be 0..1"));
+                        }
+                        if p.is_empty() || p.len() % 2 != 0 || !p.iter().all(|&v| pos(v)) {
+                            return bad("stroke points must be x, y pairs near the picture".into());
+                        }
+                        points += p.len() / 2;
                     }
-                    if !unit(*hardness) {
-                        return bad(format!("stroke hardness {hardness} must be 0..1"));
-                    }
-                    if p.is_empty() || p.len() % 2 != 0 || !p.iter().all(|&v| pos(v)) {
-                        return bad("stroke points must be x, y pairs near the picture".into());
-                    }
-                    points += p.len() / 2;
                 }
                 MaskOp::Linear { from, to, .. } => {
                     if !from.iter().chain(to).all(|&v| pos(v)) {
@@ -218,12 +247,7 @@ impl Mask {
                 return Err(Error::Cancelled);
             }
             match op {
-                MaskOp::Stroke {
-                    mode,
-                    size,
-                    hardness,
-                    points,
-                } => stroke(&mut m, w, h, *mode, size * long * 0.5, *hardness, points),
+                MaskOp::Brush { mode, strokes } => brush(&mut m, w, h, *mode, long, strokes),
                 MaskOp::Linear { mode, from, to } => {
                     let (a, d) = ends(from, to, w, h);
                     let len2 = d.0 * d.0 + d.1 * d.1;
@@ -334,70 +358,79 @@ fn each_pixel(m: &mut [f32], w: usize, mode: Mode, f: impl Fn(f64, f64) -> f64) 
     }
 }
 
-/// Paint one stroke: the union of round-capped segments between its
-/// points, with a soft edge.
-///
-/// The stroke's own coverage is built first (the maximum over segments,
-/// so joints are not painted twice), then combined with the mask once, as
-/// a single dab of paint would be.
-fn stroke(
-    m: &mut [f32],
-    w: usize,
-    h: usize,
-    mode: Mode,
-    radius: f64,
-    hardness: f64,
-    points: &[f64],
-) {
+/// A rectangle of pixels, `x0..x1` by `y0..y1`.
+#[derive(Clone, Copy)]
+struct Rect {
+    x0: usize,
+    y0: usize,
+    x1: usize,
+    y1: usize,
+}
+
+impl Rect {
+    fn union(self, o: Rect) -> Rect {
+        Rect {
+            x0: self.x0.min(o.x0),
+            y0: self.y0.min(o.y0),
+            x1: self.x1.max(o.x1),
+            y1: self.y1.max(o.y1),
+        }
+    }
+
+    fn width(self) -> usize {
+        self.x1 - self.x0
+    }
+}
+
+/// A stroke's points in pixels and its radius.
+fn stroke_geometry(s: &Stroke, w: usize, h: usize, long: f64) -> (Vec<(f64, f64)>, f64) {
     let (wf, hf) = (w as f64, h as f64);
-    let pts: Vec<(f64, f64)> = points
+    let pts = s
+        .points
         .chunks_exact(2)
         .map(|p| (p[0] * wf, p[1] * hf))
         .collect();
-    let radius = radius.max(0.5);
-    let edge = edge_width(radius, hardness);
+    (pts, (s.size * long * 0.5).max(0.5))
+}
 
-    // Bounding box of the whole stroke, clipped to the raster.
+/// The pixels a stroke can touch, clipped to the raster; none if it lies
+/// entirely outside.
+fn stroke_rect(pts: &[(f64, f64)], radius: f64, w: usize, h: usize) -> Option<Rect> {
     let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
-    for &(x, y) in &pts {
+    for &(x, y) in pts {
         x0 = x0.min(x - radius);
         y0 = y0.min(y - radius);
         x1 = x1.max(x + radius);
         y1 = y1.max(y + radius);
     }
     let clip = |v: f64, n: usize| (v.floor().max(0.0) as usize).min(n);
-    let (bx0, by0, bx1, by1) = (
-        clip(x0, w),
-        clip(y0, h),
-        clip(x1 + 1.0, w),
-        clip(y1 + 1.0, h),
-    );
+    let r = Rect {
+        x0: clip(x0, w),
+        y0: clip(y0, h),
+        x1: clip(x1 + 1.0, w),
+        y1: clip(y1 + 1.0, h),
+    };
+    (r.x0 < r.x1 && r.y0 < r.y1).then_some(r)
+}
 
-    if mode == Mode::Intersect {
-        // Outside the stroke the shape is 0, which clears the mask there.
-        for (i, v) in m.iter_mut().enumerate() {
-            let (x, y) = (i % w, i / w);
-            if x < bx0 || x >= bx1 || y < by0 || y >= by1 {
-                *v = 0.0;
-            }
-        }
-    }
-    if bx0 >= bx1 || by0 >= by1 {
-        return;
-    }
-    let bw = bx1 - bx0;
-    let mut cov = vec![0f32; bw * (by1 - by0)];
-
+/// One stroke's coverage inside `rect`: the union of round-capped segments
+/// between its points, with a soft edge. Each pixel takes the maximum over
+/// segments, so joints are not painted twice.
+fn stroke_coverage(pts: &[(f64, f64)], radius: f64, hardness: f64, rect: Rect) -> Vec<f32> {
+    let edge = edge_width(radius, hardness);
+    let bw = rect.width();
+    let mut cov = vec![0f32; bw * (rect.y1 - rect.y0)];
     let segments: Vec<((f64, f64), (f64, f64))> = if pts.len() == 1 {
         vec![(pts[0], pts[0])]
     } else {
         pts.windows(2).map(|s| (s[0], s[1])).collect()
     };
+    let clip = |v: f64, lo: usize, hi: usize| (v.floor().max(0.0) as usize).clamp(lo, hi);
     for (a, b) in segments {
-        let sx0 = clip(a.0.min(b.0) - radius, w).max(bx0);
-        let sy0 = clip(a.1.min(b.1) - radius, h).max(by0);
-        let sx1 = clip(a.0.max(b.0) + radius + 1.0, w).min(bx1);
-        let sy1 = clip(a.1.max(b.1) + radius + 1.0, h).min(by1);
+        let sx0 = clip(a.0.min(b.0) - radius, rect.x0, rect.x1);
+        let sy0 = clip(a.1.min(b.1) - radius, rect.y0, rect.y1);
+        let sx1 = clip(a.0.max(b.0) + radius + 1.0, rect.x0, rect.x1);
+        let sy1 = clip(a.1.max(b.1) + radius + 1.0, rect.y0, rect.y1);
         let (dx, dy) = (b.0 - a.0, b.1 - a.1);
         let len2 = dx * dx + dy * dy;
         for y in sy0..sy1 {
@@ -413,16 +446,56 @@ fn stroke(
                 let (ex, ey) = (px - (a.0 + t * dx), py - (a.1 + t * dy));
                 let d = (ex * ex + ey * ey).sqrt();
                 let v = soft_edge(radius, d, edge) as f32;
-                let c = &mut cov[(y - by0) * bw + (x - bx0)];
+                let c = &mut cov[(y - rect.y0) * bw + (x - rect.x0)];
                 if v > *c {
                     *c = v;
                 }
             }
         }
     }
-    for y in by0..by1 {
-        for x in bx0..bx1 {
-            let v = cov[(y - by0) * bw + (x - bx0)] as f64;
+    cov
+}
+
+/// Paint a brush component: its strokes are built up (and erased) on their
+/// own, inside the brush's bounding box, and the result is combined with
+/// the mask once, with the brush's `mode`.
+fn brush(m: &mut [f32], w: usize, h: usize, mode: Mode, long: f64, strokes: &[Stroke]) {
+    let shapes: Vec<_> = strokes
+        .iter()
+        .filter_map(|s| {
+            let (pts, radius) = stroke_geometry(s, w, h, long);
+            stroke_rect(&pts, radius, w, h).map(|r| (s, pts, radius, r))
+        })
+        .collect();
+    let rect = shapes.iter().map(|s| s.3).reduce(Rect::union);
+
+    if mode == Mode::Intersect {
+        // Outside the brush its coverage is 0, which clears the mask there.
+        for (i, v) in m.iter_mut().enumerate() {
+            let (x, y) = (i % w, i / w);
+            let inside = rect.is_some_and(|r| x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1);
+            if !inside {
+                *v = 0.0;
+            }
+        }
+    }
+    let Some(rect) = rect else { return };
+    let bw = rect.width();
+    let mut cov = vec![0f32; bw * (rect.y1 - rect.y0)];
+    for (s, pts, radius, r) in &shapes {
+        let one = stroke_coverage(pts, *radius, s.hardness, *r);
+        let how = if s.erase { Mode::Subtract } else { Mode::Add };
+        for y in r.y0..r.y1 {
+            for x in r.x0..r.x1 {
+                let v = one[(y - r.y0) * r.width() + (x - r.x0)] as f64;
+                let c = &mut cov[(y - rect.y0) * bw + (x - rect.x0)];
+                *c = combine(*c as f64, v, how) as f32;
+            }
+        }
+    }
+    for y in rect.y0..rect.y1 {
+        for x in rect.x0..rect.x1 {
+            let v = cov[(y - rect.y0) * bw + (x - rect.x0)] as f64;
             let i = y * w + x;
             m[i] = combine(m[i] as f64, v, mode) as f32;
         }
@@ -513,12 +586,21 @@ mod tests {
         m[y * w + x]
     }
 
-    fn dot(mode: Mode, x: f64, y: f64, size: f64) -> MaskOp {
-        MaskOp::Stroke {
-            mode,
+    /// A hard-edged single-point stroke.
+    fn dab(erase: bool, x: f64, y: f64, size: f64) -> Stroke {
+        Stroke {
+            erase,
             size,
             hardness: 1.0,
             points: vec![x, y],
+        }
+    }
+
+    /// A brush component with one dab.
+    fn dot(mode: Mode, x: f64, y: f64, size: f64) -> MaskOp {
+        MaskOp::Brush {
+            mode,
+            strokes: vec![dab(false, x, y, size)],
         }
     }
 
@@ -542,11 +624,14 @@ mod tests {
     fn a_stroke_covers_its_path_and_nothing_else() {
         // A horizontal stroke across the middle of a 40 x 20 raster.
         let mask = Mask {
-            ops: vec![MaskOp::Stroke {
+            ops: vec![MaskOp::Brush {
                 mode: Mode::Add,
-                size: 0.1, // 4 px wide
-                hardness: 1.0,
-                points: vec![0.1, 0.5, 0.9, 0.5],
+                strokes: vec![Stroke {
+                    erase: false,
+                    size: 0.1, // 4 px wide
+                    hardness: 1.0,
+                    points: vec![0.1, 0.5, 0.9, 0.5],
+                }],
             }],
             ..Mask::default()
         };
@@ -557,19 +642,86 @@ mod tests {
     }
 
     #[test]
-    fn the_eraser_removes_paint() {
+    fn the_eraser_takes_back_its_own_brush_only() {
+        // A radial underneath, then a brush whose eraser crosses both.
         let mask = Mask {
             ops: vec![
-                dot(Mode::Add, 0.5, 0.5, 0.5),
+                MaskOp::Radial {
+                    mode: Mode::Add,
+                    from: [0.25, 0.5],
+                    to: [0.4, 0.5],
+                    hardness: 1.0,
+                },
+                MaskOp::Brush {
+                    mode: Mode::Add,
+                    strokes: vec![
+                        dab(false, 0.75, 0.5, 0.5),
+                        // An erase line through both shapes.
+                        Stroke {
+                            erase: true,
+                            size: 0.1,
+                            hardness: 1.0,
+                            points: vec![0.05, 0.5, 0.95, 0.5],
+                        },
+                    ],
+                },
+            ],
+            ..Mask::default()
+        };
+        let m = mask.render(40, 20, &grey(40, 20, 0), NEVER).unwrap();
+        assert_eq!(at(&m, 40, 30, 10), 0.0, "the brush's own paint is erased");
+        assert_eq!(at(&m, 40, 30, 5), 1.0, "the rest of the brush stays");
+        assert_eq!(at(&m, 40, 10, 10), 1.0, "the radial is untouched");
+    }
+
+    #[test]
+    fn a_subtracting_brush_cuts_into_everything() {
+        let mask = Mask {
+            ops: vec![
+                MaskOp::Radial {
+                    mode: Mode::Add,
+                    from: [0.5, 0.5],
+                    to: [1.0, 0.5],
+                    hardness: 1.0,
+                },
                 dot(Mode::Subtract, 0.5, 0.5, 0.2),
             ],
             ..Mask::default()
         };
         let m = mask.render(20, 20, &grey(20, 20, 0), NEVER).unwrap();
-        assert_eq!(at(&m, 20, 10, 10), 0.0, "erased centre");
-        // 2.5 px from the centre: outside the eraser (radius 2), inside
-        // the paint (radius 5).
-        assert_eq!(at(&m, 20, 10, 7), 1.0, "painted ring");
+        assert_eq!(at(&m, 20, 10, 10), 0.0, "cut out");
+        assert_eq!(at(&m, 20, 10, 6), 1.0, "radial around it");
+    }
+
+    #[test]
+    fn an_empty_brush_changes_nothing_unless_it_intersects() {
+        let base = vec![MaskOp::Radial {
+            mode: Mode::Add,
+            from: [0.5, 0.5],
+            to: [1.0, 0.5],
+            hardness: 1.0,
+        }];
+        let with = |mode| Mask {
+            ops: [
+                base.clone(),
+                vec![MaskOp::Brush {
+                    mode,
+                    strokes: vec![],
+                }],
+            ]
+            .concat(),
+            ..Mask::default()
+        };
+        let plain = Mask {
+            ops: base.clone(),
+            ..Mask::default()
+        }
+        .render(10, 10, &grey(10, 10, 0), NEVER)
+        .unwrap();
+        let r = |m: Mask| m.render(10, 10, &grey(10, 10, 0), NEVER).unwrap();
+        assert_eq!(r(with(Mode::Add)), plain);
+        assert_eq!(r(with(Mode::Subtract)), plain);
+        assert!(r(with(Mode::Intersect)).iter().all(|&v| v == 0.0));
     }
 
     #[test]
@@ -678,11 +830,22 @@ mod tests {
         let mask = Mask {
             feather: 0.02,
             ops: vec![
-                MaskOp::Stroke {
+                MaskOp::Brush {
                     mode: Mode::Add,
-                    size: 0.08,
-                    hardness: 0.3,
-                    points: vec![0.1, 0.2, 0.5, 0.6, 0.8, 0.3],
+                    strokes: vec![
+                        Stroke {
+                            erase: false,
+                            size: 0.08,
+                            hardness: 0.3,
+                            points: vec![0.1, 0.2, 0.5, 0.6, 0.8, 0.3],
+                        },
+                        Stroke {
+                            erase: true,
+                            size: 0.03,
+                            hardness: 0.6,
+                            points: vec![0.45, 0.5, 0.55, 0.65],
+                        },
+                    ],
                 },
                 MaskOp::Radial {
                     mode: Mode::Subtract,
@@ -734,11 +897,14 @@ mod tests {
             .is_err()
         };
         assert!(bad(dot(Mode::Add, 0.5, 0.5, 0.0)));
-        assert!(bad(MaskOp::Stroke {
+        assert!(bad(MaskOp::Brush {
             mode: Mode::Add,
-            size: 0.1,
-            hardness: 0.5,
-            points: vec![0.5],
+            strokes: vec![Stroke {
+                erase: false,
+                size: 0.1,
+                hardness: 0.5,
+                points: vec![0.5],
+            }],
         }));
         assert!(bad(MaskOp::Brightness {
             mode: Mode::Add,

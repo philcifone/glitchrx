@@ -1,39 +1,176 @@
 import { describe, expect, it } from 'vitest';
-import { addPoint, brushScale, featherScale, insertOp, opRows, percent, withMode } from './mask';
+import {
+  addPoint,
+  afterRemoval,
+  brushScale,
+  cleanTool,
+  dragEnds,
+  featherScale,
+  grab,
+  grabHandle,
+  insertOp,
+  migrateMask,
+  newComponent,
+  opDetail,
+  percent,
+  withMode,
+} from './mask';
 import type { MaskMode, MaskOp } from './types';
 
-const stroke = (mode: MaskMode = 'add'): MaskOp => ({ shape: 'stroke', mode, size: 0.05, hardness: 0.5, points: [0.5, 0.5] });
+const brush = (mode: MaskMode = 'add'): MaskOp => ({ shape: 'brush', mode, stroke: [] });
 const bright = (mode: MaskMode): MaskOp => ({ shape: 'brightness', mode, low: 0.5, high: 1, soft: 0.1 });
 const modes = (ops: MaskOp[]) => ops.map((o) => `${o.shape}:${o.mode}`);
 
 describe('insertOp', () => {
-  it('keeps intersections last, so they limit everything painted', () => {
+  it('keeps intersections last, so they limit everything else', () => {
     let ops: MaskOp[] = [];
-    ops = insertOp(ops, stroke());
-    ops = insertOp(ops, bright('intersect'));
-    ops = insertOp(ops, stroke('subtract'));
-    expect(modes(ops)).toEqual(['stroke:add', 'stroke:subtract', 'brightness:intersect']);
+    ops = insertOp(ops, brush()).ops;
+    ops = insertOp(ops, bright('intersect')).ops;
+    const r = insertOp(ops, brush('subtract'));
+    expect(modes(r.ops)).toEqual(['brush:add', 'brush:subtract', 'brightness:intersect']);
+    expect(r.index).toBe(1);
   });
 });
 
 describe('withMode', () => {
   it('moves a new intersection to the end and back out again', () => {
-    let ops = [bright('add'), stroke(), stroke()];
-    ops = withMode(ops, 0, 'intersect');
-    expect(modes(ops)).toEqual(['stroke:add', 'stroke:add', 'brightness:intersect']);
-    ops = withMode(ops, 2, 'subtract');
-    expect(modes(ops)).toEqual(['stroke:add', 'stroke:add', 'brightness:subtract']);
-    ops = withMode(ops, 0, 'subtract');
-    expect(modes(ops)).toEqual(['stroke:subtract', 'stroke:add', 'brightness:subtract']);
+    let ops = [bright('add'), brush(), brush()];
+    let r = withMode(ops, 0, 'intersect');
+    expect(modes(r.ops)).toEqual(['brush:add', 'brush:add', 'brightness:intersect']);
+    expect(r.order).toEqual([1, 2, 0]);
+    ops = r.ops;
+    r = withMode(ops, 2, 'subtract');
+    expect(modes(r.ops)).toEqual(['brush:add', 'brush:add', 'brightness:subtract']);
+    r = withMode(r.ops, 0, 'subtract');
+    expect(modes(r.ops)).toEqual(['brush:subtract', 'brush:add', 'brightness:subtract']);
+    expect(r.order).toEqual([0, 1, 2]);
+  });
+
+  it('reports where a component leaving the intersect group lands', () => {
+    const ops = [brush(), bright('intersect'), bright('intersect')];
+    const r = withMode(ops, 2, 'add');
+    expect(modes(r.ops)).toEqual(['brush:add', 'brightness:add', 'brightness:intersect']);
+    // The selection follows: old index 2 is now at 1.
+    expect(r.order.indexOf(2)).toBe(1);
   });
 });
 
-describe('opRows', () => {
-  it('groups strokes and counts erasing', () => {
-    const rows = opRows([stroke(), bright('add'), stroke('subtract'), stroke()]);
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toEqual({ kind: 'strokes', painted: 2, erased: 1, indices: [0, 2, 3] });
-    expect(rows[1]).toMatchObject({ kind: 'op', index: 1 });
+describe('afterRemoval', () => {
+  it('follows the selection or drops it', () => {
+    expect(afterRemoval(3, [1])).toBe(2);
+    expect(afterRemoval(1, [3])).toBe(1);
+    expect(afterRemoval(1, [1])).toBeNull();
+    expect(afterRemoval(null, [0])).toBeNull();
+  });
+});
+
+describe('migrateMask', () => {
+  it('folds runs of old stroke operations into brushes', () => {
+    const old = {
+      invert: true,
+      feather: 0.01,
+      op: [
+        { shape: 'stroke', mode: 'add', size: 0.05, hardness: 0.4, points: [0.1, 0.1] },
+        { shape: 'stroke', mode: 'subtract', size: 0.02, points: [0.2, 0.2] },
+        { shape: 'radial', mode: 'add', from: [0.5, 0.5], to: [0.6, 0.5] },
+        { shape: 'stroke', mode: 'add', size: 0.05, hardness: 0.5, points: [0.3, 0.3] },
+      ],
+    } as never;
+    const m = migrateMask(old);
+    expect(m.invert).toBe(true);
+    expect(modes(m.op!)).toEqual(['brush:add', 'radial:add', 'brush:add']);
+    expect(m.op![0]).toEqual({
+      shape: 'brush',
+      mode: 'add',
+      stroke: [
+        { size: 0.05, hardness: 0.4, points: [0.1, 0.1] },
+        { size: 0.02, hardness: 0.5, points: [0.2, 0.2], erase: true },
+      ],
+    });
+  });
+
+  it('leaves a current mask alone', () => {
+    const m = { invert: false, feather: 0, op: [brush(), bright('intersect')] };
+    expect(migrateMask(m)).toEqual(m);
+  });
+});
+
+describe('newComponent', () => {
+  it('starts a radial as a centred circle a fifth of the long side across in radius', () => {
+    const wide = newComponent('radial', 1.5, 0) as Extract<MaskOp, { shape: 'radial' }>;
+    expect(wide.from).toEqual([0.5, 0.5]);
+    expect(wide.to).toEqual([0.7, 0.5]);
+    expect(wide.hardness).toBe(1);
+    // On a tall picture the long side is the height: radius 0.2 of it is
+    // 0.3 of the width at 2:3.
+    const tall = newComponent('radial', 2 / 3, 0) as Extract<MaskOp, { shape: 'radial' }>;
+    expect(tall.to[0]).toBeCloseTo(0.8, 4);
+  });
+
+  it('makes a brightness range a limit once there is something to limit', () => {
+    expect(newComponent('brightness', 1, 0).mode).toBe('add');
+    expect(newComponent('brightness', 1, 2).mode).toBe('intersect');
+  });
+});
+
+describe('opDetail', () => {
+  it('counts a brush\'s strokes', () => {
+    const s = { size: 0.05, hardness: 0.5, points: [0.5, 0.5] };
+    expect(opDetail(brush())).toBe('no strokes yet');
+    expect(opDetail({ shape: 'brush', mode: 'add', stroke: [s, s, { ...s, erase: true }] })).toBe('2 strokes, 1 erased');
+    expect(opDetail(bright('add'))).toBe('50-100');
+  });
+});
+
+describe('cleanTool', () => {
+  it('replaces tools from before components', () => {
+    expect(cleanTool({ tool: 'radial', size: 0.1 })).toMatchObject({ tool: 'paint', size: 0.1 });
+    expect(cleanTool({ tool: 'erase' }).tool).toBe('erase');
+    expect(cleanTool(null).tool).toBe('paint');
+  });
+});
+
+describe('grab', () => {
+  // A 200 x 100 display; the radial is centred at (100, 50), radius 30.
+  const radial = { shape: 'radial', mode: 'add', from: [0.5, 0.5], to: [0.65, 0.5] } as Extract<MaskOp, { shape: 'radial' }>;
+  const linear = { shape: 'linear', mode: 'add', from: [0.25, 0.5], to: [0.75, 0.5] } as Extract<MaskOp, { shape: 'linear' }>;
+
+  it('finds a radial\'s ring, inside and outside', () => {
+    expect(grab(radial, [130, 50], 200, 100, 8)).toBe('edge'); // the edge handle
+    expect(grab(radial, [100, 21], 200, 100, 8)).toBe('edge'); // on the ring
+    expect(grab(radial, [105, 55], 200, 100, 8)).toBe('move');
+    expect(grab(radial, [10, 10], 200, 100, 8)).toBe('draw');
+  });
+
+  it('finds a linear\'s end lines and middle', () => {
+    expect(grab(linear, [50, 50], 200, 100, 8)).toBe('from');
+    expect(grab(linear, [52, 5], 200, 100, 8)).toBe('from'); // along the start line
+    expect(grab(linear, [148, 90], 200, 100, 8)).toBe('to');
+    expect(grab(linear, [100, 52], 200, 100, 8)).toBe('move');
+    expect(grab(linear, [100, 90], 200, 100, 8)).toBe('draw');
+  });
+});
+
+describe('grabHandle', () => {
+  it('finds only the dots, the far one first', () => {
+    const radial = { shape: 'radial', mode: 'add', from: [0.5, 0.5], to: [0.65, 0.5] } as Extract<MaskOp, { shape: 'radial' }>;
+    expect(grabHandle(radial, [101, 50], 200, 100, 8)).toBe('move');
+    expect(grabHandle(radial, [131, 50], 200, 100, 8)).toBe('edge');
+    expect(grabHandle(radial, [115, 50], 200, 100, 8)).toBeNull(); // inside, not on a dot
+    // A tiny circle: both dots in reach, and pulling it out wins.
+    const tiny = { ...radial, to: [0.51, 0.5] as [number, number] };
+    expect(grabHandle(tiny, [101, 50], 200, 100, 8)).toBe('edge');
+  });
+});
+
+describe('dragEnds', () => {
+  const from: [number, number] = [0.5, 0.5];
+  const to: [number, number] = [0.6, 0.5];
+  it('moves, resizes and redraws', () => {
+    expect(dragEnds('move', from, to, [100, 50], [120, 60], 200, 100)).toEqual({ from: [0.6, 0.6], to: [0.7, 0.6] });
+    expect(dragEnds('edge', from, to, [120, 50], [150, 50], 200, 100)).toEqual({ from, to: [0.75, 0.5] });
+    expect(dragEnds('from', from, to, [100, 50], [20, 10], 200, 100)).toEqual({ from: [0.1, 0.1], to });
+    expect(dragEnds('draw', from, to, [20, 10], [40, 10], 200, 100)).toEqual({ from: [0.1, 0.1], to: [0.2, 0.1] });
   });
 });
 

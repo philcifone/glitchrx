@@ -9,7 +9,18 @@ import * as api from './api';
 import { ApiError, TooHeavyError } from './api';
 import { History } from './history';
 import { LatestOnly } from './latest';
-import { DEFAULT_TOOL, MASK_TINT, emptyMask, insertOp, withMode, type ToolState } from './mask';
+import {
+  DEFAULT_TOOL,
+  MASK_TINT,
+  afterRemoval,
+  cleanTool,
+  emptyMask,
+  insertOp,
+  migrateMask,
+  newComponent,
+  withMode,
+  type ToolState,
+} from './mask';
 import { usesSamples } from './palette';
 import { usesSeed } from './seed';
 import { shakeParams } from './shake';
@@ -21,6 +32,8 @@ import type {
   Mask,
   MaskMode,
   MaskOp,
+  MaskShape,
+  Stroke,
   PresetInfo,
   RecipeDto,
   RecipeState,
@@ -50,8 +63,7 @@ const TOOL_KEY = 'glitchrx.maskTool';
 
 function loadTool(): ToolState {
   try {
-    const saved = JSON.parse(storageGet(TOOL_KEY) ?? 'null');
-    return { ...DEFAULT_TOOL, ...(saved && typeof saved === 'object' ? saved : {}) };
+    return cleanTool(JSON.parse(storageGet(TOOL_KEY) ?? 'null'));
   } catch {
     return { ...DEFAULT_TOOL };
   }
@@ -69,13 +81,16 @@ const emptyRecipe = (): RecipeState => ({ encoding: DEFAULT_ENCODING, channels: 
 /**
  * A recipe from storage or a file, in the current shape. Recipes saved by
  * the 2a GUI carry `mode` and `restart` and no encoding; those fields are
- * dropped and the defaults filled in.
+ * dropped and the defaults filled in. Masks from before components had one
+ * operation per brush stroke; those become brushes.
  */
 function normalize(r: Partial<RecipeState>, known: (effect: string) => boolean): RecipeState {
   return {
     encoding: typeof r.encoding === 'string' ? r.encoding : DEFAULT_ENCODING,
     channels: r.channels === 2 || r.channels === 3 ? r.channels : 1,
-    steps: (r.steps ?? []).filter((s) => known(s.effect)),
+    steps: (r.steps ?? [])
+      .filter((s) => known(s.effect))
+      .map((s) => (s.mask ? { ...s, mask: migrateMask(s.mask) } : s)),
   };
 }
 
@@ -138,8 +153,13 @@ export class App {
   /** Saved presets, as last listed. */
   presets = $state<PresetInfo[]>([]);
 
-  /** The step whose mask is being painted on the preview, by uid. */
+  /** The step whose mask is being edited on the preview, by uid. */
   masking = $state<string | null>(null);
+  /**
+   * The mask component being edited (its index in the mask), or null.
+   * Its handles show on the photo, and the photo's gestures act on it.
+   */
+  activeOp = $state<number | null>(null);
   /** Brush and gradient settings for painting masks. */
   tool = $state<ToolState>(loadTool());
   /** Blob URL of the mask overlay for the step being painted. */
@@ -319,8 +339,13 @@ export class App {
     this.canUndo = this.history.canUndo;
     this.canRedo = this.history.canRedo;
     storageSet(RECIPE_KEY, snap);
-    // Undoing past "Add mask" ends painting.
-    if (this.masking && !this.step(this.masking)?.mask) this.stopMasking();
+    // Undoing past "Add mask" ends editing; undoing an added component
+    // moves the selection to the one before it.
+    if (this.masking) {
+      const n = this.step(this.masking)?.mask?.op?.length;
+      if (n === undefined) this.stopMasking();
+      else if (this.activeOp !== null && this.activeOp >= n) this.activeOp = n ? n - 1 : null;
+    }
     this.revision++;
     this.render('fast');
   }
@@ -440,16 +465,30 @@ export class App {
   }
 
   // -------------------------------------------------------------------------
-  // Masks. Each stroke or gradient is one history entry, so undo takes
-  // back the last one.
+  // Masks. A mask is a stack of components; each stroke, each finished
+  // handle drag and each added component is one history entry.
 
-  /** Give a step a mask and start painting it. */
-  addMask(uid: string): void {
+  /**
+   * Add a component to a step's mask (creating the mask if needed), make
+   * it the active one and start editing.
+   */
+  addComponent(uid: string, shape: MaskShape): void {
     const s = this.step(uid);
-    if (!s || s.mask) return;
-    s.mask = emptyMask();
+    if (!s) return;
+    s.mask ??= emptyMask();
+    const ops = s.mask.op ?? [];
+    const aspect = this.doc ? this.doc.width / this.doc.height : 1;
+    const { ops: next, index } = insertOp(ops, newComponent(shape, aspect, ops.length));
+    s.mask.op = next;
+    if (shape === 'brush') this.setTool({ tool: 'paint' });
     this.changed();
-    this.startMasking(uid);
+    this.startMasking(uid, index);
+  }
+
+  /** Make a component the active one (editing that step's mask). */
+  selectComponent(uid: string, index: number): void {
+    if (this.masking !== uid) this.startMasking(uid, index);
+    else this.activeOp = index;
   }
 
   removeMask(uid: string): void {
@@ -468,15 +507,15 @@ export class App {
     this.changed(commit);
   }
 
-  addMaskOp(uid: string, op: MaskOp): void {
-    const s = this.step(uid);
-    if (!s) return;
-    s.mask ??= emptyMask();
-    s.mask.op = insertOp(s.mask.op ?? [], op);
+  /** Add a stroke to a brush component. */
+  addStroke(uid: string, index: number, stroke: Stroke): void {
+    const op = this.step(uid)?.mask?.op?.[index];
+    if (op?.shape !== 'brush') return;
+    op.stroke.push(stroke);
     this.changed();
   }
 
-  /** Change one operation's values (a brightness range, say). */
+  /** Change one component's values (a radial's ends, a brightness range). */
   updateMaskOp(uid: string, index: number, patch: Partial<MaskOp>, commit = true): void {
     const ops = this.step(uid)?.mask?.op;
     if (!ops?.[index]) return;
@@ -487,7 +526,9 @@ export class App {
   setMaskOpMode(uid: string, index: number, mode: MaskMode): void {
     const m = this.step(uid)?.mask;
     if (!m?.op?.[index]) return;
-    m.op = withMode(m.op, index, mode);
+    const { ops, order } = withMode(m.op, index, mode);
+    m.op = ops;
+    if (this.masking === uid && this.activeOp !== null) this.activeOp = order.indexOf(this.activeOp);
     this.changed();
   }
 
@@ -495,24 +536,31 @@ export class App {
     const m = this.step(uid)?.mask;
     if (!m?.op) return;
     m.op = m.op.filter((_, i) => !indices.includes(i));
+    if (this.masking === uid) this.activeOp = afterRemoval(this.activeOp, indices);
     this.changed();
   }
 
-  /** The step being painted and its number in the stack (from 1). */
+  /** The step being edited and its number in the stack (from 1). */
   get maskTarget(): { n: number; step: StepState } | null {
     const i = this.recipe.steps.findIndex((s) => s.uid === this.masking);
     return i < 0 ? null : { n: i + 1, step: this.recipe.steps[i] };
   }
 
-  /** Paint this step's mask on the preview. */
-  startMasking(uid: string): void {
+  /**
+   * Edit this step's mask on the preview, with component `index` active
+   * (by default the last one, usually the newest).
+   */
+  startMasking(uid: string, index?: number): void {
+    const n = this.step(uid)?.mask?.op?.length ?? 0;
     this.masking = uid;
+    this.activeOp = index ?? (n ? n - 1 : null);
     this.maskKey = '';
     this.refreshMask();
   }
 
   stopMasking(): void {
     this.masking = null;
+    this.activeOp = null;
     this.maskKey = '';
     this.setMaskUrl(null);
   }

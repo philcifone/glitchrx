@@ -1,202 +1,335 @@
 <script lang="ts">
-  // Painting a step's mask on the preview. Sits exactly over the shown
-  // image: the server's mask overlay below, a canvas for the stroke being
-  // drawn on top.
+  // Editing a step's mask on the preview. Sits exactly over the shown
+  // image: the server's mask overlay at the bottom, a canvas of fresh brush
+  // strokes above it, and a canvas of handles on top, which takes the
+  // gestures.
   //
-  // A stroke is drawn locally while the pointer moves and sent as one mask
-  // operation when it is released. The local drawing stays until a render
-  // that includes the stroke arrives (tracked by recipe revision), so a
-  // stroke never blinks out between release and the server's answer.
+  // What a gesture does depends on the active component (app.activeOp):
+  // - brush: paint or erase a stroke, sent when released. The local drawing
+  //   stays until a render that includes it arrives (tracked by recipe
+  //   revision), so a stroke never blinks out in between.
+  // - linear, radial: drag a handle to adjust it, or drag anywhere else to
+  //   place it again. The recipe follows the drag uncommitted, so the
+  //   preview keeps up, and the release is one undo step.
+  // Linears and radials that are not active show a pin; tapping a pin makes
+  // that component active.
   import { app } from '../lib/app.svelte';
-  import { MASK_TINT, addPoint, roundCoord } from '../lib/mask';
-  import type { MaskOp } from '../lib/types';
+  import { MASK_TINT, addPoint, dragEnds, grab, grabHandle, pinOf, roundCoord, type Grab } from '../lib/mask';
+  import type { MaskOp, Stroke } from '../lib/types';
 
   let { rect }: { rect: { x: number; y: number; w: number; h: number } } = $props();
 
-  let canvas = $state<HTMLCanvasElement>();
+  let paint = $state<HTMLCanvasElement>();
+  let guides = $state<HTMLCanvasElement>();
   const dpr = window.devicePixelRatio || 1;
 
-  /** Operations sent but not yet in a shown render, with their revision. */
-  let pending: { rev: number; op: MaskOp }[] = [];
-  /** The operation being drawn. */
-  let live: MaskOp | null = null;
-  /** Brush outline under a mouse pointer, in CSS pixels. */
+  type Shape = Extract<MaskOp, { shape: 'linear' | 'radial' }>;
+  const isShape = (op: MaskOp | null | undefined): op is Shape => op?.shape === 'linear' || op?.shape === 'radial';
+
+  const uid = $derived(app.masking);
+  const ops = $derived(app.maskTarget?.step.mask?.op ?? []);
+  const active = $derived(app.activeOp === null ? null : (ops[app.activeOp] ?? null));
+  const brushy = $derived(active?.shape === 'brush');
+  /** Linears and radials with their positions, read here so moving one redraws. */
+  const shapes = $derived(
+    ops.flatMap((op, i) => (isShape(op) ? [{ i, op, from: [...op.from], to: [...op.to] }] : [])),
+  );
+
+  /** Strokes sent but not yet in a shown render, with their revision. */
+  let pending: { rev: number; stroke: Stroke }[] = [];
+  /** The stroke being drawn. */
+  let live: Stroke | null = null;
+  /** A handle drag in progress, with the shape's ends when it began. */
+  let drag: {
+    index: number;
+    grabbed: Grab;
+    start: [number, number];
+    from: [number, number];
+    to: [number, number];
+    moved: boolean;
+  } | null = null;
+  /** Mouse position (CSS pixels) and what it is over, for the cursor. */
   let cursor = $state<{ x: number; y: number } | null>(null);
+  let hover = $state<Grab | 'pin' | null>(null);
 
   const long = $derived(Math.max(rect.w, rect.h));
-  const brushy = $derived(app.tool.tool === 'brush' || app.tool.tool === 'eraser');
 
-  // Keep the canvas's backing store at device resolution.
+  // Keep both canvases' backing stores at device resolution.
   $effect(() => {
-    if (!canvas) return;
-    canvas.width = Math.max(1, Math.round(rect.w * dpr));
-    canvas.height = Math.max(1, Math.round(rect.h * dpr));
-    redraw();
+    for (const c of [paint, guides]) {
+      if (!c) continue;
+      c.width = Math.max(1, Math.round(rect.w * dpr));
+      c.height = Math.max(1, Math.round(rect.h * dpr));
+    }
+    redrawStrokes();
+    redrawGuides();
   });
 
   // Once a newer render is on screen, its strokes no longer need drawing.
   $effect(() => {
     const shown = app.paintedRevision;
     pending = pending.filter((p) => p.rev > shown);
-    redraw();
+    redrawStrokes();
+  });
+
+  // Handles follow the shapes and the selection.
+  $effect(() => {
+    void shapes;
+    void app.activeOp;
+    redrawGuides();
   });
 
   const PAINT = `rgb(${MASK_TINT.join(' ')})`;
   const ERASE = 'rgb(235 219 178)';
+  /** Gruvbox bright green, which reads on photos in either theme. */
+  const HANDLE = 'rgb(184 187 38)';
+  const SHADOW = 'rgb(0 0 0 / 0.65)';
 
-  function redraw() {
-    const ctx = canvas?.getContext('2d');
-    if (!ctx || !canvas) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (const p of pending) draw(ctx, p.op);
-    if (live) draw(ctx, live);
+  function redrawStrokes() {
+    const ctx = paint?.getContext('2d');
+    if (!ctx || !paint) return;
+    ctx.clearRect(0, 0, paint.width, paint.height);
+    for (const p of pending) drawStroke(ctx, p.stroke);
+    if (live) drawStroke(ctx, live);
   }
 
-  function draw(ctx: CanvasRenderingContext2D, op: MaskOp) {
-    const W = canvas!.width;
-    const H = canvas!.height;
+  function drawStroke(ctx: CanvasRenderingContext2D, s: Stroke) {
+    const W = paint!.width;
+    const H = paint!.height;
     const L = Math.max(W, H);
-    ctx.save();
-    if (op.shape === 'stroke') {
-      const color = op.mode === 'subtract' ? ERASE : PAINT;
-      ctx.strokeStyle = color;
-      ctx.fillStyle = color;
-      ctx.lineWidth = op.size * L;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      const p = op.points;
-      ctx.beginPath();
-      if (p.length === 2) {
-        ctx.arc(p[0] * W, p[1] * H, (op.size * L) / 2, 0, 2 * Math.PI);
-        ctx.fill();
-      } else {
-        ctx.moveTo(p[0] * W, p[1] * H);
-        for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i] * W, p[i + 1] * H);
-        ctx.stroke();
-      }
-    } else if (op.shape === 'linear' || op.shape === 'radial') {
-      const [ax, ay] = [op.from[0] * W, op.from[1] * H];
-      const [bx, by] = [op.to[0] * W, op.to[1] * H];
-      ctx.lineWidth = 2 * dpr;
-      ctx.strokeStyle = 'white';
-      ctx.shadowColor = 'rgb(0 0 0 / 0.6)';
-      ctx.shadowBlur = 3 * dpr;
-      ctx.beginPath();
-      if (op.shape === 'radial') {
-        // The circle as it will paint, with its outline on top.
-        const r = Math.hypot(bx - ax, by - ay);
-        ctx.save();
-        ctx.fillStyle = op.mode === 'subtract' ? ERASE : PAINT;
-        ctx.beginPath();
-        ctx.arc(ax, ay, r, 0, 2 * Math.PI);
-        ctx.fill();
-        ctx.restore();
-        ctx.arc(ax, ay, r, 0, 2 * Math.PI);
-      } else {
-        // Lines across the picture at both ends, square to the drag,
-        // like Lightroom's linear gradient guides.
-        const len = Math.hypot(bx - ax, by - ay) || 1;
-        const [nx, ny] = [(-(by - ay) / len) * 2 * L, ((bx - ax) / len) * 2 * L];
-        for (const [x, y] of [
-          [ax, ay],
-          [bx, by],
-        ]) {
-          ctx.moveTo(x - nx, y - ny);
-          ctx.lineTo(x + nx, y + ny);
-        }
-      }
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(bx, by);
+    const color = s.erase ? ERASE : PAINT;
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = s.size * L;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    const p = s.points;
+    ctx.beginPath();
+    if (p.length === 2) {
+      ctx.arc(p[0] * W, p[1] * H, (s.size * L) / 2, 0, 2 * Math.PI);
+      ctx.fill();
+    } else {
+      ctx.moveTo(p[0] * W, p[1] * H);
+      for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i] * W, p[i + 1] * H);
       ctx.stroke();
+    }
+  }
+
+  function redrawGuides() {
+    const ctx = guides?.getContext('2d');
+    if (!ctx || !guides) return;
+    ctx.clearRect(0, 0, guides.width, guides.height);
+    ctx.save();
+    ctx.scale(dpr, dpr); // draw in CSS pixels
+    ctx.shadowColor = SHADOW;
+    ctx.shadowBlur = 3;
+    for (const s of shapes) {
+      if (s.i === app.activeOp) drawHandles(ctx, s.op);
+      else drawPin(ctx, s.op);
     }
     ctx.restore();
   }
 
-  /** Pointer position as fractions of the picture. */
-  const norm = (e: PointerEvent): [number, number] => [e.offsetX / rect.w, e.offsetY / rect.h];
+  /** A round handle: filled for the main one, hollow for the other. */
+  function dot(ctx: CanvasRenderingContext2D, x: number, y: number, filled: boolean) {
+    ctx.beginPath();
+    ctx.arc(x, y, 6, 0, 2 * Math.PI);
+    ctx.fillStyle = filled ? HANDLE : 'white';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = filled ? 'white' : HANDLE;
+    ctx.stroke();
+  }
+
+  function drawHandles(ctx: CanvasRenderingContext2D, op: Shape) {
+    const [w, h] = [rect.w, rect.h];
+    const [ax, ay] = [op.from[0] * w, op.from[1] * h];
+    const [bx, by] = [op.to[0] * w, op.to[1] * h];
+    ctx.strokeStyle = HANDLE;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    if (op.shape === 'radial') {
+      ctx.arc(ax, ay, Math.hypot(bx - ax, by - ay), 0, 2 * Math.PI);
+      ctx.stroke();
+    } else {
+      // Lines across the picture at both ends, square to the drag, like
+      // Lightroom's linear gradient guides: solid where it is full, dashed
+      // where it has faded out.
+      const len = Math.hypot(bx - ax, by - ay) || 1;
+      const [nx, ny] = [(-(by - ay) / len) * 2 * long, ((bx - ax) / len) * 2 * long];
+      ctx.moveTo(ax - nx, ay - ny);
+      ctx.lineTo(ax + nx, ay + ny);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.setLineDash([6, 5]);
+      ctx.moveTo(bx - nx, by - ny);
+      ctx.lineTo(bx + nx, by + ny);
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+    dot(ctx, ax, ay, true);
+    dot(ctx, bx, by, false);
+  }
+
+  function drawPin(ctx: CanvasRenderingContext2D, op: Shape) {
+    const [x, y] = pinOf(op, rect.w, rect.h);
+    ctx.beginPath();
+    ctx.arc(x, y, 7, 0, 2 * Math.PI);
+    ctx.fillStyle = 'white';
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, 2 * Math.PI);
+    ctx.fillStyle = 'rgb(40 40 40)';
+    ctx.fill();
+    ctx.shadowBlur = 3;
+  }
+
+  /** The inactive component whose pin is under `p`, if any. */
+  function pinAt(p: [number, number], tol: number): number | null {
+    let best: number | null = null;
+    let bestD = Math.max(tol, 10);
+    for (const s of shapes) {
+      if (s.i === app.activeOp) continue;
+      const [x, y] = pinOf(s.op, rect.w, rect.h);
+      const d = Math.hypot(p[0] - x, p[1] - y);
+      if (d < bestD) [best, bestD] = [s.i, d];
+    }
+    return best;
+  }
+
+  /** Hit tolerance: fingers are bigger than mouse pointers. */
+  const tolerance = (e: PointerEvent) => (e.pointerType === 'touch' ? 22 : 10);
+  const at = (e: PointerEvent): [number, number] => [e.offsetX, e.offsetY];
 
   function down(e: PointerEvent) {
-    if (e.button !== 0 || !app.masking) return;
-    canvas!.setPointerCapture(e.pointerId);
-    const [x, y] = norm(e);
-    const t = app.tool;
-    if (t.tool === 'brush' || t.tool === 'eraser') {
+    if (e.button !== 0 || !uid) return;
+    guides!.setPointerCapture(e.pointerId);
+    const p = at(e);
+    const tol = tolerance(e);
+    if (active?.shape === 'brush') {
       live = {
-        shape: 'stroke',
-        mode: t.tool === 'eraser' ? 'subtract' : 'add',
-        size: t.size,
-        hardness: t.hardness,
-        points: [roundCoord(x), roundCoord(y)],
+        ...(app.tool.tool === 'erase' ? { erase: true } : {}),
+        size: app.tool.size,
+        hardness: app.tool.hardness,
+        points: [roundCoord(p[0] / rect.w), roundCoord(p[1] / rect.h)],
       };
-    } else if (t.tool === 'radial') {
-      // Hard-edged: the mask's feather is what softens it.
-      live = { shape: 'radial', mode: 'add', from: [x, y], to: [x, y], hardness: 1 };
-    } else {
-      live = { shape: 'linear', mode: 'add', from: [x, y], to: [x, y] };
+      redrawStrokes();
+      return;
     }
-    redraw();
+    // The active shape's handle dots first, then other components' pins,
+    // then the rest of the active shape (its ring, lines or inside), then
+    // drawing it again.
+    const handle = isShape(active) ? grabHandle(active, p, rect.w, rect.h, tol) : null;
+    if (!handle) {
+      const pin = pinAt(p, tol);
+      if (pin !== null) return app.selectComponent(uid, pin);
+    }
+    if (!isShape(active) || app.activeOp === null) return;
+    const grabbed = handle ?? grab(active, p, rect.w, rect.h, tol);
+    drag = { index: app.activeOp, grabbed, start: p, from: [...active.from], to: [...active.to], moved: false };
   }
 
   function move(e: PointerEvent) {
-    if (e.pointerType === 'mouse') cursor = { x: e.offsetX, y: e.offsetY };
-    if (!live) return;
-    if (live.shape === 'stroke') {
+    const p = at(e);
+    if (e.pointerType === 'mouse') {
+      cursor = { x: p[0], y: p[1] };
+      if (!live && !drag) hover = hoverAt(p);
+    }
+    if (live) {
       // Coalesced events carry every sample since the last frame: smoother
       // strokes from fast hands (and Apple Pencil).
       const events = e.getCoalescedEvents?.() ?? [e];
       const minPx = Math.max(1.5, live.size * long * 0.1);
       for (const ev of events.length ? events : [e]) {
-        const [x, y] = norm(ev);
-        addPoint(live.points, x, y, minPx, rect.w, rect.h);
+        addPoint(live.points, ev.offsetX / rect.w, ev.offsetY / rect.h, minPx, rect.w, rect.h);
       }
-    } else if (live.shape === 'linear' || live.shape === 'radial') {
-      live.to = norm(e);
+      redrawStrokes();
+    } else if (drag && uid) {
+      // A few pixels of wobble is still a tap.
+      if (!drag.moved && Math.hypot(p[0] - drag.start[0], p[1] - drag.start[1]) < 4) return;
+      drag.moved = true;
+      const ends = dragEnds(drag.grabbed, drag.from, drag.to, drag.start, p, rect.w, rect.h);
+      app.updateMaskOp(uid, drag.index, ends, false);
     }
-    redraw();
   }
 
-  function up() {
-    const op = live;
-    live = null;
-    const uid = app.masking;
-    if (!op || !uid) return redraw();
-    if (op.shape === 'linear' || op.shape === 'radial') {
-      // A tap is not a gradient.
-      const d = Math.hypot((op.to[0] - op.from[0]) * rect.w, (op.to[1] - op.from[1]) * rect.h);
-      if (d < 6) return redraw();
-      op.from = [roundCoord(op.from[0]), roundCoord(op.from[1])];
-      op.to = [roundCoord(op.to[0]), roundCoord(op.to[1])];
+  function up(e: PointerEvent) {
+    if (live) {
+      const stroke = live;
+      live = null;
+      if (uid && app.activeOp !== null) {
+        // A tap on a pin picks that component rather than leaving a dab.
+        const pin = stroke.points.length === 2 ? pinAt(at(e), tolerance(e)) : null;
+        if (pin !== null) app.selectComponent(uid, pin);
+        else {
+          app.addStroke(uid, app.activeOp, stroke);
+          pending.push({ rev: app.revision, stroke });
+        }
+      }
+      redrawStrokes();
+    } else if (drag && uid) {
+      const d = drag;
+      drag = null;
+      if (!d.moved) return;
+      // Drawing a new placement needs a real drag; a short one puts it back.
+      const p = at(e);
+      if (d.grabbed === 'draw' && Math.hypot(p[0] - d.start[0], p[1] - d.start[1]) < 8) {
+        app.updateMaskOp(uid, d.index, { from: d.from, to: d.to }, false);
+      } else {
+        app.commit();
+      }
     }
-    app.addMaskOp(uid, op);
-    pending.push({ rev: app.revision, op });
-    redraw();
   }
 
   function cancel() {
     live = null;
-    redraw();
+    redrawStrokes();
+    if (drag?.moved && uid) app.updateMaskOp(uid, drag.index, { from: drag.from, to: drag.to }, false);
+    drag = null;
   }
+
+  /** What the mouse would grab here, for the cursor. */
+  function hoverAt(p: [number, number]): Grab | 'pin' | null {
+    if (brushy) return null;
+    const handle = isShape(active) ? grabHandle(active, p, rect.w, rect.h, 10) : null;
+    if (handle) return handle;
+    if (pinAt(p, 10) !== null) return 'pin';
+    return isShape(active) ? grab(active, p, rect.w, rect.h, 10) : null;
+  }
+
+  const CURSOR: Record<Grab | 'pin', string> = {
+    edge: 'grab',
+    from: 'grab',
+    to: 'grab',
+    move: 'move',
+    pin: 'pointer',
+    draw: 'crosshair',
+  };
 </script>
 
 <div class="painter" style:left="{rect.x}px" style:top="{rect.y}px" style:width="{rect.w}px" style:height="{rect.h}px">
   {#if app.tool.show && app.maskUrl}
     <img class="overlay" src={app.maskUrl} alt="" draggable="false" />
   {/if}
+  <canvas class="strokes" bind:this={paint}></canvas>
   <canvas
-    bind:this={canvas}
-    class:brushy
+    bind:this={guides}
+    style:cursor={brushy ? 'none' : hover ? CURSOR[hover] : 'default'}
     onpointerdown={down}
     onpointermove={move}
     onpointerup={up}
     onpointercancel={cancel}
     onpointerleave={() => (cursor = null)}
     oncontextmenu={(e) => e.preventDefault()}
-    aria-label="Paint the mask"
+    aria-label="Edit the mask"
   ></canvas>
   {#if cursor && brushy}
     <div
       class="cursor"
-      class:erase={app.tool.tool === 'eraser'}
+      class:erase={app.tool.tool === 'erase'}
       style:left="{cursor.x}px"
       style:top="{cursor.y}px"
       style:width="{app.tool.size * long}px"
@@ -226,17 +359,16 @@
     -webkit-user-select: none;
   }
 
-  /* Drawn strokes are opaque on the canvas; the canvas itself is
-     translucent, so overlapping segments do not darken. */
-  canvas {
+  /* Strokes are drawn opaque on a translucent canvas, so overlapping
+     segments do not darken. */
+  canvas.strokes {
     opacity: 0.5;
-    touch-action: none;
-    cursor: crosshair;
-    -webkit-touch-callout: none;
+    pointer-events: none;
   }
 
-  canvas.brushy {
-    cursor: none;
+  canvas {
+    touch-action: none;
+    -webkit-touch-callout: none;
   }
 
   .cursor {
