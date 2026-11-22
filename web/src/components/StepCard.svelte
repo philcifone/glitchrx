@@ -137,18 +137,18 @@
 
       <!-- What to do with the step itself, apart from its settings. -->
       <div class="foot" role="group" aria-label="Step">
-        <button class="plain" onclick={() => app.moveStep(step.uid, -1)} disabled={index === 0} title="Move up">
-          <ChevronUp size={18} strokeWidth={1.75} /> Up
+        <button class="plain" onclick={() => app.moveStep(step.uid, -1)} disabled={index === 0} title="Move up" aria-label="Move up">
+          <ChevronUp size={18} strokeWidth={1.75} /> <span class="txt">Up</span>
         </button>
-        <button class="plain" onclick={() => app.moveStep(step.uid, 1)} disabled={index === count - 1} title="Move down">
-          <ChevronDown size={18} strokeWidth={1.75} /> Down
+        <button class="plain" onclick={() => app.moveStep(step.uid, 1)} disabled={index === count - 1} title="Move down" aria-label="Move down">
+          <ChevronDown size={18} strokeWidth={1.75} /> <span class="txt">Down</span>
         </button>
-        <button class="plain" onclick={() => app.duplicateStep(step.uid)} title="Duplicate (with a new seed)">
-          <Copy size={17} strokeWidth={1.75} /> Duplicate
+        <button class="plain" onclick={() => app.duplicateStep(step.uid)} title="Duplicate (with a new seed)" aria-label="Duplicate">
+          <Copy size={17} strokeWidth={1.75} /> <span class="txt">Duplicate</span>
         </button>
         <span class="grow"></span>
-        <button class="plain danger" onclick={() => app.removeStep(step.uid)} title="Remove this step">
-          <Trash2 size={17} strokeWidth={1.75} /> Remove
+        <button class="plain danger" onclick={() => app.removeStep(step.uid)} title="Remove this step" aria-label="Remove step">
+          <Trash2 size={17} strokeWidth={1.75} /> <span class="txt">Remove</span>
         </button>
       </div>
     </div>
@@ -290,6 +290,13 @@
 
   .foot .grow {
     flex: 1;
+  }
+
+  /* The narrowest phones get icons only (each button keeps its name). */
+  @media (max-width: 360px) {
+    .foot .txt {
+      display: none;
+    }
   }
 
   .seed {
