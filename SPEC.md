@@ -23,6 +23,12 @@ Keywords: **must** means required for the phase to be done. **Should** means exp
 | D-13 | `reverse` effect renamed `backwards` | Found during implementation: an effect flag `--reverse` would collide with the `--reverse` (undo) option. |
 | D-14 | Window-relative sizes | `shuffle` `block` and `stutter` `chunk` accept a percent of the hit window (defaults `5%` and `12%`). The byte-count defaults were larger than the hit window on small images, which made both effects do nothing. A test now fails if any effect's defaults leave an image unchanged. |
 | D-15 | Restart markers by default (Phase 2 start) | Phil's first real photos (6240x4160, no restart markers) showed the Phase 1 defaults turning everything below the first hit into a flat wash. Fix: before glitching, the file is losslessly rewritten with a restart marker every `--restart` interval (MCU rows, or a percent of the image height). Each glitch then stays in a band. CLI default `10%`; `--restart keep` restores the old behaviour. Consequences: the output's header differs from the *input* (a DRI segment is added) but stays byte-identical to the *prepared* file, and `--reverse` restores the original pixels exactly, not the original bytes (exact bytes still come back with `--restart keep`). Recipes carry `restart`; the core default is still "keep". |
+| D-16 | `glitchrx serve` shape (2a) | `serve` is a word-subcommand of the one binary (a photo named `serve` is `./serve`). The server lives in its own crate, `glitchrx-serve`, so a Tauri wrapper (2b) can reuse it. Default port 7878. The built frontend is embedded by `build.rs`; without Node a placeholder page is embedded, so the Rust gate never needs npm. |
+| D-17 | Access token (open item 2) | Built: `--token` (generated) or `--token=SECRET`. The printed URL carries `?token=`, which sets an HttpOnly, SameSite=Strict cookie and redirects to the clean URL. A Content-Security-Policy keeps the page from loading anything from elsewhere. Over plain HTTP the token can be sniffed on the network; over WireGuard the tunnel encrypts it. |
+| D-18 | Preview pipeline (2a) | The server decodes with libjpeg-turbo and sends a clean JPEG (quality 88, 4:4:4) sized to the preview box, so every browser shows the same pixels. Per-document cache of the prepared input plus the payload after each step; tested byte-identical to `Recipe::apply`. Seeds travel as JSON strings, because JavaScript numbers lose precision above 2^53. |
+| D-19 | Preview speed (deviation) | Measured on a 26 MP, 25 MB JPEG: about 180-220 ms per preview, against the 100 ms target. The cost is libjpeg-turbo's single-threaded Huffman decode (about 125-140 ms at any scale); the cached glitch is about 37 ms. Candidate fix, not built: decode the restart bands in parallel, since each band is independently decodable. It needs a test proving the result matches a whole-file decode. |
+| D-20 | GUI-only step switch | Steps can be switched off in the GUI. Switched-off steps are left out of previews, exports and saved recipes, so recipes stay plain. |
+| D-21 | Gate and the web GUI | `scripts/check.sh` also runs `svelte-check` and `vitest` when `web/node_modules` exists. |
 
 ## 0. Review of the brief (v0.1, kept for reference)
 
@@ -416,4 +422,5 @@ Generated procedurally, CC0, and committed. Variants:
 ## 13. Open items
 
 1. The default region skip and the per-effect defaults. Claude will report what tuning shows and ask where the choice is aesthetic.
-2. An optional auth token for `serve`, to be decided at Phase 2.
+2. ~~An optional auth token for `serve`~~: built (D-17).
+3. Preview speed on 24 MP and larger files (D-19): parallel band decoding is the candidate fix.
