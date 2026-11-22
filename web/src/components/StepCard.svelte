@@ -61,17 +61,6 @@
     <button class="icon" onclick={() => app.shake(step.uid)} disabled={!info} title="Shake: random settings for this step (placement stays)" aria-label="Shake settings">
       <Shuffle size={18} strokeWidth={1.75} />
     </button>
-    <button
-      class="icon"
-      onclick={() => app.reroll(step.uid)}
-      disabled={!seeded}
-      title={seeded
-        ? 'New seed for this step'
-        : 'Nothing random here: with hits=0 the step covers its whole region. Set hits above 0 to scatter it.'}
-      aria-label="Re-roll seed"
-    >
-      <Dices size={18} strokeWidth={1.75} />
-    </button>
   </header>
 
   {#if open}
@@ -115,35 +104,51 @@
           {#each placement as spec (spec.name)}
             <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
           {/each}
+          <!-- The seed decides where the hits land, so it lives here, with
+               the dice that re-rolls it. -->
+          <div class="seed">
+            <label for="seed-{step.uid}">Seed</label>
+            <input
+              id="seed-{step.uid}"
+              type="text"
+              inputmode="numeric"
+              bind:value={seedText}
+              onchange={() => app.setSeed(step.uid, seedText)}
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <button
+              class="icon"
+              onclick={() => app.reroll(step.uid)}
+              disabled={!seeded}
+              title={seeded
+                ? 'New seed: the same settings, landing somewhere else'
+                : 'Nothing random here: with hits=0 the step covers its whole region. Set hits above 0 to scatter it.'}
+              aria-label="Re-roll seed"
+            >
+              <Dices size={18} strokeWidth={1.75} />
+            </button>
+          </div>
         </section>
         <BlendSection {step} />
       {:else}
         <p class="err">Unknown effect `{step.effect}`.</p>
       {/if}
 
-      <div class="foot">
-        <label class="seed">
-          <span>Seed</span>
-          <input
-            type="text"
-            inputmode="numeric"
-            bind:value={seedText}
-            onchange={() => app.setSeed(step.uid, seedText)}
-            spellcheck="false"
-            autocomplete="off"
-          />
-        </label>
-        <button class="icon" onclick={() => app.moveStep(step.uid, -1)} disabled={index === 0} aria-label="Move up" title="Move up">
-          <ChevronUp size={18} strokeWidth={1.75} />
+      <!-- What to do with the step itself, apart from its settings. -->
+      <div class="foot" role="group" aria-label="Step">
+        <button class="plain" onclick={() => app.moveStep(step.uid, -1)} disabled={index === 0} title="Move up">
+          <ChevronUp size={18} strokeWidth={1.75} /> Up
         </button>
-        <button class="icon" onclick={() => app.moveStep(step.uid, 1)} disabled={index === count - 1} aria-label="Move down" title="Move down">
-          <ChevronDown size={18} strokeWidth={1.75} />
+        <button class="plain" onclick={() => app.moveStep(step.uid, 1)} disabled={index === count - 1} title="Move down">
+          <ChevronDown size={18} strokeWidth={1.75} /> Down
         </button>
-        <button class="icon" onclick={() => app.duplicateStep(step.uid)} aria-label="Duplicate" title="Duplicate (new seed)">
-          <Copy size={18} strokeWidth={1.75} />
+        <button class="plain" onclick={() => app.duplicateStep(step.uid)} title="Duplicate (with a new seed)">
+          <Copy size={17} strokeWidth={1.75} /> Duplicate
         </button>
-        <button class="icon danger" onclick={() => app.removeStep(step.uid)} aria-label="Remove" title="Remove step">
-          <Trash2 size={18} strokeWidth={1.75} />
+        <span class="grow"></span>
+        <button class="plain danger" onclick={() => app.removeStep(step.uid)} title="Remove this step">
+          <Trash2 size={17} strokeWidth={1.75} /> Remove
         </button>
       </div>
     </div>
@@ -265,7 +270,7 @@
   }
 
   .sample span,
-  .seed span {
+  .seed label {
     font-size: 0.85rem;
     font-weight: 500;
   }
@@ -274,20 +279,29 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    padding: 8px 0;
+    padding: 6px 0;
+  }
+
+  .foot button {
+    gap: 4px;
+    padding: 6px 8px;
+    font-size: 0.85rem;
+  }
+
+  .foot .grow {
+    flex: 1;
   }
 
   .seed {
-    flex: 1;
     display: flex;
     align-items: center;
     gap: 8px;
     min-width: 0;
-    margin-right: 4px;
   }
 
   .seed input {
     flex: 1;
+    min-width: 0;
     width: 100%;
   }
 
