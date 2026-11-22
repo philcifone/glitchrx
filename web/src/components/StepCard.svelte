@@ -16,6 +16,7 @@
   const own = $derived(info?.params.filter((p) => !p.placement) ?? []);
   const placement = $derived(info?.params.filter((p) => p.placement) ?? []);
   const changedPlacement = $derived(placement.some((p) => p.name in step.params));
+  const seeded = $derived(app.seeded(step));
   // Open when first added; collapsing is per card and not part of history.
   let open = $state(true);
 
@@ -31,13 +32,20 @@
     <span class="n">{index + 1}</span>
     <button class="name" onclick={() => (open = !open)} aria-expanded={open} title={info?.summary}>
       {step.effect}
-      {#if info?.reversible === 'never'}<span class="tag">lossy</span>{/if}
     </button>
     <label class="toggle" title={step.enabled ? 'Turn this step off' : 'Turn this step on'}>
       <input type="checkbox" checked={step.enabled} onchange={() => app.toggleStep(step.uid)} />
       <span class="visually-hidden">Enabled</span>
     </label>
-    <button class="icon" onclick={() => app.reroll(step.uid)} title="New seed for this step" aria-label="Re-roll seed">
+    <button
+      class="icon"
+      onclick={() => app.reroll(step.uid)}
+      disabled={!seeded}
+      title={seeded
+        ? 'New seed for this step'
+        : 'Nothing random here: with hits=0 the step covers its whole region. Set hits above 0 (under Placement) to scatter it.'}
+      aria-label="Re-roll seed"
+    >
       <Dices size={18} strokeWidth={2.25} />
     </button>
   </header>
@@ -125,14 +133,6 @@
   .name:hover:not(:disabled) {
     background: none;
     text-decoration: underline;
-  }
-
-  .tag {
-    font-family: var(--font-body);
-    font-size: 0.75rem;
-    border: 1.5px solid var(--warn);
-    color: var(--warn);
-    padding: 0 4px;
   }
 
   .toggle {

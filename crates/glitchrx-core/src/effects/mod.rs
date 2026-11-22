@@ -126,6 +126,11 @@ pub struct EffectInfo {
     pub details: &'static str,
     pub params: &'static [ParamSpec],
     pub placement: PlacementDefaults,
+    /// True if the effect draws random numbers inside each window (beyond
+    /// where its hits land). With `hits=0` and this false, the seed changes
+    /// nothing: there is one window over the whole region and nothing to
+    /// pick. Front ends use this to say when re-rolling a seed is pointless.
+    pub random_within: bool,
     pub example: &'static str,
     pub build: fn(&Params) -> Result<Box<dyn Effect>>,
 }
@@ -228,6 +233,11 @@ pub fn markdown_reference() -> String {
             "Follows Audacity's {}. Version: {}.\n\n",
             e.audacity, e.version
         ));
+        s.push_str(if e.random_within {
+            "The seed picks where hits land and what happens inside each window.\n\n"
+        } else {
+            "The seed only picks where hits land, so it has no effect with `hits=0`.\n\n"
+        });
         s.push_str("| Parameter | Default | Meaning |\n| --- | --- | --- |\n");
         for p in e.all_params() {
             s.push_str(&format!(

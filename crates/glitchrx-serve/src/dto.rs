@@ -133,6 +133,8 @@ pub struct EffectDto {
     pub audacity: &'static str,
     pub summary: &'static str,
     pub details: &'static str,
+    /// Draws random numbers inside each window (see `EffectInfo`).
+    pub random_within: bool,
     pub params: Vec<ParamDto>,
 }
 
@@ -165,6 +167,7 @@ pub fn effects() -> Vec<EffectDto> {
                 audacity: e.audacity,
                 summary: e.summary,
                 details: e.details,
+                random_within: e.random_within,
                 params: e
                     .all_params()
                     .into_iter()

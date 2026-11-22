@@ -19,8 +19,10 @@ export interface EffectInfo {
   version: number;
   summary: string;
   details: string;
-  /** "always", "never", or what it depends on. */
-  reversible: string;
+  /** The Audacity effect this one follows. */
+  audacity: string;
+  /** Draws random numbers inside each window, so the seed matters even with hits=0. */
+  random_within: boolean;
   params: ParamInfo[];
 }
 

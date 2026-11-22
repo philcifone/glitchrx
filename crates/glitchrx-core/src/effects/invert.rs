@@ -19,6 +19,7 @@ pub static INFO: EffectInfo = EffectInfo {
         hits: "4",
         len: "4%",
     },
+    random_within: false,
     example: "glitchrx --invert encoding=s16le,hits=8 photo.jpg",
     build,
 };

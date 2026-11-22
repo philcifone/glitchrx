@@ -33,6 +33,7 @@ pub static INFO: EffectInfo = EffectInfo {
         hits: "4",
         len: "10%",
     },
+    random_within: true,
     example: "glitchrx --shuffle block=2rows,fraction=1 photo.jpg",
     build,
 };

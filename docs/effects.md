@@ -29,6 +29,8 @@ Feedback delay: every sample adds a fading copy of the output `delay` earlier.
 
 Follows Audacity's Echo. Version: 1.
 
+The seed only picks where hits land, so it has no effect with `hits=0`.
+
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `delay` | `0.33rows` | distance to the repeat (rows, px, % or bytes) |
@@ -51,6 +53,8 @@ A fixed number of repeats of the input, each `decay` times quieter than the last
 `y[n] = x[n] + decay * x[n - d] + decay^2 * x[n - 2d] + ...` for `taps` repeats. Unlike `echo`, repeats come from the input, not the output, so they stop after `taps` copies: crisper, countable ghosts.
 
 Follows Audacity's Delay. Version: 1.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
@@ -75,6 +79,8 @@ Freeverb: eight damped feedback combs in parallel, then four allpass diffusers.
 Smears the picture into a haze of overlapping ghosts. `size` is the longest comb delay; the others keep Freeverb's ratios to it, so the ghosts never line up. `room` sets how long the tail rings, `damping` how fast fine detail dies out of it.
 
 Follows Audacity's Reverb. Version: 1.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
@@ -102,6 +108,8 @@ Positive gains push bytes away from the encoding's silence point and clip them: 
 
 Follows Audacity's Amplify. Version: 1.
 
+The seed only picks where hits land, so it has no effect with `hits=0`.
+
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `gain` | `6` | gain in dB (+6 dB doubles, -6 dB halves) |
@@ -123,6 +131,8 @@ With `u8` this is close to a photographic negative. With `s8` and the multi-byte
 
 Follows Audacity's Invert. Version: 1.
 
+The seed only picks where hits land, so it has no effect with `hits=0`.
+
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
@@ -142,6 +152,8 @@ Reduce every sample to `bits` bits of resolution.
 Posterizes. With `u8` it is plain colour banding; with the multi-byte encodings the lower bytes of each sample are wiped, so whole channels drop to flat values while the others keep their detail.
 
 Follows Audacity's a bitcrusher (Audacity has none built in; the usual Nyquist plug-ins). Version: 1.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
@@ -164,6 +176,8 @@ Reverses the order of the samples (not the bytes inside a sample). A window cove
 
 Follows Audacity's Reverse. Version: 1.
 
+The seed only picks where hits land, so it has no effect with `hits=0`.
+
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
@@ -183,6 +197,8 @@ Rotate each window forward by `by`; what falls off the end wraps to the start.
 A fraction of a row slides a band of the picture sideways. `phase` adds bytes to the distance, which moves the colour channels out of step (red into green, green into blue). Edits move whole samples, so with multi-byte encodings the distance is rounded down to a whole sample.
 
 Follows Audacity's cut and paste. Version: 1.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
@@ -206,6 +222,8 @@ Blocks of whole rows rearrange bands of the picture; blocks of part of a row tea
 
 Follows Audacity's cut and paste. Version: 1.
 
+The seed picks where hits land and what happens inside each window.
+
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `block` | `0.5rows` | block size (rows, px, bytes, or % of the window) |
@@ -227,6 +245,8 @@ Copy the first `chunk` of each window over the rest of it, again and again.
 Whole rows repeat a strip of the picture down the window; part of a row gives a diagonal smear, since each repeat starts a little further along the row. A percentage `chunk` is of the window.
 
 Follows Audacity's Repeat. Version: 1.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
