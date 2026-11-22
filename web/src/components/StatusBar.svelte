@@ -1,0 +1,89 @@
+<script lang="ts">
+  // Bottom line: photo facts, decode status, render time, messages.
+  import { app } from '../lib/app.svelte';
+
+  const mb = (n: number) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${Math.round(n / 1024)} KB`);
+</script>
+
+<footer>
+  {#if app.error}
+    <span class="err" role="alert">
+      {app.error}
+      <button class="dismiss" onclick={() => app.dismissError()} aria-label="Dismiss">ok</button>
+    </span>
+  {:else if app.notice}
+    <span class="ok" role="status">{app.notice}</span>
+  {:else if app.doc}
+    <span class="name" title={app.doc.path ?? app.doc.name}>{app.doc.name}</span>
+    <span>{app.doc.width}x{app.doc.height}</span>
+    <span class="wide">{app.doc.subsampling}, {mb(app.doc.payload_len)} data</span>
+    {#if app.decode}
+      <span class="decode {app.decode.word}" title={app.decode.message ?? 'decoded without complaints'}>
+        decode: {app.decode.word}
+      </span>
+    {/if}
+    {#if app.renderMs !== null}<span class="dim">{app.renderMs} ms</span>{/if}
+  {:else}
+    <span class="dim">no photo open{app.config ? ` | glitchrx ${app.config.version}` : ''}</span>
+  {/if}
+</footer>
+
+<style>
+  footer {
+    grid-area: status;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 6px var(--pad);
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+    border-top: var(--border);
+    font-size: 0.85em;
+    min-height: 34px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .name {
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .decode.clean {
+    color: var(--accent);
+  }
+  .decode.recovered {
+    color: var(--info);
+  }
+  .decode.partial {
+    color: var(--warn);
+  }
+  .decode.failed {
+    color: var(--danger);
+  }
+
+  .err {
+    color: var(--danger);
+    white-space: normal;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .ok {
+    color: var(--accent);
+    white-space: normal;
+  }
+
+  .dismiss {
+    min-height: 26px;
+    padding: 0 8px;
+  }
+
+  @media (max-width: 760px) {
+    .wide {
+      display: none;
+    }
+  }
+</style>
