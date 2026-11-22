@@ -7,7 +7,7 @@
 import Mountain from '@lucide/svelte/icons/mountain';
 import Copy from '@lucide/svelte/icons/copy';
 import IterationCw from '@lucide/svelte/icons/iteration-cw';
-import Mic from '@lucide/svelte/icons/mic';
+import Megaphone from '@lucide/svelte/icons/megaphone';
 import Eclipse from '@lucide/svelte/icons/eclipse';
 import Blocks from '@lucide/svelte/icons/blocks';
 import Rewind from '@lucide/svelte/icons/rewind';
@@ -22,7 +22,7 @@ const ICONS: Record<string, IconComponent> = {
   echo: Mountain,
   delay: Copy,
   reverb: IterationCw,
-  amplify: Mic,
+  amplify: Megaphone,
   invert: Eclipse,
   bitcrush: Blocks,
   backwards: Rewind,
