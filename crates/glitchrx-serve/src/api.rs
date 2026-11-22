@@ -25,6 +25,7 @@ use crate::browse::{self, BrowseError};
 use crate::dialogs::Dialogs;
 use crate::docs::{Doc, Store, random_hex};
 use crate::dto::{self, DocDto, RecipeDto};
+use crate::presets::{PresetError, PresetInfo, Presets};
 use crate::render::{self, Format};
 
 /// Largest upload accepted. Full-frame camera JPEGs are 10-40 MB, and
@@ -46,6 +47,9 @@ pub struct AppState {
     pub preview_budget: Duration,
     /// Native file dialogs, when running inside the desktop app.
     pub dialogs: Option<Arc<dyn Dialogs>>,
+    /// Saved presets; off unless a directory is given (tests never touch
+    /// the user's real one).
+    pub presets: Option<Presets>,
 }
 
 impl AppState {
@@ -56,7 +60,14 @@ impl AppState {
             token,
             preview_budget: PREVIEW_BUDGET,
             dialogs: None,
+            presets: None,
         }
+    }
+
+    /// Keep presets in `dir` (created on the first save).
+    pub fn with_presets(mut self, dir: PathBuf) -> AppState {
+        self.presets = Some(Presets::new(dir));
+        self
     }
 
     /// Enable the native Open and Save dialogs (the desktop app).
@@ -83,6 +94,11 @@ pub fn router(state: AppState) -> Router {
         .route("/docs/{id}/save", post(save))
         .route("/docs/{id}/save-as", post(save_as))
         .route("/desktop/open", post(desktop_open))
+        .route("/presets", get(list_presets))
+        .route(
+            "/presets/{name}",
+            get(get_preset).put(put_preset).delete(delete_preset),
+        )
         .route("/recipe/from-toml", post(recipe_from_toml))
         .route("/recipe/to-toml", post(recipe_to_toml))
         .route("/browse", get(browse_dir))
@@ -142,6 +158,18 @@ impl From<BrowseError> for ApiError {
             BrowseError::NotFound => ApiError::new(StatusCode::NOT_FOUND, "not found"),
             BrowseError::Io(m) => ApiError::internal(m),
         }
+    }
+}
+
+impl From<PresetError> for ApiError {
+    fn from(e: PresetError) -> ApiError {
+        let code = match e {
+            PresetError::BadName(_) | PresetError::Invalid(_) => StatusCode::BAD_REQUEST,
+            PresetError::NotFound(_) => StatusCode::NOT_FOUND,
+            PresetError::Exists(_) => StatusCode::CONFLICT,
+            PresetError::Io(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        ApiError::new(code, e.to_string())
     }
 }
 
@@ -362,6 +390,8 @@ struct ConfigDto {
     encodings: Vec<dto::EncodingDto>,
     /// Running inside the desktop app: native Open and Save dialogs.
     desktop: bool,
+    /// Saved presets are available.
+    presets: bool,
 }
 
 async fn config(State(st): State<Shared>) -> Json<ConfigDto> {
@@ -377,6 +407,7 @@ async fn config(State(st): State<Shared>) -> Json<ConfigDto> {
         max_preview_side: render::MAX_PREVIEW_SIDE,
         encodings: dto::encodings(),
         desktop: st.dialogs.is_some(),
+        presets: st.presets.is_some(),
     })
 }
 
@@ -834,6 +865,57 @@ async fn save_as(
         Ok(Json(SavedAs { saved, skipped }).into_response())
     })
     .await
+}
+
+// ---------------------------------------------------------------------------
+// Presets: the user's saved recipes (see `presets`).
+
+fn presets(st: &Shared) -> ApiResult<&Presets> {
+    st.presets
+        .as_ref()
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "presets are off on this server"))
+}
+
+async fn list_presets(State(st): State<Shared>) -> ApiResult<Json<Vec<PresetInfo>>> {
+    Ok(Json(presets(&st)?.list()?))
+}
+
+async fn get_preset(
+    State(st): State<Shared>,
+    Path(name): Path<String>,
+) -> ApiResult<Json<RecipeDto>> {
+    Ok(Json(RecipeDto::from_recipe(&presets(&st)?.get(&name)?)))
+}
+
+#[derive(Deserialize)]
+struct PresetRequest {
+    recipe: RecipeDto,
+    /// Replace a preset of the same name (after the user said so).
+    #[serde(default)]
+    replace: bool,
+}
+
+/// Save a preset: 200 with its name, or 409 if the name is taken and
+/// `replace` was not given.
+async fn put_preset(
+    State(st): State<Shared>,
+    Path(name): Path<String>,
+    Json(req): Json<PresetRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let recipe = req.recipe.to_recipe()?;
+    if recipe.steps.is_empty() {
+        return Err(ApiError::bad("a preset needs at least one step"));
+    }
+    let saved = presets(&st)?.put(&name, &recipe, req.replace)?;
+    Ok(Json(serde_json::json!({ "name": saved })))
+}
+
+async fn delete_preset(
+    State(st): State<Shared>,
+    Path(name): Path<String>,
+) -> ApiResult<StatusCode> {
+    presets(&st)?.delete(&name)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Parse a recipe file into the GUI's JSON form.

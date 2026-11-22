@@ -712,3 +712,74 @@ async fn masks_travel_and_show() {
     let (s, _, _) = send(&app, ask(5)).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
 }
+
+fn put_json(uri: &str, v: Value) -> Request<Body> {
+    Request::put(uri)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(v.to_string()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn presets_save_list_replace_delete() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("presets");
+    let app = router(AppState::new(None, None).with_presets(dir.clone()));
+    let get = |uri: &str| Request::get(uri).body(Body::empty()).unwrap();
+
+    let (_, _, b) = send(&app, get("/api/config")).await;
+    assert_eq!(json_of(&b)["presets"], true);
+    let (s, _, b) = send(&app, get("/api/presets")).await;
+    assert_eq!((s, json_of(&b)), (StatusCode::OK, json!([])));
+
+    // Save; names may have spaces (URL-encoded in the path).
+    let uri = "/api/presets/Melt%20down";
+    let body = json!({"recipe": sample_recipe()});
+    let (s, _, b) = send(&app, put_json(uri, body.clone())).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(json_of(&b)["name"], "Melt down");
+    // It is an ordinary recipe file the CLI can replay.
+    let text = fs::read_to_string(dir.join("Melt down.toml")).unwrap();
+    assert!(Recipe::from_toml(&text).is_ok(), "{text}");
+
+    // Taken names need `replace`.
+    let (s, _, _) = send(&app, put_json(uri, body.clone())).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    let one = json!({"recipe": {"steps": [{"effect": "invert", "seed": "3"}]}, "replace": true});
+    let (s, _, _) = send(&app, put_json(uri, one)).await;
+    assert_eq!(s, StatusCode::OK);
+
+    let (_, _, b) = send(&app, get("/api/presets")).await;
+    let list = json_of(&b);
+    assert_eq!(list[0]["name"], "Melt down");
+    assert_eq!(list[0]["effects"], json!(["invert"]));
+    let (s, _, b) = send(&app, get(uri)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(json_of(&b)["steps"][0]["seed"], "3");
+
+    // Bad names and empty recipes are refused; nothing leaves the directory.
+    for bad in ["/api/presets/..%2Fescape", "/api/presets/.hidden"] {
+        let (s, _, _) = send(&app, put_json(bad, body.clone())).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{bad}");
+    }
+    assert!(!tmp.path().join("escape.toml").exists());
+    let (s, _, _) = send(&app, put_json("/api/presets/empty", json!({"recipe": {}}))).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+
+    let del = || Request::delete(uri).body(Body::empty()).unwrap();
+    assert_eq!(send(&app, del()).await.0, StatusCode::NO_CONTENT);
+    assert_eq!(send(&app, del()).await.0, StatusCode::NOT_FOUND);
+
+    // A server without a presets directory says so.
+    let plain = app_without_presets();
+    let (_, _, b) = send(&plain, get("/api/config")).await;
+    assert_eq!(json_of(&b)["presets"], false);
+    assert_eq!(
+        send(&plain, get("/api/presets")).await.0,
+        StatusCode::NOT_FOUND
+    );
+}
+
+fn app_without_presets() -> Router {
+    app(None, None)
+}

@@ -1,6 +1,7 @@
 <script lang="ts">
-  // Title, open, undo/redo, export, theme toggle.
+  // Title, open, presets, undo/redo, export, theme toggle.
   import FolderOpen from '@lucide/svelte/icons/folder-open';
+  import Bookmark from '@lucide/svelte/icons/bookmark';
   import Download from '@lucide/svelte/icons/download';
   import Undo2 from '@lucide/svelte/icons/undo-2';
   import Redo2 from '@lucide/svelte/icons/redo-2';
@@ -10,7 +11,7 @@
   import { currentTheme, toggleTheme, type Theme } from '../lib/theme';
   import { onMount } from 'svelte';
 
-  let { onopen, onexport }: { onopen: () => void; onexport: () => void } = $props();
+  let { onopen, onexport, onpresets }: { onopen: () => void; onexport: () => void; onpresets: () => void } = $props();
   let theme = $state<Theme>('dark');
   onMount(() => (theme = currentTheme()));
 </script>
@@ -22,6 +23,11 @@
       <FolderOpen size={18} strokeWidth={1.75} />
       <span class="label">Open</span>
     </button>
+    {#if app.config?.presets}
+      <button class="icon" onclick={onpresets} title="Presets: your saved recipes" aria-label="Presets">
+        <Bookmark size={18} strokeWidth={1.75} />
+      </button>
+    {/if}
     <button class="icon" onclick={() => app.undo()} disabled={!app.canUndo} title="Undo (Ctrl+Z)" aria-label="Undo">
       <Undo2 size={18} strokeWidth={1.75} />
     </button>

@@ -10,6 +10,7 @@ import { ApiError, TooHeavyError } from './api';
 import { History } from './history';
 import { LatestOnly } from './latest';
 import { DEFAULT_TOOL, MASK_TINT, emptyMask, insertOp, withMode, type ToolState } from './mask';
+import { usesSamples } from './palette';
 import { usesSeed } from './seed';
 import { shakeParams } from './shake';
 import type {
@@ -20,9 +21,11 @@ import type {
   Mask,
   MaskMode,
   MaskOp,
+  PresetInfo,
   RecipeDto,
   RecipeState,
   ServerConfig,
+  StepDto,
   StepState,
 } from './types';
 
@@ -131,6 +134,9 @@ export class App {
 
   canUndo = $state(false);
   canRedo = $state(false);
+
+  /** Saved presets, as last listed. */
+  presets = $state<PresetInfo[]>([]);
 
   /** The step whose mask is being painted on the preview, by uid. */
   masking = $state<string | null>(null);
@@ -581,6 +587,7 @@ export class App {
 
   /** Replace the recipe with one loaded from a file. */
   loadRecipe(dto: RecipeDto): void {
+    this.stopMasking(); // every step is replaced
     this.recipe = normalize(
       {
         encoding: dto.encoding,
@@ -590,6 +597,81 @@ export class App {
       () => true, // the server already checked the effects
     );
     this.changed();
+  }
+
+  /** Add a recipe's steps after the current ones. */
+  appendRecipe(dto: RecipeDto): void {
+    // The added steps keep the sample format they were saved with, even if
+    // this recipe's differs. (Pixel effects have none to keep.)
+    const pin = (s: StepDto) =>
+      !usesSamples(this.effect(s.effect))
+        ? s.params
+        : {
+            ...(dto.encoding !== this.recipe.encoding ? { [ENCODING_KEY]: dto.encoding } : {}),
+            ...(dto.channels !== this.recipe.channels ? { [CHANNELS_KEY]: String(dto.channels) } : {}),
+            ...s.params,
+          };
+    for (const s of dto.steps) {
+      this.recipe.steps.push({ ...s, params: { ...pin(s) }, uid: newUid(), enabled: true });
+    }
+    this.changed();
+  }
+
+  // -------------------------------------------------------------------------
+  // Presets: recipes saved on the server, shared by every device using it.
+
+  async loadPresets(): Promise<void> {
+    if (!this.config?.presets) return;
+    try {
+      this.presets = await api.listPresets();
+    } catch (e) {
+      this.fail(e);
+    }
+  }
+
+  /** Use a preset: replace the recipe, or add its steps (`append`). Undoable. */
+  async applyPreset(name: string, append = false): Promise<void> {
+    try {
+      const dto = await api.getPreset(name);
+      if (append) this.appendRecipe(dto);
+      else this.loadRecipe(dto);
+      this.flash(`${append ? 'Added' : 'Loaded'} ${name}`);
+    } catch (e) {
+      this.fail(e);
+    }
+  }
+
+  /**
+   * Save the recipe as a preset. A taken name is replaced only after the
+   * user confirms. Returns true once saved.
+   */
+  async savePreset(name: string): Promise<boolean> {
+    const recipe = this.dto();
+    try {
+      let saved: string;
+      try {
+        saved = await api.savePreset(name, recipe, false);
+      } catch (e) {
+        if (!(e instanceof ApiError && e.status === 409)) throw e;
+        if (!confirm(`Replace the preset "${name.trim()}"?`)) return false;
+        saved = await api.savePreset(name, recipe, true);
+      }
+      this.flash(`Saved preset ${saved}`);
+      await this.loadPresets();
+      return true;
+    } catch (e) {
+      this.fail(e);
+      return false;
+    }
+  }
+
+  async deletePreset(name: string): Promise<void> {
+    try {
+      await api.deletePreset(name);
+      await this.loadPresets();
+    } catch (e) {
+      this.fail(e);
+    }
   }
 
   // -------------------------------------------------------------------------

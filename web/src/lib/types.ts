@@ -60,6 +60,8 @@ export interface EncodingInfo {
 export interface ServerConfig {
   /** Running in the desktop app: native Open and Save dialogs. */
   desktop: boolean;
+  /** Saved presets are available on this server. */
+  presets: boolean;
   version: string;
   browse: boolean;
   root_name: string | null;
@@ -122,6 +124,17 @@ export interface RecipeState {
   encoding: string;
   channels: Channels;
   steps: StepState[];
+}
+
+/** A saved preset, as listed. */
+export interface PresetInfo {
+  name: string;
+  steps: number;
+  effects: string[];
+  /** Seconds since 1970. */
+  modified: number;
+  /** Why this build cannot use it (an effect version that moved on, say). */
+  error?: string;
 }
 
 export interface BrowseEntry {
