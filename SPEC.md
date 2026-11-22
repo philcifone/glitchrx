@@ -340,10 +340,19 @@ Built and tested on `phase-1-cli`; the byte engine is now at `archive/jpeg-bytes
 
 ### Phase 3: depth (branch `phase-3-depth`)
 
-- **Done:** pixel sorting (D-36), masks and opacity (D-37, D-38), presets (D-39).
-- **Deferred:** per-effect strength sliders, with the tuning pass (D-38); zoom for fine mask work.
-- More inputs: WebP, AVIF, DNG/RAW.
-- 16-bit raster and BMP layout (section 4).
+- **Done:** pixel sorting (D-36), masks and opacity (D-37, D-38), presets (D-39); after Phil's first hands-on round: editable mask components with handles and pins, per-component opacity and feather, multi-select and copy / cut / paste (D-37), previews that settle to exact (D-40), the new-photo choice (D-41), the step card's seed row and action row (9.5), new icons.
+
+### Phase 4: tools (planned with Phil, 2026-11-22; starts on his go-ahead)
+
+- **4a Zoom and pan.** Pinch to zoom anywhere, on the phone and the desktop (wheel or trackpad). Press and hold the photo to see the original, as in Instagram; a magnifier button takes the place of "Hold for original". Zoomed in, one finger pans. While masking, one finger works the tool and two fingers pinch and pan, and the zoom stays put between strokes (as in Procreate and Lightroom mobile); the edit bar gets a compare button, since holding the photo there paints. A zoomed view asks the server for just the visible region, so it stays sharp, and settles to exact like the full view. Exact renders also start reusing cached full-resolution steps (today a change to the last step re-runs them all).
+- **4b Geometric masks.** A rectangle (corner handles to resize, a handle to rotate, drag inside to move) and a pen tool for polygons: tap to place corners, tap the first to close, drag while placing to bend a side into a curve; points stay editable. Both are components like the others (mode, opacity, feather). Coverage is computed exactly, anti-aliased, with basic f64 operations, so they replay byte for byte (D-25).
+- **4c Library, export folder, Save As.** A Settings sheet: a library folder (what Open browses) and an export folder, picked with a folder browser limited to the home directory and saved in `~/.config/glitchrx/config.toml`; `--root` still overrides. The new-photo choice moves there. Export gains Save As (folder, name, format) beside "next to original" and "download to this device".
+- **4d Export formats.** WebP (lossy with quality, or lossless; libwebp) and AVIF (quality and speed; a pure-Rust encoder). Same input and settings give the same file. Lossy compression smooths fine glitch texture, which the dialog says.
+- **4e Preset groups.** Steps added from a preset form a labelled group in the stack ("From preset: NAME", a divider). Editing one marks the group modified, with Revert (back to the preset's settings) and Update preset. The group moves as a block. Chosen over locking (copies need no lock: the preset file only changes on Update).
+
+### Parked
+
+Not planned for now, kept so the ideas are not lost: more inputs (WebP, AVIF, RAW/DNG; RAW needs a demosaic and colour pipeline, and converting to DNG does not avoid it), 16-bit raster and BMP layout (section 4), DNG export (a finished-pixel DNG is a TIFF with extra tags; TIFF already goes into Lightroom losslessly), dragging mask parts between steps, a recipe "work size" (D-40), per-effect strength sliders (D-38), the macOS build (`docs/macos.md`), app icon iteration.
 
 Each phase ends in a working, tested tool, followed by a stop-and-summarize.
 
