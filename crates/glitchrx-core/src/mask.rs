@@ -7,7 +7,9 @@
 //! any resolution, and replay from the command line:
 //!
 //! - **stroke**: a brush stroke (a path of points with a size and hardness);
-//! - **linear** / **radial**: a gradient, 1 at `from` fading to 0 at `to`;
+//! - **linear**: a gradient, 1 at `from` fading to 0 at `to`;
+//! - **radial**: a circle centred on `from` and reaching `to`, hard-edged
+//!   unless given a lower `hardness` (soften it with the mask's feather);
 //! - **brightness**: the pixels whose brightness lies in a range, read from
 //!   the picture as it arrives at the step.
 //!
@@ -45,6 +47,10 @@ fn default_hardness() -> f64 {
     0.5
 }
 
+fn hard() -> f64 {
+    1.0
+}
+
 /// One operation of a mask. In a recipe file:
 ///
 /// ```toml
@@ -73,13 +79,18 @@ pub enum MaskOp {
         from: [f64; 2],
         to: [f64; 2],
     },
+    /// A circle. Hard-edged by default, so the mask's feather decides how
+    /// soft it is (Phil, 2026-11-22: "the feather should be what makes it
+    /// fade"); a lower `hardness` fades it toward the centre, like a brush.
     Radial {
         #[serde(default)]
         mode: Mode,
-        /// Centre (fully on).
+        /// Centre.
         from: [f64; 2],
-        /// A point on the edge where it has faded out.
+        /// A point on the edge.
         to: [f64; 2],
+        #[serde(default = "hard")]
+        hardness: f64,
     },
     Brightness {
         #[serde(default)]
@@ -163,9 +174,19 @@ impl Mask {
                     }
                     points += p.len() / 2;
                 }
-                MaskOp::Linear { from, to, .. } | MaskOp::Radial { from, to, .. } => {
+                MaskOp::Linear { from, to, .. } => {
                     if !from.iter().chain(to).all(|&v| pos(v)) {
                         return bad("gradient ends must be near the picture".into());
+                    }
+                }
+                MaskOp::Radial {
+                    from, to, hardness, ..
+                } => {
+                    if !from.iter().chain(to).all(|&v| pos(v)) {
+                        return bad("circle centre and edge must be near the picture".into());
+                    }
+                    if !unit(*hardness) {
+                        return bad(format!("circle hardness {hardness} must be 0..1"));
                     }
                 }
                 MaskOp::Brightness {
@@ -214,15 +235,18 @@ impl Mask {
                         1.0 - t.clamp(0.0, 1.0)
                     });
                 }
-                MaskOp::Radial { mode, from, to } => {
+                MaskOp::Radial {
+                    mode,
+                    from,
+                    to,
+                    hardness,
+                } => {
                     let (a, d) = ends(from, to, w, h);
                     let r = (d.0 * d.0 + d.1 * d.1).sqrt();
+                    let edge = edge_width(r, *hardness);
                     each_pixel(&mut m, w, *mode, |px, py| {
-                        if r < 1e-9 {
-                            return 0.0;
-                        }
                         let (dx, dy) = (px - a.0, py - a.1);
-                        1.0 - ((dx * dx + dy * dy).sqrt() / r).clamp(0.0, 1.0)
+                        soft_edge(r, (dx * dx + dy * dy).sqrt(), edge)
                     });
                 }
                 MaskOp::Brightness {
@@ -281,6 +305,20 @@ fn combine(m: f64, v: f64, mode: Mode) -> f64 {
     }
 }
 
+/// Width of the soft edge of a round shape of radius `r` (pixels). Even the
+/// hardest edge keeps a pixel of softness, which is anti-aliasing.
+fn edge_width(r: f64, hardness: f64) -> f64 {
+    (r * (1.0 - hardness)).max(1.0)
+}
+
+/// Coverage at distance `d` from the centre of a round shape of radius
+/// `r`: 1 inside, 0 outside, and a smoothstep across the `edge`, a fade
+/// that starts and ends flat, so no ring shows.
+fn soft_edge(r: f64, d: f64, edge: f64) -> f64 {
+    let s = ((r - d) / edge).clamp(0.0, 1.0);
+    s * s * (3.0 - 2.0 * s)
+}
+
 /// Gradient ends in pixels: the start, and the vector to the end.
 fn ends(from: &[f64; 2], to: &[f64; 2], w: usize, h: usize) -> ((f64, f64), (f64, f64)) {
     let (w, h) = (w as f64, h as f64);
@@ -316,9 +354,8 @@ fn stroke(
         .chunks_exact(2)
         .map(|p| (p[0] * wf, p[1] * hf))
         .collect();
-    // Even the hardest brush keeps a pixel of soft edge (anti-aliasing).
     let radius = radius.max(0.5);
-    let edge = (radius * (1.0 - hardness)).max(1.0);
+    let edge = edge_width(radius, hardness);
 
     // Bounding box of the whole stroke, clipped to the raster.
     let (mut x0, mut y0, mut x1, mut y1) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
@@ -375,9 +412,7 @@ fn stroke(
                 };
                 let (ex, ey) = (px - (a.0 + t * dx), py - (a.1 + t * dy));
                 let d = (ex * ex + ey * ey).sqrt();
-                let s = ((radius - d) / edge).clamp(0.0, 1.0);
-                // Smoothstep: a soft edge without a visible ring.
-                let v = (s * s * (3.0 - 2.0 * s)) as f32;
+                let v = soft_edge(radius, d, edge) as f32;
                 let c = &mut cov[(y - by0) * bw + (x - bx0)];
                 if v > *c {
                     *c = v;
@@ -554,18 +589,30 @@ mod tests {
     }
 
     #[test]
-    fn radial_gradient_is_full_at_the_centre() {
-        let mask = Mask {
+    fn radial_is_a_hard_circle_unless_softened() {
+        let circle = |hardness: f64| Mask {
             ops: vec![MaskOp::Radial {
                 mode: Mode::Add,
                 from: [0.5, 0.5],
-                to: [1.0, 0.5],
+                to: [0.75, 0.5], // radius 10 px on a 40 px square
+                hardness,
             }],
             ..Mask::default()
         };
-        let m = mask.render(20, 20, &grey(20, 20, 0), NEVER).unwrap();
-        assert!(at(&m, 20, 10, 10) > 0.9);
-        assert_eq!(at(&m, 20, 0, 0), 0.0);
+        let hard = circle(1.0).render(40, 40, &grey(40, 40, 0), NEVER).unwrap();
+        // Full right up to the edge, nothing past it: no fade of its own.
+        assert_eq!(at(&hard, 40, 20, 20), 1.0);
+        assert_eq!(at(&hard, 40, 28, 20), 1.0);
+        assert_eq!(at(&hard, 40, 31, 20), 0.0);
+        assert_eq!(at(&hard, 40, 0, 0), 0.0);
+        // A lower hardness fades toward the centre, like a soft brush.
+        let soft = circle(0.0).render(40, 40, &grey(40, 40, 0), NEVER).unwrap();
+        let v = at(&soft, 40, 26, 20);
+        assert!(v > 0.05 && v < 0.6, "{v}");
+        // A recipe that leaves hardness out gets the hard circle.
+        let op: MaskOp =
+            toml::from_str("shape = \"radial\"\nfrom = [0.5, 0.5]\nto = [0.6, 0.5]").unwrap();
+        assert!(matches!(op, MaskOp::Radial { hardness, .. } if hardness == 1.0));
     }
 
     #[test]
@@ -641,6 +688,7 @@ mod tests {
                     mode: Mode::Subtract,
                     from: [0.5, 0.6],
                     to: [0.6, 0.6],
+                    hardness: 1.0,
                 },
             ],
             ..Mask::default()

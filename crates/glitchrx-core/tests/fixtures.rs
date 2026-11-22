@@ -81,6 +81,7 @@ fn busy_mask() -> Mask {
                 mode: Mode::Subtract,
                 from: [0.6, 0.5],
                 to: [0.75, 0.5],
+                hardness: 1.0,
             },
         ],
     }
