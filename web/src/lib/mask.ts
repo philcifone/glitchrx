@@ -178,8 +178,11 @@ function migrateStrokes(mask: Mask): Mask {
   return { ...mask, op: out };
 }
 
-/** Positions in a recipe: a ten-thousandth of the side (0.6 px at 6000 px). */
-export const roundCoord = (v: number) => Math.round(v * 10000) / 10000;
+/**
+ * Positions in a recipe: a hundred-thousandth of the side (0.06 px at
+ * 6000 px), fine enough for strokes painted at 800% zoom.
+ */
+export const roundCoord = (v: number) => Math.round(v * 100000) / 100000;
 
 /**
  * Add a point to a stroke (flat x, y list in picture fractions) if it is at

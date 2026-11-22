@@ -198,10 +198,10 @@ describe('dragEnds', () => {
 describe('addPoint', () => {
   it('skips points closer than the minimum and rounds the rest', () => {
     const pts: number[] = [];
-    expect(addPoint(pts, 0.123456, 0.5, 4, 1000, 1000)).toBe(true);
+    expect(addPoint(pts, 0.1234567, 0.5, 4, 1000, 1000)).toBe(true);
     expect(addPoint(pts, 0.125, 0.5, 4, 1000, 1000)).toBe(false); // 1.5 px away
     expect(addPoint(pts, 0.13, 0.5, 4, 1000, 1000)).toBe(true);
-    expect(pts).toEqual([0.1235, 0.5, 0.13, 0.5]);
+    expect(pts).toEqual([0.12346, 0.5, 0.13, 0.5]);
   });
 });
 
