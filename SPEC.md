@@ -1,6 +1,6 @@
 # glitcharaxia: Specification
 
-Status: **v0.3 draft, 2026-11-21, for Phil's review.** v0.3 changes what the effects work on. v0.2 glitched the *compressed* data inside a JPEG. Phil's reference work (`samples/examples/`, uncompressed TIFFs bent in Audacity) shows that the look he wants comes from bending *raw pixels*. v0.3 makes the raw-pixel domain the whole engine and removes JPEG byte glitching from the live project. The source documents are `pre-brief.md` and `BRIEF.md`, and `VOCAB.md` defines the terms used here.
+Status: **v0.3, 2026-11-21, approved by Phil.** v0.3 changes what the effects work on. v0.2 glitched the *compressed* data inside a JPEG. Phil's reference work (`samples/examples/`, uncompressed TIFFs bent in Audacity) shows that the look he wants comes from bending *raw pixels*. v0.3 makes the raw-pixel domain the whole engine and removes JPEG byte glitching from the live project. The source documents are `pre-brief.md` and `BRIEF.md`, and `VOCAB.md` defines the terms used here.
 
 Keywords: **must** means required for the phase to be done. **Should** means expected, but logged and deferred if it proves hard. **Later** means out of scope for the phase.
 
@@ -41,7 +41,8 @@ Decisions from earlier versions keep their numbers. Superseded ones say so.
 | D-25 | **Deterministic floating point** | Same input, recipe and seed still give the same bytes on every machine. Effect math uses IEEE f64 with basic operations only (`+ - * /`, `sqrt`, comparisons). No `sin`, `exp` or `pow` from the platform math library in sample loops, since those can differ by a last bit between systems; oscillators use our own polynomial sine. Per-effect `VERSION` and golden-hash tests stay. This replaces "integer math only (Q8)". |
 | D-26 | **Preview at screen resolution** | Live previews bend a screen-sized copy of the image, with sizes and delays scaled to match (section 9.2). Close to the export, not byte-identical. Exports always run at full resolution. This trades exact WYSIWYG for about 10-20 times less work per preview. |
 | D-27 | **CPU limits, no GPU** | No GPU: Audacity's echo and reverb feed back on themselves, so each sample depends on the previous one, which GPUs cannot speed up; GPU float results also vary by hardware, which would break D-25. Instead: screen-resolution previews (D-26), cancelling stale renders mid-way, capped slider ranges, and a preview time budget (section 9.2). |
-| D-28 | **Output is a normal image** | The glitched pixels are saved as PNG (default), uncompressed TIFF (for Photoshop masking), or JPEG (quality 95). There is no "glitched file itself" any more: the pixels *are* the result. |
+| D-28 | **Output is a normal image** | The glitched pixels are saved as uncompressed TIFF (default, for Phil's Photoshop masking), PNG, or JPEG (quality 95). There is no "glitched file itself" any more: the pixels *are* the result. |
+| D-29 | **Recipe-wide encoding** | A recipe sets `encoding` and `channels` once, like Audacity's import dialog; any step may override them. Claude's call, delegated by Phil. |
 
 ## 1. Goals and non-goals
 
@@ -110,8 +111,8 @@ Removed from the live tree (tag `archive/jpeg-bytes`): `formats/jpeg.rs`, `resta
 | Format | In | Out | Notes |
 | --- | --- | --- | --- |
 | JPEG | must | must | libjpeg-turbo. Output quality 95, 4:4:4. |
-| PNG | must | must (default) | 8- and 16-bit in; 16-bit is reduced to 8-bit (should: round, not truncate). Alpha is dropped. |
-| TIFF | must | must | Uncompressed, LZW and Deflate in; uncompressed RGB out, for Photoshop. 16-bit in is reduced to 8-bit. |
+| PNG | must | must | 8- and 16-bit in; 16-bit is reduced to 8-bit (should: round, not truncate). Alpha is dropped. |
+| TIFF | must | must (default) | Uncompressed, LZW and Deflate in; uncompressed RGB out, for Photoshop. 16-bit in is reduced to 8-bit. |
 | WebP, AVIF | later | later | Decode to raster; AVIF behind a feature flag (dav1d). |
 | DNG / camera RAW | later | no | rawler, demosaiced to 8-bit RGB. iPhone ProRAW (JPEG XL inside) to be verified. |
 
@@ -123,7 +124,7 @@ Removed from the live tree (tag `archive/jpeg-bytes`): `formats/jpeg.rs`, `resta
 
 ## 5. Sample encodings (Audacity "Import Raw Data")
 
-Each step has an `encoding` and `channels` parameter (D-23):
+The recipe sets `encoding` and `channels` once; any step may override them (D-23, D-29):
 
 | `encoding` | Bytes per sample | Character (from the 2026-11-21 contact sheets) |
 | --- | --- | --- |
@@ -192,7 +193,7 @@ glitchrx --info INPUT...     glitchrx --list     glitchrx serve ...
 Examples:
 
 ```
-glitchrx --echo photo.jpg                                writes photo-glitch.png
+glitchrx --echo photo.jpg                                writes photo-glitch.tif
 glitchrx --echo delay=0.33rows,decay=0.5,encoding=ulaw photo.jpg
 glitchrx --reverb --echo phase=1 photo.tif photo-bent.tif
 glitchrx --recipe moody.toml --batch *.jpg
@@ -203,7 +204,8 @@ glitchrx --recipe moody.toml --batch *.jpg
 | `--seed N` | Master seed. The default is random and is always printed. |
 | `--recipe FILE` | Apply a saved recipe instead of effect flags. |
 | `--save-recipe[=FILE]` | Write the recipe used. Default `<output-stem>.recipe.toml`. |
-| `--format png\|tiff\|jpeg` | Output format when OUTPUT is not given (default `png`); otherwise taken from OUTPUT's extension. |
+| `--format tiff\|png\|jpeg` | Output format when OUTPUT is not given (default `tiff`); otherwise taken from OUTPUT's extension. |
+| `--encoding E`, `--channels 1\|2` | Recipe-wide sample encoding and channel count (default `u8`, `1`). |
 | `--force` | Allow overwriting an existing output. Never the input. |
 | `--batch`, `--info`, `--list`, `-q`, `-v`, `--help` | As before. `--info` reports the format, size, orientation and colour profile. |
 
@@ -218,12 +220,14 @@ TOML, recipe `version = 2`. Version 1 recipes (JPEG byte mode) are refused with 
 ```toml
 format = "glitcharaxia-recipe"
 version = 2
+encoding = "u8"        # recipe-wide; a step may override
+channels = 1
 
 [[step]]
 effect = "echo"
 effect_version = 1
 seed = 81723
-encoding = "u8"
+encoding = "ulaw"       # this step only
 delay = "0.33rows"
 phase = 1
 decay = 0.5
@@ -236,7 +240,8 @@ region = "30%:100%"
 
 - Remove the Bands and Mode controls and the decode status.
 - Each step gets `encoding` and `channels` pickers; the effect list shows the Audacity counterpart.
-- Export offers PNG, TIFF and JPEG; "Save next to original" keeps the CLI naming.
+- A recipe-wide encoding picker, with per-step override.
+- Export offers TIFF (default), PNG and JPEG; "Save next to original" keeps the CLI naming.
 - Everything else (open, step stack, undo/redo, compare, recipes, browsing, token, layout, look) stays.
 
 ### 9.2 Preview performance
@@ -318,7 +323,6 @@ Dropped: header-safe (no compressed data is edited) and exact reversibility (D-2
 
 ## 14. Open items
 
-1. Default output format: PNG (smaller, lossless) or TIFF (matches the Photoshop workflow)? Draft says PNG.
-2. Default encoding: `u8`, unless the second round of contact sheets says otherwise.
-3. Whether a step's `encoding` should also be settable once for the whole recipe (as Audacity's import was), with per-step override.
-4. Preview fidelity threshold (9.2), to be set from measurements.
+1. Default encoding: `u8`, unless the second round of contact sheets says otherwise.
+2. Preview fidelity threshold (9.2), to be set from measurements.
+3. Resolved: TIFF is the default output (D-28); encoding is recipe-wide with per-step override (D-29); close-not-identical previews accepted (D-26).
