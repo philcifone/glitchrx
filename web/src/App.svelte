@@ -41,7 +41,21 @@
       app.redo();
     } else if (e.key === '\\' && !e.repeat) {
       app.compare(true);
+    } else if (app.masking && !mod && !e.altKey) {
+      maskKey(e);
     }
+  }
+
+  /** Painting shortcuts, Photoshop style: [ and ] size the brush. */
+  function maskKey(e: KeyboardEvent) {
+    const tools: Record<string, 'brush' | 'eraser' | 'linear' | 'radial'> = { b: 'brush', e: 'eraser', g: 'linear', r: 'radial' };
+    const k = e.key.toLowerCase();
+    if (k in tools) app.setTool({ tool: tools[k] });
+    else if (e.key === '[') app.setTool({ size: Math.max(0.005, Math.round(app.tool.size * 0.85 * 10000) / 10000) });
+    else if (e.key === ']') app.setTool({ size: Math.min(0.3, Math.round(app.tool.size * 1.18 * 10000) / 10000) });
+    else if (e.key === 'Escape' || e.key === 'Enter') app.stopMasking();
+    else return;
+    e.preventDefault();
   }
 
   function onKeyUp(e: KeyboardEvent) {

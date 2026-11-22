@@ -73,12 +73,34 @@ export interface ServerConfig {
  */
 export type Channels = 1 | 2 | 3;
 
+/** How a mask operation combines with the mask so far. */
+export type MaskMode = 'add' | 'subtract' | 'intersect';
+
+/**
+ * One mask operation (see crates/glitchrx-core/src/mask.rs). Positions are
+ * fractions of the picture (x of the width, y of the height); sizes are
+ * fractions of its longer side.
+ */
+export type MaskOp =
+  | { shape: 'stroke'; mode: MaskMode; size: number; hardness: number; points: number[] }
+  | { shape: 'linear' | 'radial'; mode: MaskMode; from: [number, number]; to: [number, number] }
+  | { shape: 'brightness'; mode: MaskMode; low: number; high: number; soft: number };
+
+/** Where a step's result shows. The server omits empty and default fields. */
+export interface Mask {
+  invert?: boolean;
+  feather?: number;
+  op?: MaskOp[];
+}
+
 /** A step as sent to the server. Seeds are strings: they are full u64s. */
 export interface StepDto {
   effect: string;
   effect_version?: number;
   seed: string;
+  /** Effect parameters, plus the step keys encoding, channels and opacity. */
   params: Record<string, string>;
+  mask?: Mask;
 }
 
 export interface RecipeDto {

@@ -1,9 +1,11 @@
 <script lang="ts">
   // The preview stage: shows the latest render (or the original while
   // comparing), reports its size to the app, draws the region band while
-  // one is dragged, and hosts the compare and exact buttons.
+  // one is dragged, hosts the compare and exact buttons, and the mask
+  // painter while a step's mask is being painted.
   import { onMount } from 'svelte';
   import { app } from '../lib/app.svelte';
+  import MaskPainter from './MaskPainter.svelte';
 
   let { onopen }: { onopen: () => void } = $props();
   let box: HTMLDivElement;
@@ -35,6 +37,12 @@
     app.compare(true);
   }
   const release = () => app.compare(false);
+
+  /** The step being painted, for the pill's label. */
+  const maskStep = $derived.by(() => {
+    const i = app.recipe.steps.findIndex((s) => s.uid === app.masking);
+    return i < 0 ? null : { n: i + 1, step: app.recipe.steps[i] };
+  });
 </script>
 
 <div class="box" bind:this={box}>
@@ -63,6 +71,15 @@
         <div class="shade" style:top="{r.e}%" style:bottom="0"></div>
       </div>
     {/if}
+    {#if app.masking && !app.comparing && maskStep}
+      <MaskPainter {rect} />
+      <div class="masking" role="status">
+        <span>
+          Masking step {maskStep.n}{maskStep.step.enabled ? '' : ' (off)'}: {maskStep.step.effect}
+        </span>
+        <button class="primary" onclick={() => app.stopMasking()}>Done</button>
+      </div>
+    {/if}
   {:else if !app.doc}
     <div class="empty">
       <p>Open a photo to start: JPEG, PNG or TIFF.</p>
@@ -76,7 +93,7 @@
   {#if app.busy || app.working}
     <div class="progress" aria-hidden="true"></div>
   {/if}
-  {#if app.working}
+  {#if app.working && !app.masking}
     <div class="working" role="status">{app.working}</div>
   {:else if app.heavy}
     <div class="working heavy" role="status">
@@ -173,7 +190,8 @@
   /* Floating "glass" elements over the photo: blurred, rounded pills. */
   .working,
   .exact,
-  .compare {
+  .compare,
+  .masking {
     background: var(--glass);
     backdrop-filter: saturate(180%) blur(16px);
     -webkit-backdrop-filter: saturate(180%) blur(16px);
@@ -189,6 +207,33 @@
     padding: 6px 14px;
     font-size: 0.9rem;
     white-space: nowrap;
+  }
+
+  /* While painting a mask: what is being painted, and the way out. */
+  .masking {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 4px 4px 14px;
+    max-width: calc(100% - 24px);
+    font-size: 0.9rem;
+    white-space: nowrap;
+    z-index: 2;
+  }
+
+  .masking span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .masking button {
+    border-radius: 999px;
+    min-height: 30px;
+    flex: none;
   }
 
   /* Region band: shade outside it, thin accent edges along it. */

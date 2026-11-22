@@ -119,6 +119,23 @@ export async function preview(
   };
 }
 
+/**
+ * A step's mask at preview size, as a PNG of `tint` with the mask as alpha,
+ * for laying over the preview. `step` counts the steps sent, from 0.
+ */
+export async function maskView(
+  docId: string,
+  recipe: RecipeDto,
+  step: number,
+  maxW: number,
+  maxH: number,
+  tint: [number, number, number],
+): Promise<Blob> {
+  const res = await postJson(`/api/docs/${docId}/mask`, { recipe, step, max_w: maxW, max_h: maxH, tint });
+  if (!res.ok) await fail(res);
+  return res.blob();
+}
+
 /** Full-resolution export; returns the file and its suggested name. */
 export async function exportFile(
   docId: string,
