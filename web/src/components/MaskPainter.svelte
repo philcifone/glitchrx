@@ -1,8 +1,12 @@
 <script lang="ts">
-  // Editing a step's mask on the preview. Sits exactly over the shown
-  // image: the server's mask overlay at the bottom, a canvas of fresh brush
-  // strokes above it, and a canvas of handles on top, which takes the
-  // gestures.
+  // Editing a step's mask on the preview. Covers the stage: the server's
+  // mask overlay laid over the picture at the bottom, a canvas of fresh
+  // brush strokes above it, and a canvas of handles on top. The canvases
+  // are the size of the stage, not the picture, so strokes and handles stay
+  // sharp, and handles finger-sized, at any zoom.
+  //
+  // The preview owns the gestures (two fingers always pinch and pan) and
+  // hands this component the one-finger ones: down, move, up, cancel.
   //
   // What a gesture does depends on the active component (app.activeOp):
   // - brush: paint or erase a stroke, sent when released. The local drawing
@@ -13,12 +17,28 @@
   //   preview keeps up, and the release is one undo step.
   // Linears and radials that are not active show a pin; tapping a pin makes
   // that component active.
+  //
+  // The brush is sized against the screen, as in Procreate: zoomed in, the
+  // same setting paints a finer line on the photo. The size setting is its
+  // size at fit.
   import { app } from '../lib/app.svelte';
   import { MASK_TINT, addPoint, dragEnds, grab, grabHandle, pinOf, roundCoord, type Grab } from '../lib/mask';
   import type { MaskOp, Stroke } from '../lib/types';
 
-  let { rect }: { rect: { x: number; y: number; w: number; h: number } } = $props();
+  let {
+    rect,
+    stage,
+    cursor: cursorStyle = $bindable('default'),
+  }: {
+    /** Where the picture is drawn on the stage (it may reach past the edges). */
+    rect: { x: number; y: number; w: number; h: number };
+    /** The stage's size, in CSS pixels. */
+    stage: { w: number; h: number };
+    /** The mouse cursor the stage should show. */
+    cursor?: string;
+  } = $props();
 
+  let root = $state<HTMLDivElement>();
   let paint = $state<HTMLCanvasElement>();
   let guides = $state<HTMLCanvasElement>();
   const dpr = window.devicePixelRatio || 1;
@@ -53,14 +73,24 @@
   let hover = $state<Grab | 'pin' | null>(null);
 
   const long = $derived(Math.max(rect.w, rect.h));
+  /** The brush's size on the photo: its setting, shrunk by the zoom. */
+  const brushSize = $derived(app.tool.size / app.view.z);
 
-  // Keep both canvases' backing stores at device resolution.
+  // Keep both canvases' backing stores at device resolution. Only a new
+  // stage size reallocates them; zooming and panning just redraw.
   $effect(() => {
     for (const c of [paint, guides]) {
       if (!c) continue;
-      c.width = Math.max(1, Math.round(rect.w * dpr));
-      c.height = Math.max(1, Math.round(rect.h * dpr));
+      c.width = Math.max(1, Math.round(stage.w * dpr));
+      c.height = Math.max(1, Math.round(stage.h * dpr));
     }
+    redrawStrokes();
+    redrawGuides();
+  });
+
+  // The picture moved (zoom or pan): draw everything where it now is.
+  $effect(() => {
+    void [rect.x, rect.y, rect.w, rect.h];
     redrawStrokes();
     redrawGuides();
   });
@@ -88,14 +118,17 @@
   function redrawStrokes() {
     const ctx = paint?.getContext('2d');
     if (!ctx || !paint) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, paint.width, paint.height);
+    // Device pixels, with the picture's top-left corner at the origin.
+    ctx.translate(rect.x * dpr, rect.y * dpr);
     for (const p of pending) drawStroke(ctx, p.stroke);
     if (live) drawStroke(ctx, live);
   }
 
   function drawStroke(ctx: CanvasRenderingContext2D, s: Stroke) {
-    const W = paint!.width;
-    const H = paint!.height;
+    const W = rect.w * dpr;
+    const H = rect.h * dpr;
     const L = Math.max(W, H);
     const color = s.erase ? ERASE : PAINT;
     ctx.strokeStyle = color;
@@ -121,6 +154,7 @@
     ctx.clearRect(0, 0, guides.width, guides.height);
     ctx.save();
     ctx.scale(dpr, dpr); // draw in CSS pixels
+    ctx.translate(rect.x, rect.y); // from the picture's top-left corner
     ctx.shadowColor = SHADOW;
     ctx.shadowBlur = 3;
     for (const s of shapes) {
@@ -202,17 +236,26 @@
 
   /** Hit tolerance: fingers are bigger than mouse pointers. */
   const tolerance = (e: PointerEvent) => (e.pointerType === 'touch' ? 22 : 10);
-  const at = (e: PointerEvent): [number, number] => [e.offsetX, e.offsetY];
+  /** The stage point of an event. */
+  function onStage(e: PointerEvent): { x: number; y: number } {
+    const b = root!.getBoundingClientRect();
+    return { x: e.clientX - b.left, y: e.clientY - b.top };
+  }
+  /** The event's position from the picture's top-left corner, in CSS pixels. */
+  function at(e: PointerEvent): [number, number] {
+    const p = onStage(e);
+    return [p.x - rect.x, p.y - rect.y];
+  }
 
-  function down(e: PointerEvent) {
-    if (e.button !== 0 || !uid) return;
-    guides!.setPointerCapture(e.pointerId);
+  /** A finger or the mouse button went down on the stage. */
+  export function down(e: PointerEvent) {
+    if (e.button !== 0 || !uid || !root) return;
     const p = at(e);
     const tol = tolerance(e);
     if (active?.shape === 'brush') {
       live = {
         ...(app.tool.tool === 'erase' ? { erase: true } : {}),
-        size: app.tool.size,
+        size: roundSize(brushSize),
         hardness: app.tool.hardness,
         points: [roundCoord(p[0] / rect.w), roundCoord(p[1] / rect.h)],
       };
@@ -232,10 +275,13 @@
     drag = { index: app.activeOp, grabbed, start: p, from: [...active.from], to: [...active.to], moved: false };
   }
 
-  function move(e: PointerEvent) {
+  /** A move, with or without a button down (the mouse shows the brush). */
+  export function move(e: PointerEvent) {
+    if (!root) return;
     const p = at(e);
     if (e.pointerType === 'mouse') {
-      cursor = { x: p[0], y: p[1] };
+      const s = onStage(e);
+      cursor = { x: s.x, y: s.y };
       if (!live && !drag) hover = hoverAt(p);
     }
     if (live) {
@@ -244,7 +290,8 @@
       const events = e.getCoalescedEvents?.() ?? [e];
       const minPx = Math.max(1.5, live.size * long * 0.1);
       for (const ev of events.length ? events : [e]) {
-        addPoint(live.points, ev.offsetX / rect.w, ev.offsetY / rect.h, minPx, rect.w, rect.h);
+        const [x, y] = at(ev);
+        addPoint(live.points, x / rect.w, y / rect.h, minPx, rect.w, rect.h);
       }
       redrawStrokes();
     } else if (drag && uid) {
@@ -256,7 +303,8 @@
     }
   }
 
-  function up(e: PointerEvent) {
+  export function up(e: PointerEvent) {
+    if (!root) return;
     if (live) {
       const stroke = live;
       live = null;
@@ -284,7 +332,8 @@
     }
   }
 
-  function cancel() {
+  /** The gesture ended without a release (a second finger came down, or the system took it). */
+  export function cancel() {
     live = null;
     redrawStrokes();
     if (drag?.moved && uid) app.updateMaskOp(uid, drag.index, { from: drag.from, to: drag.to }, false);
@@ -300,6 +349,19 @@
     return isShape(active) ? grab(active, p, rect.w, rect.h, 10) : null;
   }
 
+  /** The mouse left the stage. */
+  export function leave() {
+    cursor = null;
+  }
+
+  /** Strokes keep their size to 1/100,000 of the picture, as positions do. */
+  const roundSize = (v: number) => Math.max(0.00001, Math.round(v * 100000) / 100000);
+
+  // The stage shows the cursor (the canvases take no events themselves).
+  $effect(() => {
+    cursorStyle = brushy ? 'none' : hover ? CURSOR[hover] : 'default';
+  });
+
   const CURSOR: Record<Grab | 'pin', string> = {
     edge: 'grab',
     from: 'grab',
@@ -310,41 +372,42 @@
   };
 </script>
 
-<div class="painter" style:left="{rect.x}px" style:top="{rect.y}px" style:width="{rect.w}px" style:height="{rect.h}px">
+<div class="painter" bind:this={root}>
   {#if app.tool.show && app.maskUrl}
-    <img class="overlay" src={app.maskUrl} alt="" draggable="false" />
+    <img
+      class="overlay"
+      src={app.maskUrl}
+      alt=""
+      draggable="false"
+      style:left="{rect.x}px"
+      style:top="{rect.y}px"
+      style:width="{rect.w}px"
+      style:height="{rect.h}px"
+    />
   {/if}
   <canvas class="strokes" bind:this={paint}></canvas>
-  <canvas
-    bind:this={guides}
-    style:cursor={brushy ? 'none' : hover ? CURSOR[hover] : 'default'}
-    onpointerdown={down}
-    onpointermove={move}
-    onpointerup={up}
-    onpointercancel={cancel}
-    onpointerleave={() => (cursor = null)}
-    oncontextmenu={(e) => e.preventDefault()}
-    aria-label="Edit the mask"
-  ></canvas>
+  <canvas bind:this={guides} aria-label="Edit the mask"></canvas>
   {#if cursor && brushy}
     <div
       class="cursor"
       class:erase={app.tool.tool === 'erase'}
       style:left="{cursor.x}px"
       style:top="{cursor.y}px"
-      style:width="{app.tool.size * long}px"
-      style:height="{app.tool.size * long}px"
+      style:width="{brushSize * long}px"
+      style:height="{brushSize * long}px"
     ></div>
   {/if}
 </div>
 
 <style>
+  /* Covers the stage; the stage takes the gestures and passes them on. */
   .painter {
     position: absolute;
+    inset: 0;
     overflow: hidden;
+    pointer-events: none;
   }
 
-  .overlay,
   canvas {
     position: absolute;
     inset: 0;
@@ -353,8 +416,9 @@
   }
 
   .overlay {
+    position: absolute;
+    max-width: none;
     opacity: 0.45;
-    pointer-events: none;
     user-select: none;
     -webkit-user-select: none;
   }
@@ -364,11 +428,6 @@
   canvas.strokes {
     opacity: 0.5;
     pointer-events: none;
-  }
-
-  canvas {
-    touch-action: none;
-    -webkit-touch-callout: none;
   }
 
   .cursor {
