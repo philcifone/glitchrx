@@ -8,7 +8,7 @@
 //!
 //! ```toml
 //! format = "glitcharaxia-recipe"
-//! version = 2
+//! version = 3
 //! encoding = "u8"     # how steps read bytes as samples; a step may override
 //! channels = 1
 //!
@@ -17,9 +17,21 @@
 //! effect_version = 1
 //! seed = 81723
 //! encoding = "ulaw"   # this step only
+//! opacity = 0.8       # blend the result over the step's input
 //! delay = "0.33rows"
 //! decay = 0.5
+//!
+//! [step.mask]         # optional: where the result shows (see `mask`)
+//! feather = 0.01
+//!
+//! [[step.mask.op]]
+//! shape = "stroke"
+//! size = 0.05
+//! points = [0.2, 0.4, 0.3, 0.45]
 //! ```
+//!
+//! Version 3 added `opacity` and `mask`; version 2 recipes load unchanged
+//! (they have neither) and are written back as version 3.
 
 use std::collections::BTreeMap;
 
@@ -27,6 +39,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::effects::{self, Effect, EffectInfo, Group, Window};
 use crate::error::{Error, Result};
+use crate::mask::{self, Mask};
 use crate::params::{Params, Units, parse_list};
 use crate::placement::{Placement, hit_rng};
 use crate::raster::Raster;
@@ -36,12 +49,13 @@ use crate::samples::Encoding;
 /// Magic string identifying a recipe file.
 pub const FORMAT: &str = "glitcharaxia-recipe";
 /// Recipe file format version.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
-/// Step keys that are not effect parameters but per-step overrides of the
-/// recipe's sample format.
+/// Step keys that are not effect parameters: per-step overrides of the
+/// recipe's sample format, and how strongly the result is blended in.
 const ENCODING_KEY: &str = "encoding";
 const CHANNELS_KEY: &str = "channels";
+const OPACITY_KEY: &str = "opacity";
 
 /// A render that can be abandoned: called between hits and between blocks
 /// of samples; returning true stops the render with [`Error::Cancelled`].
@@ -61,6 +75,15 @@ fn parse_channels(s: &str) -> Result<usize> {
     }
 }
 
+fn parse_opacity(s: &str) -> Result<f64> {
+    match s.trim().parse::<f64>() {
+        Ok(v) if (0.0..=1.0).contains(&v) => Ok(v),
+        _ => Err(Error::Recipe(format!(
+            "opacity must be a number from 0 to 1, not `{s}`"
+        ))),
+    }
+}
+
 /// One effect application.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Step {
@@ -72,6 +95,9 @@ pub struct Step {
     /// `channels` overrides.
     #[serde(flatten, with = "param_values")]
     pub params: BTreeMap<String, String>,
+    /// Where the result shows; none means everywhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask: Option<Mask>,
 }
 
 impl Step {
@@ -83,6 +109,7 @@ impl Step {
             effect_version: info.version,
             seed,
             params: parse_list(effect, params)?,
+            mask: None,
         };
         // Validate now, not halfway through a batch.
         step.prepare(Encoding::default(), 1)?;
@@ -115,6 +142,15 @@ impl Step {
             .transpose()
     }
 
+    /// How strongly the result is blended over the step's input, 0..1.
+    pub fn opacity(&self) -> Result<f64> {
+        self.params
+            .get(OPACITY_KEY)
+            .map(|o| parse_opacity(o).map_err(|err| self.param_error(err)))
+            .transpose()
+            .map(|o| o.unwrap_or(1.0))
+    }
+
     fn param_error(&self, err: Error) -> Error {
         let msg = match err {
             Error::Recipe(m) => m,
@@ -138,9 +174,14 @@ impl Step {
         }
         let encoding = self.encoding()?.unwrap_or(encoding);
         let channels = self.channels()?.unwrap_or(channels);
+        let opacity = self.opacity()?;
+        if let Some(m) = &self.mask {
+            m.validate().map_err(|err| self.param_error(err))?;
+        }
         let mut given = self.params.clone();
         given.remove(ENCODING_KEY);
         given.remove(CHANNELS_KEY);
+        given.remove(OPACITY_KEY);
         let params = Params::new(info.id, &info.all_params(), &given)?;
         let effect = (info.build)(&params)?;
         Ok(Prepared {
@@ -150,6 +191,8 @@ impl Step {
             seed: self.seed,
             encoding,
             channels,
+            opacity,
+            mask: self.mask.clone(),
         })
     }
 }
@@ -162,9 +205,17 @@ pub struct Prepared {
     pub seed: u64,
     pub encoding: Encoding,
     pub channels: usize,
+    /// Blend of the result over the step's input (1 = all of it).
+    pub opacity: f64,
+    pub mask: Option<Mask>,
 }
 
 impl Prepared {
+    /// True if the result is blended over the input rather than kept whole.
+    pub fn blends(&self) -> bool {
+        self.mask.is_some() || self.opacity < 1.0
+    }
+
     /// Bytes per frame (one sample for each channel). Pixel effects work on
     /// whole pixels, so for them a frame is one pixel, and windows (which
     /// are whole frames from the start of the raster) cover whole pixels.
@@ -176,8 +227,24 @@ impl Prepared {
         }
     }
 
-    /// Apply this step to raster bytes measured by `units`.
+    /// Apply this step to raster bytes measured by `units`, then blend the
+    /// result over the input through the mask and opacity, if any.
     pub fn apply(&self, bytes: &mut [u8], units: &Units, cancel: Cancel<'_>) -> Result<()> {
+        if !self.blends() {
+            return self.run(bytes, units, cancel);
+        }
+        let before = bytes.to_vec();
+        self.run(bytes, units, cancel)?;
+        let coverage = match &self.mask {
+            Some(m) => Some(m.render(units.width, units.height, &before, cancel)?),
+            None => None,
+        };
+        mask::composite(&before, bytes, coverage.as_deref(), self.opacity);
+        Ok(())
+    }
+
+    /// The effect alone, window by window.
+    fn run(&self, bytes: &mut [u8], units: &Units, cancel: Cancel<'_>) -> Result<()> {
         assert_eq!(
             bytes.len(),
             units.len(),
@@ -261,7 +328,7 @@ impl Recipe {
             )));
         }
         match raw.get("version").and_then(|v| v.as_integer()) {
-            Some(2) => {}
+            Some(2 | 3) => {}
             Some(1) => {
                 return Err(Error::Recipe(
                     "version 1 recipes are for the JPEG byte engine, which was retired; \
@@ -272,7 +339,9 @@ impl Recipe {
             Some(v) => return Err(Error::Recipe(format!("unsupported recipe version {v}"))),
             None => return Err(Error::Recipe("missing `version`".into())),
         }
-        let r: Recipe = toml::from_str(text).map_err(|e| Error::Recipe(e.to_string()))?;
+        let mut r: Recipe = toml::from_str(text).map_err(|e| Error::Recipe(e.to_string()))?;
+        // Version 2 is a subset of 3; from here on it is a version 3 recipe.
+        r.version = VERSION;
         r.validate()?;
         Ok(r)
     }
@@ -383,7 +452,7 @@ mod tests {
         r.steps
             .push(Step::new("backwards", "channels=1", 5).unwrap());
         let text = r.to_toml();
-        assert!(text.contains("version = 2"), "{text}");
+        assert!(text.contains("version = 3"), "{text}");
         assert!(text.contains("encoding = \"s16le\""), "{text}");
         assert!(text.contains("encoding = \"ulaw\""), "{text}");
         assert!(text.contains("decay = 0.7"), "{text}");
@@ -440,5 +509,80 @@ mod tests {
         assert!(matches!(err, Err(Error::Cancelled)));
         r.apply(&mut raster).unwrap();
         assert!(raster.bytes.iter().all(|&b| b == 255));
+    }
+
+    fn masked_invert() -> Step {
+        use crate::mask::{MaskOp, Mode};
+        let mut s = Step::new("invert", "hits=0,opacity=0.5", 1).unwrap();
+        s.mask = Some(Mask {
+            invert: false,
+            feather: 0.0,
+            ops: vec![MaskOp::Linear {
+                mode: Mode::Add,
+                from: [0.0, 0.0],
+                to: [0.0, 0.0],
+            }],
+        });
+        s
+    }
+
+    #[test]
+    fn masks_and_opacity_round_trip_through_toml() {
+        use crate::mask::{MaskOp, Mode};
+        let mut r = Recipe::default();
+        let mut s = masked_invert();
+        let m = s.mask.as_mut().unwrap();
+        m.feather = 0.01;
+        m.ops.push(MaskOp::Stroke {
+            mode: Mode::Subtract,
+            size: 0.05,
+            hardness: 0.25,
+            points: vec![0.1, 0.2, 0.3, 0.4],
+        });
+        r.steps.push(s);
+        r.steps.push(Step::new("backwards", "", 2).unwrap());
+        let text = r.to_toml();
+        assert!(text.contains("[step.mask]"), "{text}");
+        assert!(text.contains("[[step.mask.op]]"), "{text}");
+        assert!(text.contains("shape = \"stroke\""), "{text}");
+        assert!(text.contains("opacity = 0.5"), "{text}");
+        assert_eq!(Recipe::from_toml(&text).unwrap(), r);
+    }
+
+    #[test]
+    fn version_2_recipes_still_load() {
+        let v2 = "format = \"glitcharaxia-recipe\"\nversion = 2\n\n[[step]]\n\
+                  effect = \"invert\"\neffect_version = 1\nseed = 3\n";
+        let r = Recipe::from_toml(v2).unwrap();
+        assert_eq!(r.version, VERSION);
+        assert_eq!(r.steps[0].mask, None);
+        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 4")).is_err());
+    }
+
+    #[test]
+    fn a_mask_confines_the_step_and_opacity_softens_it() {
+        // The linear op with equal ends covers everything (1), so the whole
+        // picture is inverted at half opacity: 0 becomes 128 (127.5 rounds up).
+        let mut r = Recipe::default();
+        r.steps.push(masked_invert());
+        let mut raster = Raster::new(4, 2, vec![0; 24]);
+        r.apply(&mut raster).unwrap();
+        assert!(raster.bytes.iter().all(|&b| b == 128), "{:?}", raster.bytes);
+
+        // Inverted, the same mask hides the step entirely.
+        r.steps[0].mask.as_mut().unwrap().invert = true;
+        let mut raster = Raster::new(4, 2, vec![0; 24]);
+        r.apply(&mut raster).unwrap();
+        assert!(raster.bytes.iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn bad_opacity_and_masks_name_the_effect() {
+        let err = Step::new("invert", "opacity=2", 1).unwrap_err().to_string();
+        assert!(err.contains("invert") && err.contains("opacity"), "{err}");
+        let mut s = masked_invert();
+        s.mask.as_mut().unwrap().feather = -1.0;
+        let err = s.prepare(Encoding::U8, 1).err().unwrap().to_string();
+        assert!(err.contains("invert") && err.contains("feather"), "{err}");
     }
 }
