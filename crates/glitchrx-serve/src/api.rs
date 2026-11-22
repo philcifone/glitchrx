@@ -22,6 +22,7 @@ use glitchrx_core::{Error, Recipe};
 use serde::{Deserialize, Serialize};
 
 use crate::browse::{self, BrowseError};
+use crate::dialogs::Dialogs;
 use crate::docs::{Doc, Store, random_hex};
 use crate::dto::{self, DocDto, RecipeDto};
 use crate::render::{self, Format};
@@ -43,6 +44,8 @@ pub struct AppState {
     pub token: Option<String>,
     /// Time limit for a live preview; an exact preview gets ten times this.
     pub preview_budget: Duration,
+    /// Native file dialogs, when running inside the desktop app.
+    pub dialogs: Option<Arc<dyn Dialogs>>,
 }
 
 impl AppState {
@@ -52,7 +55,14 @@ impl AppState {
             root,
             token,
             preview_budget: PREVIEW_BUDGET,
+            dialogs: None,
         }
+    }
+
+    /// Enable the native Open and Save dialogs (the desktop app).
+    pub fn with_dialogs(mut self, dialogs: Arc<dyn Dialogs>) -> AppState {
+        self.dialogs = Some(dialogs);
+        self
     }
 }
 
@@ -70,6 +80,8 @@ pub fn router(state: AppState) -> Router {
         .route("/docs/{id}/preview", post(preview))
         .route("/docs/{id}/export", post(export))
         .route("/docs/{id}/save", post(save))
+        .route("/docs/{id}/save-as", post(save_as))
+        .route("/desktop/open", post(desktop_open))
         .route("/recipe/from-toml", post(recipe_from_toml))
         .route("/recipe/to-toml", post(recipe_to_toml))
         .route("/browse", get(browse_dir))
@@ -347,6 +359,8 @@ struct ConfigDto {
     max_preview_side: u32,
     /// Sample encodings for the encoding pickers.
     encodings: Vec<dto::EncodingDto>,
+    /// Running inside the desktop app: native Open and Save dialogs.
+    desktop: bool,
 }
 
 async fn config(State(st): State<Shared>) -> Json<ConfigDto> {
@@ -361,6 +375,7 @@ async fn config(State(st): State<Shared>) -> Json<ConfigDto> {
         }),
         max_preview_side: render::MAX_PREVIEW_SIDE,
         encodings: dto::encodings(),
+        desktop: st.dialogs.is_some(),
     })
 }
 
@@ -659,6 +674,106 @@ async fn save(
             saved.push(browse::relative(&root, &rpath));
         }
         Ok(Json(Saved { saved }))
+    })
+    .await
+}
+
+// ---------------------------------------------------------------------------
+// Desktop app: native dialogs
+
+fn dialogs(st: &AppState) -> ApiResult<Arc<dyn Dialogs>> {
+    st.dialogs
+        .clone()
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "only in the desktop app"))
+}
+
+/// The user closed a dialog without choosing: nothing to do.
+fn cancelled() -> Response {
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// Where dialogs start when there is no original to start next to.
+fn pictures_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let pictures = home.join("Pictures");
+    Some(if pictures.is_dir() { pictures } else { home })
+}
+
+/// Show the native Open dialog and open the chosen photo. Unlike
+/// `/docs/open`, the path is not confined to `--root`: the user picked it
+/// on their own machine.
+async fn desktop_open(State(st): State<Shared>) -> ApiResult<Response> {
+    let dialogs = dialogs(&st)?;
+    let st2 = st.clone();
+    blocking(move || {
+        let Some(path) = dialogs.pick_photo(pictures_dir().as_deref()) else {
+            return Ok(cancelled());
+        };
+        let bytes =
+            std::fs::read(&path).map_err(|e| ApiError::bad(format!("{}: {e}", path.display())))?;
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let doc = Doc::new(random_hex(8), name, Some(path), &bytes)?;
+        let doc = st2.store.insert(doc);
+        Ok(Json(doc_dto(&st2, &doc)).into_response())
+    })
+    .await
+}
+
+#[derive(Serialize)]
+struct SavedAs {
+    /// Full paths of the files written.
+    saved: Vec<String>,
+    /// Files not written, with the reason (a recipe file that exists).
+    skipped: Vec<String>,
+}
+
+/// Show the native Save dialog, suggesting the next free `-glitch` name
+/// next to the original, then render and write there. Replacing a file is
+/// allowed only because the dialog asked first; the original is never
+/// written. The recipe, if wanted, goes beside the image and is never
+/// replaced, since the dialog asked about the image only.
+async fn save_as(
+    State(st): State<Shared>,
+    Path(id): Path<String>,
+    Json(req): Json<ExportRequest>,
+) -> ApiResult<Response> {
+    let dialogs = dialogs(&st)?;
+    let doc = find(&st, &id)?;
+    let recipe = req.recipe.to_recipe()?;
+    blocking(move || {
+        let ext = codec::Format::from(req.format).extension();
+        let (dir, name) = match &doc.source {
+            Some(src) => {
+                let suggested = auto_output(src, ext)
+                    .ok()
+                    .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                    .unwrap_or_else(|| export_name(&doc.name, req.format));
+                (src.parent().map(|p| p.to_path_buf()), suggested)
+            }
+            None => (pictures_dir(), export_name(&doc.name, req.format)),
+        };
+        let Some(out) = dialogs.save_as(dir.as_deref(), &name) else {
+            return Ok(cancelled());
+        };
+        // An uploaded photo has no file on disk; an empty path matches
+        // nothing, so only the "never the input" check is skipped.
+        let source = doc.source.clone().unwrap_or_default();
+        let bytes = export_bytes(&doc, &recipe, req.format)?;
+        write_output(&source, &out, &bytes, true)
+            .map_err(|e| ApiError::new(StatusCode::CONFLICT, e.to_string()))?;
+        let mut saved = vec![out.display().to_string()];
+        let mut skipped = Vec::new();
+        if req.with_recipe {
+            let rpath = out.with_extension("recipe.toml");
+            match write_output(&source, &rpath, recipe.to_toml().as_bytes(), false) {
+                Ok(()) => saved.push(rpath.display().to_string()),
+                Err(e) => skipped.push(e.to_string()),
+            }
+        }
+        Ok(Json(SavedAs { saved, skipped }).into_response())
     })
     .await
 }

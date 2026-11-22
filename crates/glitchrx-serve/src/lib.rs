@@ -12,10 +12,12 @@
 //! - [`render`]: preview decode/re-encode and full-resolution export
 //! - [`browse`]: listing photos under `--root`, confined to it
 //! - [`dto`]: the JSON shapes the frontend uses
+//! - [`dialogs`]: native file dialogs, supplied by the desktop app
 
 pub mod api;
 mod assets;
 pub mod browse;
+pub mod dialogs;
 pub mod docs;
 pub mod dto;
 pub mod render;
