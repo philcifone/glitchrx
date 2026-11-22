@@ -114,7 +114,7 @@ glitchrx serve --host 0.0.0.0 --token --root ~/Pictures   # from a phone over LA
 In the GUI:
 - **Open** a photo from your device (it is sent to your own server, nowhere else) or, with `--root`, from the server's folders.
 - **Pick the encoding** for the whole recipe (and mono or stereo) at the top. Any step can override both.
-- **Add steps** by tapping an effect in the palette. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
+- **Add steps** by tapping an effect in the palette, grouped into audio effects (echo, delay, reverb, amplify, stutter) and data effects (invert, bitcrush, backwards, shift, shuffle). On a phone the palette sits behind the floating + button. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
 - **Placement** (`region`, `hits`, `len`) is always shown on each step. Dragging the region's two handles shades the preview outside the band it covers.
 - **Shake** (the wand) rolls a step's own settings at random, within the useful range; placement and encoding stay. **Re-roll** (the dice) picks a new seed, which moves where hits land; it is greyed out when a step has nothing random (`hits=0`, except for `shuffle`).
 - **Hold "original"** (or the `\` key) to compare with the untouched photo.
