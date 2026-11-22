@@ -140,7 +140,7 @@ scripts/install-desktop.sh            # or: just install-desktop
 scripts/install-desktop.sh --remove   # or: just uninstall-desktop
 ```
 
-This builds the app and installs it for your user only: `~/.local/bin/glitchrx-desktop`, a launcher entry and icons under `~/.local/share`. `just desktop` runs a debug build instead, which prints its internal URL so you can open the same session in a browser's developer tools. macOS is planned.
+This builds the app and installs it for your user only: `~/.local/bin/glitchrx-desktop`, a launcher entry and icons under `~/.local/share`. `just desktop` runs a debug build instead, which prints its internal URL so you can open the same session in a browser's developer tools. macOS is planned; the build steps are in `docs/macos.md`.
 
 ## How it works
 
