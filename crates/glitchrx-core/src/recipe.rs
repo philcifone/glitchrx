@@ -22,12 +22,13 @@
 //! decay = 0.5
 //!
 //! [step.mask]         # optional: where the result shows (see `mask`)
-//! feather = 0.01
+//! invert = true
 //!
 //! [[step.mask.op]]
-//! shape = "stroke"
-//! size = 0.05
-//! points = [0.2, 0.4, 0.3, 0.45]
+//! shape = "radial"
+//! from = [0.5, 0.5]
+//! to = [0.7, 0.5]
+//! feather = 0.01
 //! ```
 //!
 //! Version 3 added `opacity` and `mask`; version 2 recipes load unchanged
@@ -512,43 +513,50 @@ mod tests {
     }
 
     fn masked_invert() -> Step {
-        use crate::mask::{MaskOp, Mode};
+        use crate::mask::{MaskOp, Mode, Shape};
         let mut s = Step::new("invert", "hits=0,opacity=0.5", 1).unwrap();
         s.mask = Some(Mask {
             invert: false,
-            feather: 0.0,
-            ops: vec![MaskOp::Linear {
-                mode: Mode::Add,
-                from: [0.0, 0.0],
-                to: [0.0, 0.0],
-            }],
+            ops: vec![MaskOp::new(
+                Shape::Linear {
+                    from: [0.0, 0.0],
+                    to: [0.0, 0.0],
+                },
+                Mode::Add,
+            )],
         });
         s
     }
 
     #[test]
     fn masks_and_opacity_round_trip_through_toml() {
-        use crate::mask::{MaskOp, Mode, Stroke};
+        use crate::mask::{MaskOp, Mode, Shape, Stroke};
         let mut r = Recipe::default();
         let mut s = masked_invert();
         let m = s.mask.as_mut().unwrap();
-        m.feather = 0.01;
-        m.ops.push(MaskOp::Brush {
-            mode: Mode::Subtract,
-            strokes: vec![
-                Stroke {
-                    erase: false,
-                    size: 0.05,
-                    hardness: 0.25,
-                    points: vec![0.1, 0.2, 0.3, 0.4],
+        m.invert = true; // a mask-level key, so `[step.mask]` is written
+        m.ops.push(MaskOp {
+            opacity: 0.75,
+            feather: 0.01,
+            ..MaskOp::new(
+                Shape::Brush {
+                    strokes: vec![
+                        Stroke {
+                            erase: false,
+                            size: 0.05,
+                            hardness: 0.25,
+                            points: vec![0.1, 0.2, 0.3, 0.4],
+                        },
+                        Stroke {
+                            erase: true,
+                            size: 0.02,
+                            hardness: 0.5,
+                            points: vec![0.2, 0.3],
+                        },
+                    ],
                 },
-                Stroke {
-                    erase: true,
-                    size: 0.02,
-                    hardness: 0.5,
-                    points: vec![0.2, 0.3],
-                },
-            ],
+                Mode::Subtract,
+            )
         });
         r.steps.push(s);
         r.steps.push(Step::new("backwards", "", 2).unwrap());
@@ -558,6 +566,8 @@ mod tests {
         assert!(text.contains("shape = \"brush\""), "{text}");
         assert!(text.contains("[[step.mask.op.stroke]]"), "{text}");
         assert!(text.contains("erase = true"), "{text}");
+        assert!(text.contains("opacity = 0.75"), "{text}");
+        assert!(text.contains("feather = 0.01"), "{text}");
         assert!(text.contains("opacity = 0.5"), "{text}");
         assert_eq!(Recipe::from_toml(&text).unwrap(), r);
     }
@@ -594,7 +604,7 @@ mod tests {
         let err = Step::new("invert", "opacity=2", 1).unwrap_err().to_string();
         assert!(err.contains("invert") && err.contains("opacity"), "{err}");
         let mut s = masked_invert();
-        s.mask.as_mut().unwrap().feather = -1.0;
+        s.mask.as_mut().unwrap().ops[0].feather = -1.0;
         let err = s.prepare(Encoding::U8, 1).err().unwrap().to_string();
         assert!(err.contains("invert") && err.contains("feather"), "{err}");
     }

@@ -3,22 +3,24 @@
 //! A mask works like a layer mask in Photoshop: after a step runs, its
 //! result is blended over the step's input pixel by pixel, fully where the
 //! mask is 1, not at all where it is 0. Masks are stored in the recipe as a
-//! short list of operations, not as an image, so they are small, exact at
-//! any resolution, and replay from the command line:
+//! short list of components, not as an image, so they are small, exact at
+//! any resolution, and replay from the command line. A component's shape is
+//! one of:
 //!
 //! - **brush**: a set of brush strokes (paths of points with a size and
 //!   hardness); a stroke can also erase the brush's own paint;
 //! - **linear**: a gradient, 1 at `from` fading to 0 at `to`;
 //! - **radial**: a circle centred on `from` and reaching `to`, hard-edged
-//!   unless given a lower `hardness` (soften it with the mask's feather);
+//!   unless given a lower `hardness` (soften it with its feather);
 //! - **brightness**: the pixels whose brightness lies in a range, read from
 //!   the picture as it arrives at the step.
 //!
-//! Starting from an empty mask (nothing shows), each operation (a
-//! *component*, in the GUI) is combined in order with its `mode`: **add**
-//! paints toward 1 and **subtract** toward 0, as painting white or black onto
-//! a layer mask does, and **intersect** keeps only what the shape also
-//! covers. Then the whole mask may be inverted and feathered (blurred).
+//! Each component has its own **feather** (a blur of its edges) and
+//! **opacity** (how strongly it counts). Starting from an empty mask
+//! (nothing shows), the components are combined in order with their `mode`:
+//! **add** paints toward 1 and **subtract** toward 0, as painting white or
+//! black onto a layer mask does, and **intersect** keeps only what the shape
+//! also covers. Then the whole mask may be inverted.
 //!
 //! Each component stays separate, so any of them can be adjusted later: a
 //! brush's eraser only takes back that brush's own paint. To cut into
@@ -35,14 +37,14 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, Result};
 use crate::recipe::Cancel;
 
-/// How an operation combines with the mask so far.
+/// How a component combines with the mask so far.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Mode {
-    /// Paint toward 1: `m + v - m v` (the brush).
+    /// Paint toward 1: `m + v - m v`.
     #[default]
     Add,
-    /// Paint toward 0: `m (1 - v)` (the eraser).
+    /// Paint toward 0: `m (1 - v)`.
     Subtract,
     /// Keep only where the shape is too: `m v`.
     Intersect,
@@ -54,6 +56,22 @@ fn default_hardness() -> f64 {
 
 fn hard() -> f64 {
     1.0
+}
+
+fn one() -> f64 {
+    1.0
+}
+
+fn is_one(v: &f64) -> bool {
+    *v == 1.0
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+fn is_zero(v: &f64) -> bool {
+    *v == 0.0
 }
 
 /// One stroke of a brush.
@@ -71,12 +89,50 @@ pub struct Stroke {
     pub points: Vec<f64>,
 }
 
-/// One operation (component) of a mask. In a recipe file:
+/// The shape of a mask component. In a recipe file its name is the
+/// component's `shape` key, beside the component's own settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "shape", rename_all = "lowercase")]
+pub enum Shape {
+    /// Brush strokes, built up (and erased) on their own.
+    Brush {
+        #[serde(rename = "stroke", default, skip_serializing_if = "Vec::is_empty")]
+        strokes: Vec<Stroke>,
+    },
+    Linear {
+        from: [f64; 2],
+        to: [f64; 2],
+    },
+    /// A circle. Hard-edged by default, so the feather decides how soft it
+    /// is (Phil, 2026-11-22: "the feather should be what makes it fade"); a
+    /// lower `hardness` fades it toward the centre, like a brush.
+    Radial {
+        /// Centre.
+        from: [f64; 2],
+        /// A point on the edge.
+        to: [f64; 2],
+        #[serde(default = "hard")]
+        hardness: f64,
+    },
+    Brightness {
+        /// Brightness range that is fully on, 0..1.
+        low: f64,
+        high: f64,
+        /// Width of the fade on either side of the range.
+        #[serde(default)]
+        soft: f64,
+    },
+}
+
+/// One component of a mask: a shape and how it joins the rest. In a recipe
+/// file:
 ///
 /// ```toml
 /// [[step.mask.op]]
 /// shape = "brush"
 /// mode = "add"
+/// opacity = 0.8        # optional, default 1
+/// feather = 0.01       # optional, share of the longer side
 ///
 /// [[step.mask.op.stroke]]
 /// size = 0.06          # brush diameter, share of the longer side
@@ -89,75 +145,43 @@ pub struct Stroke {
 /// points = [0.24, 0.42]
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "shape", rename_all = "lowercase")]
-pub enum MaskOp {
-    /// Brush strokes, built up (and erased) on their own, then combined
-    /// with the mask as one shape.
-    Brush {
-        #[serde(default)]
-        mode: Mode,
-        #[serde(rename = "stroke", default, skip_serializing_if = "Vec::is_empty")]
-        strokes: Vec<Stroke>,
-    },
-    Linear {
-        #[serde(default)]
-        mode: Mode,
-        from: [f64; 2],
-        to: [f64; 2],
-    },
-    /// A circle. Hard-edged by default, so the mask's feather decides how
-    /// soft it is (Phil, 2026-11-22: "the feather should be what makes it
-    /// fade"); a lower `hardness` fades it toward the centre, like a brush.
-    Radial {
-        #[serde(default)]
-        mode: Mode,
-        /// Centre.
-        from: [f64; 2],
-        /// A point on the edge.
-        to: [f64; 2],
-        #[serde(default = "hard")]
-        hardness: f64,
-    },
-    Brightness {
-        #[serde(default)]
-        mode: Mode,
-        /// Brightness range that is fully on, 0..1.
-        low: f64,
-        high: f64,
-        /// Width of the fade on either side of the range.
-        #[serde(default)]
-        soft: f64,
-    },
+pub struct MaskOp {
+    // The shape's own keys sit beside the common ones (`flatten`), so a
+    // recipe reads `shape = "radial"`, `from`, `to`, `mode` at one level.
+    #[serde(flatten)]
+    pub shape: Shape,
+    #[serde(default)]
+    pub mode: Mode,
+    /// How strongly the component counts, 0..1: at 0.5 it does half of
+    /// what it would.
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub opacity: f64,
+    /// Blur of this component's edges, as a share of the longer side.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub feather: f64,
 }
 
 impl MaskOp {
-    pub fn mode(&self) -> Mode {
-        match self {
-            MaskOp::Brush { mode, .. }
-            | MaskOp::Linear { mode, .. }
-            | MaskOp::Radial { mode, .. }
-            | MaskOp::Brightness { mode, .. } => *mode,
+    /// A component at full opacity with no feather.
+    pub fn new(shape: Shape, mode: Mode) -> MaskOp {
+        MaskOp {
+            shape,
+            mode,
+            opacity: 1.0,
+            feather: 0.0,
         }
     }
 }
 
-fn is_false(b: &bool) -> bool {
-    !*b
-}
-
-fn is_zero(v: &f64) -> bool {
-    *v == 0.0
-}
-
-/// A step's mask.
+/// A step's mask. Unknown keys are refused, so a recipe from before
+/// feather moved onto each component fails loudly instead of rendering
+/// without its feather.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Mask {
     /// Swap shown and hidden: paint where the glitch should *not* be.
     #[serde(default, skip_serializing_if = "is_false")]
     pub invert: bool,
-    /// Blur of the finished mask (its edges), as a share of the longer side.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub feather: f64,
     #[serde(rename = "op", default, skip_serializing_if = "Vec::is_empty")]
     pub ops: Vec<MaskOp>,
 }
@@ -165,6 +189,8 @@ pub struct Mask {
 /// Limits that keep a hostile or broken recipe from eating the machine.
 const MAX_OPS: usize = 2000;
 const MAX_POINTS: usize = 400_000;
+/// Largest feather, as a share of the longer side.
+pub const MAX_FEATHER: f64 = 0.25;
 
 impl Mask {
     /// Check every value; a bad mask fails before any work.
@@ -174,16 +200,19 @@ impl Mask {
         // Positions may sit a little outside the picture (a stroke that
         // runs off the edge), but not absurdly far.
         let pos = |v: f64| v.is_finite() && (-4.0..=5.0).contains(&v);
-        if !(self.feather.is_finite() && (0.0..=0.25).contains(&self.feather)) {
-            return bad(format!("feather {} must be 0..0.25", self.feather));
-        }
         if self.ops.len() > MAX_OPS {
             return bad(format!("{} operations (at most {MAX_OPS})", self.ops.len()));
         }
         let mut points = 0;
         for op in &self.ops {
-            match op {
-                MaskOp::Brush { strokes, .. } => {
+            if !unit(op.opacity) {
+                return bad(format!("opacity {} must be 0..1", op.opacity));
+            }
+            if !(op.feather.is_finite() && (0.0..=MAX_FEATHER).contains(&op.feather)) {
+                return bad(format!("feather {} must be 0..{MAX_FEATHER}", op.feather));
+            }
+            match &op.shape {
+                Shape::Brush { strokes } => {
                     for Stroke {
                         size,
                         hardness,
@@ -203,14 +232,12 @@ impl Mask {
                         points += p.len() / 2;
                     }
                 }
-                MaskOp::Linear { from, to, .. } => {
+                Shape::Linear { from, to } => {
                     if !from.iter().chain(to).all(|&v| pos(v)) {
                         return bad("gradient ends must be near the picture".into());
                     }
                 }
-                MaskOp::Radial {
-                    from, to, hardness, ..
-                } => {
+                Shape::Radial { from, to, hardness } => {
                     if !from.iter().chain(to).all(|&v| pos(v)) {
                         return bad("circle centre and edge must be near the picture".into());
                     }
@@ -218,9 +245,7 @@ impl Mask {
                         return bad(format!("circle hardness {hardness} must be 0..1"));
                     }
                 }
-                MaskOp::Brightness {
-                    low, high, soft, ..
-                } => {
+                Shape::Brightness { low, high, soft } => {
                     if !(unit(*low) && unit(*high) && unit(*soft) && low <= high) {
                         return bad(format!(
                             "brightness range {low}..{high} (soft {soft}) must be 0..1, low first"
@@ -242,90 +267,108 @@ impl Mask {
         let mut m = vec![0f32; w * h];
         // Lengths are shares of the longer side, in this raster's pixels.
         let long = w.max(h) as f64;
+        // Each component's coverage is drawn on its own (so its feather
+        // blurs only its edges), then blended into the mask. One buffer,
+        // reused.
+        let mut c = vec![0f32; w * h];
         for op in &self.ops {
             if cancel() {
                 return Err(Error::Cancelled);
             }
-            match op {
-                MaskOp::Brush { mode, strokes } => brush(&mut m, w, h, *mode, long, strokes),
-                MaskOp::Linear { mode, from, to } => {
-                    let (a, d) = ends(from, to, w, h);
-                    let len2 = d.0 * d.0 + d.1 * d.1;
-                    each_pixel(&mut m, w, *mode, |px, py| {
-                        if len2 < 1e-9 {
-                            return 1.0;
-                        }
-                        let t = ((px - a.0) * d.0 + (py - a.1) * d.1) / len2;
-                        1.0 - t.clamp(0.0, 1.0)
-                    });
-                }
-                MaskOp::Radial {
-                    mode,
-                    from,
-                    to,
-                    hardness,
-                } => {
-                    let (a, d) = ends(from, to, w, h);
-                    let r = (d.0 * d.0 + d.1 * d.1).sqrt();
-                    let edge = edge_width(r, *hardness);
-                    each_pixel(&mut m, w, *mode, |px, py| {
-                        let (dx, dy) = (px - a.0, py - a.1);
-                        soft_edge(r, (dx * dx + dy * dy).sqrt(), edge)
-                    });
-                }
-                MaskOp::Brightness {
-                    mode,
-                    low,
-                    high,
-                    soft,
-                } => {
-                    let (low, high, soft) = (*low, *high, *soft);
-                    for (i, v) in m.iter_mut().enumerate() {
-                        let p = &input[i * 3..i * 3 + 3];
-                        let l =
-                            (0.2126 * p[0] as f64 + 0.7152 * p[1] as f64 + 0.0722 * p[2] as f64)
-                                / 255.0;
-                        let c = if soft > 0.0 {
-                            let up = ((l - (low - soft)) / soft).clamp(0.0, 1.0);
-                            let down = (((high + soft) - l) / soft).clamp(0.0, 1.0);
-                            up.min(down)
-                        } else if low <= l && l <= high {
-                            1.0
-                        } else {
-                            0.0
-                        };
-                        *v = combine(*v as f64, c, *mode) as f32;
+            c.fill(0.0);
+            coverage(&op.shape, &mut c, w, h, long, input);
+            // Three box blurs in a row approximate a Gaussian; a box of
+            // radius k three times has a standard deviation of about k.
+            let k = (op.feather * long).round() as usize;
+            if k > 0 {
+                for _ in 0..3 {
+                    if cancel() {
+                        return Err(Error::Cancelled);
                     }
+                    blur_rows(&mut c, w, h, k);
+                    blur_columns(&mut c, w, h, k);
                 }
             }
+            blend(&mut m, &c, op.mode, op.opacity);
         }
         if self.invert {
             for v in &mut m {
                 *v = 1.0 - *v;
             }
         }
-        // Three box blurs in a row approximate a Gaussian; a box of radius
-        // k three times has a standard deviation of about k.
-        let k = (self.feather * long).round() as usize;
-        if k > 0 {
-            for _ in 0..3 {
-                if cancel() {
-                    return Err(Error::Cancelled);
-                }
-                blur_rows(&mut m, w, h, k);
-                blur_columns(&mut m, w, h, k);
-            }
-        }
         Ok(m)
     }
 }
 
-/// Combine the mask so far with an operation's value at one pixel.
+/// Draw one shape's coverage (0..1 per pixel) into `c`, which starts at 0.
+fn coverage(shape: &Shape, c: &mut [f32], w: usize, h: usize, long: f64, input: &[u8]) {
+    match shape {
+        Shape::Brush { strokes } => brush(c, w, h, long, strokes),
+        Shape::Linear { from, to } => {
+            let (a, d) = ends(from, to, w, h);
+            let len2 = d.0 * d.0 + d.1 * d.1;
+            each_pixel(c, w, |px, py| {
+                if len2 < 1e-9 {
+                    return 1.0;
+                }
+                let t = ((px - a.0) * d.0 + (py - a.1) * d.1) / len2;
+                1.0 - t.clamp(0.0, 1.0)
+            });
+        }
+        Shape::Radial { from, to, hardness } => {
+            let (a, d) = ends(from, to, w, h);
+            let r = (d.0 * d.0 + d.1 * d.1).sqrt();
+            let edge = edge_width(r, *hardness);
+            each_pixel(c, w, |px, py| {
+                let (dx, dy) = (px - a.0, py - a.1);
+                soft_edge(r, (dx * dx + dy * dy).sqrt(), edge)
+            });
+        }
+        Shape::Brightness { low, high, soft } => {
+            let (low, high, soft) = (*low, *high, *soft);
+            for (i, v) in c.iter_mut().enumerate() {
+                let p = &input[i * 3..i * 3 + 3];
+                let l =
+                    (0.2126 * p[0] as f64 + 0.7152 * p[1] as f64 + 0.0722 * p[2] as f64) / 255.0;
+                *v = if soft > 0.0 {
+                    let up = ((l - (low - soft)) / soft).clamp(0.0, 1.0);
+                    let down = (((high + soft) - l) / soft).clamp(0.0, 1.0);
+                    up.min(down)
+                } else if low <= l && l <= high {
+                    1.0
+                } else {
+                    0.0
+                } as f32;
+            }
+        }
+    }
+}
+
+/// Combine the mask so far with a component's value at one pixel.
 fn combine(m: f64, v: f64, mode: Mode) -> f64 {
     match mode {
         Mode::Add => m + v - m * v,
         Mode::Subtract => m * (1.0 - v),
         Mode::Intersect => m * v,
+    }
+}
+
+/// Blend a component's coverage `c` into the mask `m` with its mode, scaled
+/// by its opacity: the mask moves `opacity` of the way from where it was to
+/// where the full combination would take it. For add and subtract that is
+/// the same as scaling the coverage; for intersect it lets an opacity below
+/// 1 limit only partly, instead of darkening everything.
+fn blend(m: &mut [f32], c: &[f32], mode: Mode, opacity: f64) {
+    for (mv, &cv) in m.iter_mut().zip(c) {
+        let (a, v) = (*mv as f64, cv as f64);
+        let full = combine(a, v, mode);
+        // At full opacity, exactly the combination (no rounding detour).
+        let out = if opacity == 1.0 {
+            full
+        } else {
+            a + (full - a) * opacity
+        };
+        *mv = out as f32;
     }
 }
 
@@ -350,11 +393,11 @@ fn ends(from: &[f64; 2], to: &[f64; 2], w: usize, h: usize) -> ((f64, f64), (f64
     (a, (to[0] * w - a.0, to[1] * h - a.1))
 }
 
-/// Apply `f(x, y)` (pixel centres) to every pixel with `mode`.
-fn each_pixel(m: &mut [f32], w: usize, mode: Mode, f: impl Fn(f64, f64) -> f64) {
-    for (i, v) in m.iter_mut().enumerate() {
+/// Set every pixel to `f(x, y)` (pixel centres).
+fn each_pixel(c: &mut [f32], w: usize, f: impl Fn(f64, f64) -> f64) {
+    for (i, v) in c.iter_mut().enumerate() {
         let (x, y) = ((i % w) as f64 + 0.5, (i / w) as f64 + 0.5);
-        *v = combine(*v as f64, f(x, y), mode) as f32;
+        *v = f(x, y) as f32;
     }
 }
 
@@ -368,15 +411,6 @@ struct Rect {
 }
 
 impl Rect {
-    fn union(self, o: Rect) -> Rect {
-        Rect {
-            x0: self.x0.min(o.x0),
-            y0: self.y0.min(o.y0),
-            x1: self.x1.max(o.x1),
-            y1: self.y1.max(o.y1),
-        }
-    }
-
     fn width(self) -> usize {
         self.x1 - self.x0
     }
@@ -456,48 +490,22 @@ fn stroke_coverage(pts: &[(f64, f64)], radius: f64, hardness: f64, rect: Rect) -
     cov
 }
 
-/// Paint a brush component: its strokes are built up (and erased) on their
-/// own, inside the brush's bounding box, and the result is combined with
-/// the mask once, with the brush's `mode`.
-fn brush(m: &mut [f32], w: usize, h: usize, mode: Mode, long: f64, strokes: &[Stroke]) {
-    let shapes: Vec<_> = strokes
-        .iter()
-        .filter_map(|s| {
-            let (pts, radius) = stroke_geometry(s, w, h, long);
-            stroke_rect(&pts, radius, w, h).map(|r| (s, pts, radius, r))
-        })
-        .collect();
-    let rect = shapes.iter().map(|s| s.3).reduce(Rect::union);
-
-    if mode == Mode::Intersect {
-        // Outside the brush its coverage is 0, which clears the mask there.
-        for (i, v) in m.iter_mut().enumerate() {
-            let (x, y) = (i % w, i / w);
-            let inside = rect.is_some_and(|r| x >= r.x0 && x < r.x1 && y >= r.y0 && y < r.y1);
-            if !inside {
-                *v = 0.0;
-            }
-        }
-    }
-    let Some(rect) = rect else { return };
-    let bw = rect.width();
-    let mut cov = vec![0f32; bw * (rect.y1 - rect.y0)];
-    for (s, pts, radius, r) in &shapes {
-        let one = stroke_coverage(pts, *radius, s.hardness, *r);
+/// A brush's coverage: its strokes in order, each painted (or erased) on
+/// the brush's own layer, touching only the pixels it can reach.
+fn brush(c: &mut [f32], w: usize, h: usize, long: f64, strokes: &[Stroke]) {
+    for s in strokes {
+        let (pts, radius) = stroke_geometry(s, w, h, long);
+        let Some(r) = stroke_rect(&pts, radius, w, h) else {
+            continue;
+        };
+        let one = stroke_coverage(&pts, radius, s.hardness, r);
         let how = if s.erase { Mode::Subtract } else { Mode::Add };
         for y in r.y0..r.y1 {
             for x in r.x0..r.x1 {
                 let v = one[(y - r.y0) * r.width() + (x - r.x0)] as f64;
-                let c = &mut cov[(y - rect.y0) * bw + (x - rect.x0)];
-                *c = combine(*c as f64, v, how) as f32;
+                let i = y * w + x;
+                c[i] = combine(c[i] as f64, v, how) as f32;
             }
-        }
-    }
-    for y in rect.y0..rect.y1 {
-        for x in rect.x0..rect.x1 {
-            let v = cov[(y - rect.y0) * bw + (x - rect.x0)] as f64;
-            let i = y * w + x;
-            m[i] = combine(m[i] as f64, v, mode) as f32;
         }
     }
 }
@@ -586,6 +594,17 @@ mod tests {
         m[y * w + x]
     }
 
+    fn render(mask: &Mask, w: usize, h: usize) -> Vec<f32> {
+        mask.render(w, h, &grey(w, h, 0), NEVER).unwrap()
+    }
+
+    fn masked(ops: Vec<MaskOp>) -> Mask {
+        Mask {
+            ops,
+            ..Mask::default()
+        }
+    }
+
     /// A hard-edged single-point stroke.
     fn dab(erase: bool, x: f64, y: f64, size: f64) -> Stroke {
         Stroke {
@@ -598,44 +617,62 @@ mod tests {
 
     /// A brush component with one dab.
     fn dot(mode: Mode, x: f64, y: f64, size: f64) -> MaskOp {
-        MaskOp::Brush {
+        MaskOp::new(
+            Shape::Brush {
+                strokes: vec![dab(false, x, y, size)],
+            },
             mode,
-            strokes: vec![dab(false, x, y, size)],
-        }
+        )
+    }
+
+    fn circle(mode: Mode, from: [f64; 2], to: [f64; 2]) -> MaskOp {
+        MaskOp::new(
+            Shape::Radial {
+                from,
+                to,
+                hardness: 1.0,
+            },
+            mode,
+        )
+    }
+
+    /// On (1) left of x = 0.5, off right of it: a linear gradient squeezed
+    /// to a step.
+    fn left_half() -> MaskOp {
+        MaskOp::new(
+            Shape::Linear {
+                from: [0.5, 0.0],
+                to: [0.5001, 0.0],
+            },
+            Mode::Add,
+        )
     }
 
     #[test]
     fn empty_mask_hides_everything_and_invert_shows_it() {
-        let m = Mask::default().render(4, 4, &grey(4, 4, 0), NEVER).unwrap();
-        assert!(m.iter().all(|&v| v == 0.0));
+        assert!(render(&Mask::default(), 4, 4).iter().all(|&v| v == 0.0));
         let inv = Mask {
             invert: true,
             ..Mask::default()
         };
-        assert!(
-            inv.render(4, 4, &grey(4, 4, 0), NEVER)
-                .unwrap()
-                .iter()
-                .all(|&v| v == 1.0)
-        );
+        assert!(render(&inv, 4, 4).iter().all(|&v| v == 1.0));
     }
 
     #[test]
     fn a_stroke_covers_its_path_and_nothing_else() {
         // A horizontal stroke across the middle of a 40 x 20 raster.
-        let mask = Mask {
-            ops: vec![MaskOp::Brush {
-                mode: Mode::Add,
+        let mask = masked(vec![MaskOp::new(
+            Shape::Brush {
                 strokes: vec![Stroke {
                     erase: false,
                     size: 0.1, // 4 px wide
                     hardness: 1.0,
                     points: vec![0.1, 0.5, 0.9, 0.5],
                 }],
-            }],
-            ..Mask::default()
-        };
-        let m = mask.render(40, 20, &grey(40, 20, 0), NEVER).unwrap();
+            },
+            Mode::Add,
+        )]);
+        let m = render(&mask, 40, 20);
         assert_eq!(at(&m, 40, 20, 10), 1.0);
         assert_eq!(at(&m, 40, 20, 2), 0.0);
         assert_eq!(at(&m, 40, 1, 10), 0.0);
@@ -644,16 +681,10 @@ mod tests {
     #[test]
     fn the_eraser_takes_back_its_own_brush_only() {
         // A radial underneath, then a brush whose eraser crosses both.
-        let mask = Mask {
-            ops: vec![
-                MaskOp::Radial {
-                    mode: Mode::Add,
-                    from: [0.25, 0.5],
-                    to: [0.4, 0.5],
-                    hardness: 1.0,
-                },
-                MaskOp::Brush {
-                    mode: Mode::Add,
+        let mask = masked(vec![
+            circle(Mode::Add, [0.25, 0.5], [0.4, 0.5]),
+            MaskOp::new(
+                Shape::Brush {
                     strokes: vec![
                         dab(false, 0.75, 0.5, 0.5),
                         // An erase line through both shapes.
@@ -665,10 +696,10 @@ mod tests {
                         },
                     ],
                 },
-            ],
-            ..Mask::default()
-        };
-        let m = mask.render(40, 20, &grey(40, 20, 0), NEVER).unwrap();
+                Mode::Add,
+            ),
+        ]);
+        let m = render(&mask, 40, 20);
         assert_eq!(at(&m, 40, 30, 10), 0.0, "the brush's own paint is erased");
         assert_eq!(at(&m, 40, 30, 5), 1.0, "the rest of the brush stays");
         assert_eq!(at(&m, 40, 10, 10), 1.0, "the radial is untouched");
@@ -676,65 +707,44 @@ mod tests {
 
     #[test]
     fn a_subtracting_brush_cuts_into_everything() {
-        let mask = Mask {
-            ops: vec![
-                MaskOp::Radial {
-                    mode: Mode::Add,
-                    from: [0.5, 0.5],
-                    to: [1.0, 0.5],
-                    hardness: 1.0,
-                },
-                dot(Mode::Subtract, 0.5, 0.5, 0.2),
-            ],
-            ..Mask::default()
-        };
-        let m = mask.render(20, 20, &grey(20, 20, 0), NEVER).unwrap();
+        let mask = masked(vec![
+            circle(Mode::Add, [0.5, 0.5], [1.0, 0.5]),
+            dot(Mode::Subtract, 0.5, 0.5, 0.2),
+        ]);
+        let m = render(&mask, 20, 20);
         assert_eq!(at(&m, 20, 10, 10), 0.0, "cut out");
         assert_eq!(at(&m, 20, 10, 6), 1.0, "radial around it");
     }
 
     #[test]
     fn an_empty_brush_changes_nothing_unless_it_intersects() {
-        let base = vec![MaskOp::Radial {
-            mode: Mode::Add,
-            from: [0.5, 0.5],
-            to: [1.0, 0.5],
-            hardness: 1.0,
-        }];
-        let with = |mode| Mask {
-            ops: [
+        let base = circle(Mode::Add, [0.5, 0.5], [1.0, 0.5]);
+        let with = |mode| {
+            masked(vec![
                 base.clone(),
-                vec![MaskOp::Brush {
-                    mode,
-                    strokes: vec![],
-                }],
-            ]
-            .concat(),
-            ..Mask::default()
+                MaskOp::new(Shape::Brush { strokes: vec![] }, mode),
+            ])
         };
-        let plain = Mask {
-            ops: base.clone(),
-            ..Mask::default()
-        }
-        .render(10, 10, &grey(10, 10, 0), NEVER)
-        .unwrap();
-        let r = |m: Mask| m.render(10, 10, &grey(10, 10, 0), NEVER).unwrap();
-        assert_eq!(r(with(Mode::Add)), plain);
-        assert_eq!(r(with(Mode::Subtract)), plain);
-        assert!(r(with(Mode::Intersect)).iter().all(|&v| v == 0.0));
+        let plain = render(&masked(vec![base.clone()]), 10, 10);
+        assert_eq!(render(&with(Mode::Add), 10, 10), plain);
+        assert_eq!(render(&with(Mode::Subtract), 10, 10), plain);
+        assert!(
+            render(&with(Mode::Intersect), 10, 10)
+                .iter()
+                .all(|&v| v == 0.0)
+        );
     }
 
     #[test]
     fn linear_gradient_fades_from_start_to_end() {
-        let mask = Mask {
-            ops: vec![MaskOp::Linear {
-                mode: Mode::Add,
+        let mask = masked(vec![MaskOp::new(
+            Shape::Linear {
                 from: [0.0, 0.5],
                 to: [1.0, 0.5],
-            }],
-            ..Mask::default()
-        };
-        let m = mask.render(10, 2, &grey(10, 2, 0), NEVER).unwrap();
+            },
+            Mode::Add,
+        )]);
+        let m = render(&mask, 10, 2);
         let row: Vec<f32> = (0..10).map(|x| at(&m, 10, x, 0)).collect();
         assert!(row.windows(2).all(|p| p[0] > p[1]), "{row:?}");
         assert!((row[0] - 0.95).abs() < 1e-6 && (row[9] - 0.05).abs() < 1e-6);
@@ -742,122 +752,163 @@ mod tests {
 
     #[test]
     fn radial_is_a_hard_circle_unless_softened() {
-        let circle = |hardness: f64| Mask {
-            ops: vec![MaskOp::Radial {
-                mode: Mode::Add,
-                from: [0.5, 0.5],
-                to: [0.75, 0.5], // radius 10 px on a 40 px square
-                hardness,
-            }],
-            ..Mask::default()
+        let ring = |hardness: f64| {
+            masked(vec![MaskOp::new(
+                Shape::Radial {
+                    from: [0.5, 0.5],
+                    to: [0.75, 0.5], // radius 10 px on a 40 px square
+                    hardness,
+                },
+                Mode::Add,
+            )])
         };
-        let hard = circle(1.0).render(40, 40, &grey(40, 40, 0), NEVER).unwrap();
+        let hard = render(&ring(1.0), 40, 40);
         // Full right up to the edge, nothing past it: no fade of its own.
         assert_eq!(at(&hard, 40, 20, 20), 1.0);
         assert_eq!(at(&hard, 40, 28, 20), 1.0);
         assert_eq!(at(&hard, 40, 31, 20), 0.0);
         assert_eq!(at(&hard, 40, 0, 0), 0.0);
         // A lower hardness fades toward the centre, like a soft brush.
-        let soft = circle(0.0).render(40, 40, &grey(40, 40, 0), NEVER).unwrap();
+        let soft = render(&ring(0.0), 40, 40);
         let v = at(&soft, 40, 26, 20);
         assert!(v > 0.05 && v < 0.6, "{v}");
-        // A recipe that leaves hardness out gets the hard circle.
+        // A recipe that leaves hardness (and mode, opacity, feather) out
+        // gets the hard circle, added at full strength.
         let op: MaskOp =
             toml::from_str("shape = \"radial\"\nfrom = [0.5, 0.5]\nto = [0.6, 0.5]").unwrap();
-        assert!(matches!(op, MaskOp::Radial { hardness, .. } if hardness == 1.0));
+        assert_eq!(op, circle(Mode::Add, [0.5, 0.5], [0.6, 0.5]));
     }
 
     #[test]
     fn brightness_selects_by_level() {
         let mut input = grey(2, 1, 30);
         input[3..6].copy_from_slice(&[230, 230, 230]);
-        let mask = Mask {
-            ops: vec![MaskOp::Brightness {
-                mode: Mode::Add,
+        let mask = masked(vec![MaskOp::new(
+            Shape::Brightness {
                 low: 0.5,
                 high: 1.0,
                 soft: 0.0,
-            }],
-            ..Mask::default()
-        };
+            },
+            Mode::Add,
+        )]);
         assert_eq!(mask.render(2, 1, &input, NEVER).unwrap(), vec![0.0, 1.0]);
     }
 
     #[test]
     fn intersect_keeps_only_the_overlap() {
-        let mask = Mask {
-            ops: vec![
-                MaskOp::Linear {
-                    mode: Mode::Add,
+        let mask = masked(vec![
+            MaskOp::new(
+                Shape::Linear {
                     from: [0.0, 0.0],
                     to: [0.0, 0.0],
                 },
-                dot(Mode::Intersect, 0.25, 0.5, 0.3),
-            ],
-            ..Mask::default()
-        };
-        let m = mask.render(20, 10, &grey(20, 10, 0), NEVER).unwrap();
+                Mode::Add,
+            ),
+            dot(Mode::Intersect, 0.25, 0.5, 0.3),
+        ]);
+        let m = render(&mask, 20, 10);
         assert_eq!(at(&m, 20, 5, 5), 1.0);
         assert_eq!(at(&m, 20, 15, 5), 0.0);
     }
 
     #[test]
-    fn feather_softens_edges_but_keeps_the_middle() {
-        let hard = Mask {
-            ops: vec![MaskOp::Linear {
-                mode: Mode::Add,
-                from: [0.5, 0.0],
-                to: [0.5001, 0.0],
-            }],
-            ..Mask::default()
-        };
-        let soft = Mask {
+    fn feather_softens_its_own_component_only() {
+        let (w, h) = (100, 40);
+        let hard = render(&masked(vec![left_half()]), w, h);
+        assert_eq!((at(&hard, w, 48, 20), at(&hard, w, 52, 20)), (1.0, 0.0));
+
+        // The same edge feathered, next to a hard circle on the right.
+        let soft_half = MaskOp {
             feather: 0.05,
-            ..hard.clone()
+            ..left_half()
         };
-        let (w, h) = (100, 4);
-        let a = hard.render(w, h, &grey(w, h, 0), NEVER).unwrap();
-        let b = soft.render(w, h, &grey(w, h, 0), NEVER).unwrap();
-        // Left half on, right half off; feathered, the edge ramps.
-        assert_eq!((at(&a, w, 48, 1), at(&a, w, 52, 1)), (1.0, 0.0));
-        let (l, r) = (at(&b, w, 48, 1), at(&b, w, 52, 1));
+        let m = render(
+            &masked(vec![soft_half, circle(Mode::Add, [0.85, 0.5], [0.95, 0.5])]),
+            w,
+            h,
+        );
+        // The feathered edge ramps; its middle stays on.
+        let (l, r) = (at(&m, w, 48, 20), at(&m, w, 52, 20));
         assert!(l < 1.0 && l > 0.5 && r > 0.0 && r < 0.5, "{l} {r}");
-        assert!(at(&b, w, 5, 1) > 0.999 && at(&b, w, 95, 1) < 0.001);
+        assert!(at(&m, w, 5, 20) > 0.999);
+        // The circle (radius 10 px around x = 85) keeps its hard edge.
+        assert_eq!(at(&m, w, 85, 20), 1.0);
+        assert_eq!(at(&m, w, 93, 20), 1.0);
+        assert!(at(&m, w, 96, 20) < 0.01);
+    }
+
+    #[test]
+    fn opacity_scales_what_a_component_does() {
+        let half = |op: MaskOp| MaskOp { opacity: 0.5, ..op };
+        // Added at half strength.
+        let m = render(&masked(vec![half(left_half())]), 10, 2);
+        assert_eq!((at(&m, 10, 2, 0), at(&m, 10, 8, 0)), (0.5, 0.0));
+        // Subtracted at half strength: halves what was there. (A dot of
+        // radius 3 px, so the pixel tested is fully inside it.)
+        let m = render(
+            &masked(vec![left_half(), half(dot(Mode::Subtract, 0.2, 0.5, 0.3))]),
+            20,
+            20,
+        );
+        assert_eq!(at(&m, 20, 4, 10), 0.5);
+        // Intersected at half strength: outside the limit keeps half, and
+        // nothing darkens inside it.
+        let all_on = MaskOp::new(
+            Shape::Linear {
+                from: [0.0, 0.0],
+                to: [0.0, 0.0],
+            },
+            Mode::Add,
+        );
+        let mut limit = half(left_half());
+        limit.mode = Mode::Intersect;
+        let m = render(&masked(vec![all_on, limit]), 10, 2);
+        assert_eq!((at(&m, 10, 2, 0), at(&m, 10, 8, 0)), (1.0, 0.5));
+        // At zero a component does nothing at all.
+        let m = render(
+            &masked(vec![MaskOp {
+                opacity: 0.0,
+                ..left_half()
+            }]),
+            10,
+            2,
+        );
+        assert!(m.iter().all(|&v| v == 0.0));
     }
 
     #[test]
     fn a_preview_sized_mask_matches_the_full_one() {
-        let mask = Mask {
-            feather: 0.02,
-            ops: vec![
-                MaskOp::Brush {
-                    mode: Mode::Add,
-                    strokes: vec![
-                        Stroke {
-                            erase: false,
-                            size: 0.08,
-                            hardness: 0.3,
-                            points: vec![0.1, 0.2, 0.5, 0.6, 0.8, 0.3],
-                        },
-                        Stroke {
-                            erase: true,
-                            size: 0.03,
-                            hardness: 0.6,
-                            points: vec![0.45, 0.5, 0.55, 0.65],
-                        },
-                    ],
-                },
-                MaskOp::Radial {
-                    mode: Mode::Subtract,
-                    from: [0.5, 0.6],
-                    to: [0.6, 0.6],
-                    hardness: 1.0,
-                },
-            ],
-            ..Mask::default()
-        };
-        let full = mask.render(400, 300, &grey(400, 300, 0), NEVER).unwrap();
-        let small = mask.render(100, 75, &grey(100, 75, 0), NEVER).unwrap();
+        let mask = masked(vec![
+            MaskOp {
+                feather: 0.02,
+                ..MaskOp::new(
+                    Shape::Brush {
+                        strokes: vec![
+                            Stroke {
+                                erase: false,
+                                size: 0.08,
+                                hardness: 0.3,
+                                points: vec![0.1, 0.2, 0.5, 0.6, 0.8, 0.3],
+                            },
+                            Stroke {
+                                erase: true,
+                                size: 0.03,
+                                hardness: 0.6,
+                                points: vec![0.45, 0.5, 0.55, 0.65],
+                            },
+                        ],
+                    },
+                    Mode::Add,
+                )
+            },
+            MaskOp {
+                opacity: 0.7,
+                feather: 0.01,
+                ..circle(Mode::Subtract, [0.5, 0.6], [0.6, 0.6])
+            },
+        ]);
+        let full = render(&mask, 400, 300);
+        let small = render(&mask, 100, 75);
         // Average the full mask over each 4x4 block and compare.
         let mut err = 0.0;
         for y in 0..75 {
@@ -888,39 +939,44 @@ mod tests {
 
     #[test]
     fn validation_catches_bad_values() {
-        let bad = |op: MaskOp| {
-            Mask {
-                ops: vec![op],
-                ..Mask::default()
-            }
-            .validate()
-            .is_err()
-        };
+        let bad = |op: MaskOp| masked(vec![op]).validate().is_err();
         assert!(bad(dot(Mode::Add, 0.5, 0.5, 0.0)));
-        assert!(bad(MaskOp::Brush {
-            mode: Mode::Add,
-            strokes: vec![Stroke {
-                erase: false,
-                size: 0.1,
-                hardness: 0.5,
-                points: vec![0.5],
-            }],
-        }));
-        assert!(bad(MaskOp::Brightness {
-            mode: Mode::Add,
-            low: 0.8,
-            high: 0.2,
-            soft: 0.0,
-        }));
+        assert!(bad(MaskOp::new(
+            Shape::Brush {
+                strokes: vec![Stroke {
+                    erase: false,
+                    size: 0.1,
+                    hardness: 0.5,
+                    points: vec![0.5],
+                }],
+            },
+            Mode::Add,
+        )));
+        assert!(bad(MaskOp::new(
+            Shape::Brightness {
+                low: 0.8,
+                high: 0.2,
+                soft: 0.0,
+            },
+            Mode::Add,
+        )));
         assert!(bad(dot(Mode::Add, f64::NAN, 0.5, 0.1)));
+        assert!(bad(MaskOp {
+            feather: 0.9,
+            ..dot(Mode::Add, 0.5, 0.5, 0.1)
+        }));
+        assert!(bad(MaskOp {
+            opacity: 1.5,
+            ..dot(Mode::Add, 0.5, 0.5, 0.1)
+        }));
         assert!(!bad(dot(Mode::Add, 0.5, 0.5, 0.1)));
-        assert!(
-            Mask {
-                feather: 0.9,
-                ..Mask::default()
-            }
-            .validate()
-            .is_err()
-        );
+    }
+
+    #[test]
+    fn a_mask_wide_feather_is_refused() {
+        // Feather moved onto each component; an old recipe must not
+        // quietly lose it.
+        let err = toml::from_str::<Mask>("feather = 0.01\n").unwrap_err();
+        assert!(err.to_string().contains("feather"), "{err}");
     }
 }

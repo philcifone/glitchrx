@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use glitchrx_core::codec::{self, Format};
 use glitchrx_core::effects::REGISTRY;
-use glitchrx_core::mask::{Mask, MaskOp, Mode, Stroke};
+use glitchrx_core::mask::{Mask, MaskOp, Mode, Shape, Stroke};
 use glitchrx_core::{Encoding, Raster, Recipe, Step, Units};
 
 fn fixture_dir() -> PathBuf {
@@ -54,45 +54,69 @@ fn mean_diff(a: &Raster, b: &Raster) -> f64 {
     sum as f64 / a.bytes.len() as f64
 }
 
-/// A mask that uses every kind of operation, every mode, invert and feather.
+/// A mask that uses every kind of component, every mode, invert, and
+/// component feather and opacity.
 fn busy_mask() -> Mask {
     Mask {
         invert: true,
-        feather: 0.01,
         ops: vec![
-            MaskOp::Brightness {
-                mode: Mode::Add,
-                low: 0.4,
-                high: 0.9,
-                soft: 0.1,
-            },
-            MaskOp::Brush {
-                mode: Mode::Add,
-                strokes: vec![
-                    Stroke {
-                        erase: false,
-                        size: 0.08,
-                        hardness: 0.4,
-                        points: vec![0.1, 0.1, 0.4, 0.5, 0.9, 0.6],
+            // Feathered: a brightness range follows pixel-level detail,
+            // which a preview-sized picture cannot have, and the blur keeps
+            // that speckle from swamping the placement check below.
+            MaskOp {
+                feather: 0.01,
+                ..MaskOp::new(
+                    Shape::Brightness {
+                        low: 0.4,
+                        high: 0.9,
+                        soft: 0.1,
                     },
-                    Stroke {
-                        erase: true,
-                        size: 0.03,
-                        hardness: 0.7,
-                        points: vec![0.35, 0.45, 0.45, 0.55],
+                    Mode::Add,
+                )
+            },
+            MaskOp {
+                feather: 0.01,
+                ..MaskOp::new(
+                    Shape::Brush {
+                        strokes: vec![
+                            Stroke {
+                                erase: false,
+                                size: 0.08,
+                                hardness: 0.4,
+                                points: vec![0.1, 0.1, 0.4, 0.5, 0.9, 0.6],
+                            },
+                            Stroke {
+                                erase: true,
+                                size: 0.03,
+                                hardness: 0.7,
+                                points: vec![0.35, 0.45, 0.45, 0.55],
+                            },
+                        ],
                     },
-                ],
+                    Mode::Add,
+                )
             },
-            MaskOp::Linear {
-                mode: Mode::Intersect,
-                from: [0.0, 0.2],
-                to: [0.0, 1.0],
+            MaskOp {
+                opacity: 0.6,
+                ..MaskOp::new(
+                    Shape::Linear {
+                        from: [0.0, 0.2],
+                        to: [0.0, 1.0],
+                    },
+                    Mode::Intersect,
+                )
             },
-            MaskOp::Radial {
-                mode: Mode::Subtract,
-                from: [0.6, 0.5],
-                to: [0.75, 0.5],
-                hardness: 1.0,
+            MaskOp {
+                feather: 0.02,
+                opacity: 0.8,
+                ..MaskOp::new(
+                    Shape::Radial {
+                        from: [0.6, 0.5],
+                        to: [0.75, 0.5],
+                        hardness: 1.0,
+                    },
+                    Mode::Subtract,
+                )
             },
         ],
     }

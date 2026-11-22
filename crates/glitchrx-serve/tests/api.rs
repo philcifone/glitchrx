@@ -652,8 +652,8 @@ async fn masks_travel_and_show() {
     let recipe = json!({"steps": [
         {"effect": "invert", "seed": "1", "params": {"hits": "0"}},
         {"effect": "bitcrush", "seed": "2", "params": {"opacity": "0.5"},
-         "mask": {"feather": 0.01, "op": [
-            {"shape": "linear", "from": [0.0, 0.5], "to": [1.0, 0.5]}]}}]});
+         "mask": {"op": [
+            {"shape": "linear", "from": [0.0, 0.5], "to": [1.0, 0.5], "feather": 0.01}]}}]});
 
     // The mask survives TOML both ways.
     let (s, _, toml) = send(&app, post_json("/api/recipe/to-toml", recipe.clone())).await;
