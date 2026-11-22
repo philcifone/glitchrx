@@ -113,19 +113,21 @@ glitchrx serve --root ~/Pictures                 # also browse, open and save ph
 glitchrx serve --host 0.0.0.0 --token --root ~/Pictures   # from a phone over LAN or WireGuard
 ```
 
-`--host 0.0.0.0` listens on every interface and prints a URL for each address. There is no login, so anyone who can reach the port can use the server. `--token` adds a generated secret to the printed URL; open that URL once per browser, and a cookie keeps you signed in. `--token=SECRET` sets your own.
+`--host 0.0.0.0` listens on every interface and prints a URL for each address. There is no login, so anyone who can reach the port can use the server. `--token` adds a generated secret to the printed URL; open that URL once per browser, and a cookie keeps you signed in. `--token=SECRET` sets your own. A browser without the cookie gets a sign-in page where you can paste the token instead.
+
+**On a phone, add it to the home screen** (Safari: Share, then Add to Home Screen). It then opens full screen with its own icon, like an app. The home-screen app may keep its own cookies, so it can ask for the token once. Exports open the share sheet (Save Image, Save to Files, AirDrop) through a Save button in the status bar.
 
 In the GUI:
 - **Open** a photo from your device (it is sent to your own server, nowhere else) or, with `--root`, from the server's folders.
 - **Pick the encoding** for the whole recipe (and mono, stereo or RGB) at the top. Any step can override both.
-- **Add steps** by tapping an effect in the palette, grouped into audio effects (echo, delay, reverb, amplify, stutter) and data effects (invert, bitcrush, backwards, shift, shuffle). On a phone the palette sits behind the floating + button. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
+- **Add steps** by tapping an effect in the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter) and data effects (invert, bitcrush, backwards, shift, shuffle). On a phone the palette sits behind the floating + button. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
 - **Placement** (`region`, `hits`, `len`) is always shown on each step. Dragging the region's two handles shades the preview outside the band it covers.
 - **Shake** (the wand) rolls a step's own settings at random, within the useful range; placement and encoding stay. **Re-roll** (the dice) picks a new seed, which moves where hits land; it is greyed out when a step has nothing random (`hits=0`, except for `shuffle`).
 - **Hold "original"** (or the `\` key) to compare with the untouched photo.
 - **Undo and redo** with the buttons or Ctrl+Z / Ctrl+Shift+Z. History holds recipes, not images.
 - **Export** at full resolution as TIFF, PNG or JPEG. With `--root`, results can be saved next to the original using the CLI's `-glitch`, `-glitch-1` naming. Nothing is overwritten. The recipe can be downloaded, then loaded again later or replayed with `glitchrx --recipe`.
 
-The preview runs the recipe on a copy of the photo shrunk to your screen, with every size scaled to match, so even a 26 MP photo previews quickly. It is close to the full-resolution export but not identical: long reverb tails and very fine shuffles differ most. **Make exact** renders the current recipe at full resolution and shrinks the result, which is exactly what export will give; it takes about a second on a 26 MP photo. A newer slider position cancels a render that is still running, and a live preview that runs over 3 s stops with a "too heavy to preview live" notice (export, and usually Make exact, still work).
+The preview runs the recipe on a copy of the photo shrunk to your screen, with every size scaled to match, so even a 26 MP photo previews quickly. It is close to the full-resolution export but not identical: long reverb tails and very fine shuffles differ most. The phaser cannot be previewed at a smaller size at all, so with a phaser in the recipe the preview turns exact by itself once you stop for a moment. **Make exact** renders the current recipe at full resolution and shrinks the result, which is exactly what export will give; it takes about a second on a 26 MP photo. A newer slider position cancels a render that is still running, and a live preview that runs over 3 s stops with a "too heavy to preview live" notice (export, and usually Make exact, still work).
 
 ## How it works
 
