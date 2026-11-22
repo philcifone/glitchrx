@@ -478,6 +478,51 @@ async fn token_gates_everything() {
     assert_eq!(s, StatusCode::OK);
 }
 
+/// A browser without the token gets a sign-in page (an app on the iOS home
+/// screen may start without the cookie); the manifest and icons are public,
+/// since browsers fetch them without cookies.
+#[tokio::test]
+async fn sign_in_page_and_public_icons() {
+    let app = app(None, Some("s3cret"));
+    let page = Request::get("/")
+        .header(header::ACCEPT, "text/html,application/xhtml+xml")
+        .body(Body::empty())
+        .unwrap();
+    let (s, h, b) = send(&app, page).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert!(
+        h[header::CONTENT_TYPE]
+            .to_str()
+            .unwrap()
+            .starts_with("text/html")
+    );
+    assert!(h.contains_key(header::CONTENT_SECURITY_POLICY));
+    let html = String::from_utf8_lossy(&b);
+    assert!(html.contains(r#"name="token""#) && !html.contains("s3cret"));
+
+    for path in [
+        "/manifest.webmanifest",
+        "/apple-touch-icon.png",
+        "/icon-512.png",
+    ] {
+        let (s, _, _) = send(&app, Request::get(path).body(Body::empty()).unwrap()).await;
+        // 404 when the frontend is not built (placeholder only), never 401.
+        assert!(
+            s == StatusCode::OK || s == StatusCode::NOT_FOUND,
+            "{path}: {s}"
+        );
+    }
+    // Lookalike paths are still guarded.
+    let (s, _, _) = send(
+        &app,
+        Request::get("/manifest.webmanifest/../api/effects")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+}
+
 #[tokio::test]
 async fn index_is_served() {
     let app = app(None, None);
