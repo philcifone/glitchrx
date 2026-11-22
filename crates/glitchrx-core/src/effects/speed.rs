@@ -1,6 +1,6 @@
 //! `speed`: Audacity's Change Speed, fitted back into the window.
 
-use super::{BLOCK, Effect, EffectInfo, PlacementDefaults, Window};
+use super::{BLOCK, Effect, EffectInfo, Group, PlacementDefaults, Window};
 use crate::error::{Error, Result};
 use crate::params::{Kind, ParamSpec, Params};
 use crate::rng::Rng;
@@ -8,6 +8,7 @@ use crate::samples::Encoding;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "speed",
+    group: Group::Audio,
     version: 1,
     audacity: "Change Speed",
     summary: "Play each window faster or slower, wrapping around to keep its length: shears and stretches.",

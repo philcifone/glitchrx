@@ -1,12 +1,13 @@
 //! `delay`: feed-forward taps, after Audacity's Nyquist Delay.
 
-use super::{Effect, EffectInfo, Filter, PHASE, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Filter, Group, PHASE, PlacementDefaults, Window};
 use crate::error::Result;
 use crate::params::{Bound, Kind, ParamSpec, Params};
 use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "delay",
+    group: Group::Audio,
     version: 1,
     audacity: "Delay",
     summary: "A fixed number of repeats of the input, each `decay` times quieter than the last.",

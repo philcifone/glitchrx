@@ -1,6 +1,6 @@
 //! `wahwah`: Audacity's Wahwah, a resonant filter swept by an LFO.
 
-use super::{Effect, EffectInfo, Filter, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Filter, Group, PlacementDefaults, Window};
 use crate::dsp::{Lfo, cos_turns, exp, sin_turns};
 use crate::error::Result;
 use crate::params::{Bound, Kind, ParamSpec, Params};
@@ -8,6 +8,7 @@ use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "wahwah",
+    group: Group::Audio,
     version: 1,
     audacity: "Wahwah",
     summary: "A resonant filter whose cutoff an LFO sweeps up and down: smears that pulse down the picture.",

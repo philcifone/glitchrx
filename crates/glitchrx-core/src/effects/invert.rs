@@ -1,12 +1,13 @@
 //! `invert`: Audacity's Invert, `y = -x`.
 
-use super::{Effect, EffectInfo, Filter, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Filter, Group, PlacementDefaults, Window};
 use crate::error::Result;
 use crate::params::Params;
 use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "invert",
+    group: Group::Data,
     version: 1,
     audacity: "Invert",
     summary: "Flip every sample upside down.",

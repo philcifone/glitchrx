@@ -1,12 +1,13 @@
 //! `stutter`: repeat the start of each window across it.
 
-use super::{Effect, EffectInfo, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Group, PlacementDefaults, Window};
 use crate::error::Result;
 use crate::params::{Bound, Kind, ParamSpec, Params};
 use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "stutter",
+    group: Group::Audio,
     version: 1,
     audacity: "Repeat",
     summary: "Copy the first `chunk` of each window over the rest of it, again and again.",

@@ -1,6 +1,6 @@
 //! `reverb`: Freeverb, the algorithm behind Audacity's Reverb.
 
-use super::{Effect, EffectInfo, Filter, PHASE, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Filter, Group, PHASE, PlacementDefaults, Window};
 use crate::dsp::{Allpass, Comb};
 use crate::error::Result;
 use crate::params::{Bound, Kind, ParamSpec, Params};
@@ -8,6 +8,7 @@ use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "reverb",
+    group: Group::Audio,
     version: 1,
     audacity: "Reverb",
     summary: "Freeverb: eight damped feedback combs in parallel, then four allpass diffusers.",

@@ -1,6 +1,6 @@
 //! `amplify`: Audacity's Amplify, a gain in decibels with clipping.
 
-use super::{Effect, EffectInfo, Filter, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Filter, Group, PlacementDefaults, Window};
 use crate::dsp::db_to_gain;
 use crate::error::Result;
 use crate::params::{Kind, ParamSpec, Params};
@@ -8,6 +8,7 @@ use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "amplify",
+    group: Group::Audio,
     version: 1,
     audacity: "Amplify",
     summary: "Multiply every sample by a gain given in decibels, clipping at the limits.",

@@ -1,6 +1,6 @@
 //! `phaser`: Audacity's Phaser, a chain of all-pass stages swept by an LFO.
 
-use super::{Effect, EffectInfo, Filter, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Filter, Group, PlacementDefaults, Window};
 use crate::dsp::{Lfo, exp};
 use crate::error::Result;
 use crate::params::{Bound, Kind, ParamSpec, Params};
@@ -8,6 +8,7 @@ use crate::rng::Rng;
 
 pub static INFO: EffectInfo = EffectInfo {
     id: "phaser",
+    group: Group::Audio,
     version: 1,
     audacity: "Phaser",
     summary: "All-pass stages swept by a slow oscillator, mixed with the input: wavy, combed bands.",
