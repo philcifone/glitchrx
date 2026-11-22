@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, Path, Query, Request, State};
@@ -17,6 +17,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use glitchrx_core::codec;
 use glitchrx_core::io::{auto_output, base_stem, write_output};
+use glitchrx_core::recipe::NEVER;
 use glitchrx_core::{Error, Recipe};
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +41,8 @@ pub struct AppState {
     pub root: Option<PathBuf>,
     /// Shared access token, if one is required.
     pub token: Option<String>,
+    /// Time limit for a live preview; an exact preview gets ten times this.
+    pub preview_budget: Duration,
 }
 
 impl AppState {
@@ -48,6 +51,7 @@ impl AppState {
             store: Store::new(MAX_DOCS),
             root,
             token,
+            preview_budget: PREVIEW_BUDGET,
         }
     }
 }
@@ -361,11 +365,20 @@ struct PreviewRequest {
     /// Show the untouched original instead (before/after).
     #[serde(default)]
     original: bool,
+    /// Bend at full resolution, then shrink: exactly the export, slower.
+    #[serde(default)]
+    exact: bool,
 }
+
+/// How long a live preview may run before it gives up (SPEC 9.2). Export
+/// has no limit; an exact preview gets longer, since it was asked for.
+pub const PREVIEW_BUDGET: Duration = Duration::from_secs(3);
 
 /// Render a preview. Answers `image/jpeg` with timing in `X-Render-Ms`, or
 /// 204 when a newer request for the same photo has arrived (latest wins):
-/// a render in progress notices within a block of samples and stops.
+/// a render in progress notices within a block of samples and stops. A
+/// render over its time budget stops the same way and answers 503 with
+/// `X-Too-Heavy: 1`, so the GUI can say so instead of showing an error.
 async fn preview(
     State(st): State<Shared>,
     Path(id): Path<String>,
@@ -382,14 +395,40 @@ async fn preview(
     let generation = recipe.as_ref().map(|_| doc.begin());
     let max_w = req.max_w.clamp(16, render::MAX_PREVIEW_SIDE) as usize;
     let max_h = req.max_h.clamp(16, render::MAX_PREVIEW_SIDE) as usize;
+    let exact = req.exact;
+    let budget = st.preview_budget * if exact { 10 } else { 1 };
     blocking(move || {
         let t0 = Instant::now();
         let raster = match (&recipe, generation) {
             (Some(r), Some(g)) => {
-                let superseded = || !doc.is_current(g);
-                match doc.preview(r, max_w, max_h, &superseded) {
+                let stop = || !doc.is_current(g) || t0.elapsed() > budget;
+                let result = if exact {
+                    doc.render_full(r, &stop).map(|full| {
+                        let (w, h) = full.fit(max_w, max_h);
+                        full.resize(w, h)
+                    })
+                } else {
+                    doc.preview(r, max_w, max_h, &stop)
+                };
+                match result {
                     Ok(raster) => raster,
-                    Err(Error::Cancelled) => return Ok(StatusCode::NO_CONTENT.into_response()),
+                    Err(Error::Cancelled) if !doc.is_current(g) => {
+                        return Ok(StatusCode::NO_CONTENT.into_response());
+                    }
+                    Err(Error::Cancelled) => {
+                        let mut res = ApiError::new(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            format!(
+                                "too heavy to preview {}(over {} s); export still works",
+                                if exact { "exactly " } else { "live " },
+                                budget.as_secs()
+                            ),
+                        )
+                        .into_response();
+                        res.headers_mut()
+                            .insert("x-too-heavy", HeaderValue::from_static("1"));
+                        return Ok(res);
+                    }
                     Err(e) => return Err(e.into()),
                 }
             }
@@ -440,7 +479,7 @@ fn export_name(doc_name: &str, format: Format) -> String {
 
 /// Bend the full image and encode it, keeping the colour profile.
 fn export_bytes(doc: &Doc, recipe: &Recipe, format: Format) -> ApiResult<Vec<u8>> {
-    let raster = doc.render_full(recipe)?;
+    let raster = doc.render_full(recipe, NEVER)?;
     Ok(codec::encode(
         &raster,
         format.into(),

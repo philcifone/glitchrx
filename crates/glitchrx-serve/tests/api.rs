@@ -190,6 +190,69 @@ async fn upload_preview_export() {
 }
 
 #[tokio::test]
+async fn exact_preview_and_budget() {
+    let bytes = fixture("baseline-420.jpg");
+    let req = |exact: bool, id: &str| {
+        post_json(
+            &format!("/api/docs/{id}/preview"),
+            json!({"recipe": sample_recipe(), "max_w": 4096, "max_h": 4096, "exact": exact}),
+        )
+    };
+
+    // An exact preview at (at least) full size is the export itself.
+    let app = app(None, None);
+    let id = upload(&app, "a.jpg", bytes.clone()).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (s, h, b) = send(&app, req(true, &id)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(h["x-width"], "480");
+    let mut want = codec::decode(&bytes).unwrap();
+    core_recipe().apply(&mut want.raster).unwrap();
+    let got = codec::decode(&b).unwrap().raster;
+    // Compared after the preview's own JPEG encoding, so only roughly.
+    let err: u64 = got
+        .bytes
+        .iter()
+        .zip(&want.raster.bytes)
+        .map(|(a, b)| a.abs_diff(*b) as u64)
+        .sum::<u64>()
+        / got.bytes.len() as u64;
+    assert!(err < 4, "mean error {err}");
+
+    // Over budget: 503 with X-Too-Heavy, a readable message, and the
+    // photo still works afterwards.
+    let mut state = AppState::new(None, None);
+    state.preview_budget = std::time::Duration::ZERO;
+    let app = router(state);
+    let id = upload(&app, "a.jpg", bytes).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for exact in [false, true] {
+        let (s, h, b) = send(&app, req(exact, &id)).await;
+        assert_eq!(s, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(h["x-too-heavy"], "1");
+        assert!(
+            json_of(&b)["error"]
+                .as_str()
+                .unwrap()
+                .contains("export still works")
+        );
+    }
+    let (s, _, _) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/export"),
+            json!({"recipe": sample_recipe(), "format": "png"}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn errors_are_json_with_useful_codes() {
     let app = app(None, None);
     // Not an image we read.

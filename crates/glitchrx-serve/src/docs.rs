@@ -161,9 +161,10 @@ impl Doc {
     }
 
     /// Bend the full-resolution image, exactly as the CLI would.
-    pub fn render_full(&self, recipe: &Recipe) -> Result<Raster> {
+    pub fn render_full(&self, recipe: &Recipe, cancel: Cancel<'_>) -> Result<Raster> {
         let mut raster = self.image.raster.clone();
-        recipe.apply(&mut raster)?;
+        let units = self.units(raster.width, raster.height);
+        recipe.apply_with(&mut raster.bytes, &units, cancel)?;
         Ok(raster)
     }
 }
@@ -293,7 +294,7 @@ mod tests {
         let r = recipe(&[("reverb", "", 9)], Encoding::S8);
         let mut want = d.image.raster.clone();
         r.apply(&mut want).unwrap();
-        assert_eq!(d.render_full(&r).unwrap(), want);
+        assert_eq!(d.render_full(&r, NEVER).unwrap(), want);
     }
 
     #[test]

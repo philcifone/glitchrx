@@ -34,7 +34,7 @@ pub enum Format {
     /// Uncompressed TIFF, for Photoshop (the default).
     Tiff,
     Png,
-    /// `jpeg-baked` is the 2a name, accepted until the GUI is updated.
+    /// `jpeg-baked` is the 2a name, still accepted from old clients.
     #[serde(alias = "jpeg-baked")]
     Jpeg,
 }
