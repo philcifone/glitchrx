@@ -1,66 +1,83 @@
 /* glitchrx web GUI: global styles.
  *
- * Gruvbox, dark and light. The theme follows the system unless the toggle
- * sets data-theme on <html>. Sharp corners and 2px lines throughout.
- * Courier New is the body face where the system has it (macOS, iOS,
- * Windows); Courier Prime (OFL, bundled) stands in elsewhere. */
+ * An iOS-style look in a muted Gruvbox palette: the system font (SF Pro on
+ * Apple devices), grouped cards on a tinted background, hairline
+ * separators, rounded controls, and one accent colour. The photo should be
+ * the only loud thing on screen.
+ *
+ * The theme follows the system unless the toggle sets data-theme on <html>.
+ * Dark values are listed twice (media query and explicit attribute), as
+ * CSS cannot share one block between the two selectors. */
 
 :root {
-  --bg: #fbf1c7;
-  --bg1: #ebdbb2;
-  --bg2: #d5c4a1;
+  --bg: #f4efe0; /* grouped background */
+  --card: #fbf7ec; /* cards, sheets, dialogs */
+  --fill: rgb(60 56 54 / 0.07); /* control backgrounds */
+  --fill-strong: rgb(60 56 54 / 0.14); /* tracks, pressed states */
+  --line: #ddd3ba; /* hairline separators */
   --fg: #3c3836;
-  --fg-dim: #7c6f64;
-  --line: #3c3836;
+  --fg-dim: #928374;
   --accent: #79740e;
-  --accent-fg: #fbf1c7;
+  --accent-fg: #fbf7ec;
+  --accent-soft: rgb(121 116 14 / 0.16);
   --danger: #9d0006;
   --warn: #b57614;
-  --info: #076678;
-  --stage: #d5c4a1;
+  --stage: #e9e1cb; /* behind the photo */
+  --bar: rgb(251 247 236 / 0.82); /* translucent bars */
+  --glass: rgb(251 247 236 / 0.72); /* buttons floating on the photo */
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 4px 16px rgb(0 0 0 / 0.06);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #282828;
-    --bg1: #3c3836;
-    --bg2: #504945;
+    --bg: #1d2021;
+    --card: #282828;
+    --fill: rgb(235 219 178 / 0.08);
+    --fill-strong: rgb(235 219 178 / 0.16);
+    --line: #3a3735;
     --fg: #ebdbb2;
-    --fg-dim: #a89984;
-    --line: #a89984;
+    --fg-dim: #928374;
     --accent: #b8bb26;
-    --accent-fg: #282828;
+    --accent-fg: #1d2021;
+    --accent-soft: rgb(184 187 38 / 0.18);
     --danger: #fb4934;
     --warn: #fabd2f;
-    --info: #83a598;
-    --stage: #1d2021;
+    --stage: #141617;
+    --bar: rgb(40 40 40 / 0.82);
+    --glass: rgb(40 40 40 / 0.66);
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.25);
     color-scheme: dark;
   }
 }
 
 :root[data-theme='dark'] {
-  --bg: #282828;
-  --bg1: #3c3836;
-  --bg2: #504945;
+  --bg: #1d2021;
+  --card: #282828;
+  --fill: rgb(235 219 178 / 0.08);
+  --fill-strong: rgb(235 219 178 / 0.16);
+  --line: #3a3735;
   --fg: #ebdbb2;
-  --fg-dim: #a89984;
-  --line: #a89984;
+  --fg-dim: #928374;
   --accent: #b8bb26;
-  --accent-fg: #282828;
+  --accent-fg: #1d2021;
+  --accent-soft: rgb(184 187 38 / 0.18);
   --danger: #fb4934;
   --warn: #fabd2f;
-  --info: #83a598;
-  --stage: #1d2021;
+  --stage: #141617;
+  --bar: rgb(40 40 40 / 0.82);
+  --glass: rgb(40 40 40 / 0.66);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.25);
   color-scheme: dark;
 }
 
 :root {
-  --font-head: 'Young Serif', Georgia, serif;
-  --font-body: 'Courier New', 'Courier Prime', Courier, monospace;
-  --border: 2px solid var(--line);
-  --pad: 12px;
-  /* Comfortable touch target (Apple and Material both say ~44-48px). */
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --hairline: 1px solid var(--line);
+  --radius: 10px; /* controls */
+  --radius-lg: 14px; /* cards, dialogs */
+  --pad: 16px;
+  /* Comfortable touch target (Apple's guideline is 44pt). */
   --touch: 44px;
 }
 
@@ -68,7 +85,6 @@
 *::before,
 *::after {
   box-sizing: border-box;
-  border-radius: 0;
 }
 
 html,
@@ -77,19 +93,31 @@ body {
   height: 100%;
   background: var(--bg);
   color: var(--fg);
-  font-family: var(--font-body);
+  font-family: var(--font);
   font-size: 15px;
   line-height: 1.4;
   -webkit-text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
 }
 
 h1,
 h2,
 h3 {
-  font-family: var(--font-head);
-  font-weight: 400;
+  font-weight: 600;
   margin: 0;
-  line-height: 1.15;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+/* iOS-style section header: small, upper case, grey. */
+.section-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-dim);
 }
 
 button,
@@ -100,53 +128,98 @@ textarea {
   color: inherit;
 }
 
+/* ---------------------------------------------------------------------------
+   Buttons. The default is a soft filled button; `.primary` is the one solid
+   call to action; `.icon` and `.plain` are bare, tinted with the accent, like
+   iOS toolbar buttons. */
+
 button {
-  min-height: 36px;
-  padding: 4px 12px;
-  background: var(--bg1);
-  border: var(--border);
+  min-height: 34px;
+  padding: 6px 14px;
+  background: var(--fill);
+  border: none;
+  border-radius: var(--radius);
+  font-weight: 500;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 6px;
   touch-action: manipulation;
+  transition:
+    background-color 0.15s,
+    opacity 0.15s;
 }
 
 button:hover:not(:disabled) {
-  background: var(--bg2);
+  background: var(--fill-strong);
+}
+
+button:active:not(:disabled) {
+  opacity: 0.6;
 }
 
 button:disabled {
-  opacity: 0.45;
+  opacity: 0.35;
   cursor: default;
 }
 
 button.primary {
   background: var(--accent);
-  border-color: var(--accent);
   color: var(--accent-fg);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 button.primary:hover:not(:disabled) {
   background: var(--accent);
-  filter: brightness(1.1);
+  filter: brightness(1.08);
+}
+
+button.icon,
+button.plain {
+  background: none;
+  color: var(--accent);
 }
 
 button.icon {
   padding: 4px;
-  min-width: 36px;
+  min-width: 34px;
+  border-radius: 50%;
 }
+
+button.plain {
+  padding: 4px 8px;
+}
+
+button.icon:hover:not(:disabled),
+button.plain:hover:not(:disabled) {
+  background: var(--fill);
+}
+
+button.danger {
+  color: var(--danger);
+}
+
+/* ---------------------------------------------------------------------------
+   Fields */
 
 input[type='text'],
 input[type='number'],
 select {
-  min-height: 36px;
-  padding: 4px 8px;
-  background: var(--bg);
-  border: var(--border);
+  min-height: 34px;
+  padding: 6px 10px;
+  background: var(--fill);
+  border: none;
+  border-radius: 8px;
   min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+input[type='text']:focus,
+input[type='number']:focus,
+select:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 input[type='number'] {
@@ -154,11 +227,109 @@ input[type='number'] {
   appearance: textfield;
 }
 
+/* A flat select with a chevron; the grey works on both themes. */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23928374' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 9 5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+
+/* ---------------------------------------------------------------------------
+   Sliders: a thin track filled with the accent up to the thumb, and a round
+   white thumb. WebKit has no "progress" part, so the fill is a gradient
+   stopping at --pct, which the component sets; Firefox draws it natively. */
+
 input[type='range'] {
-  accent-color: var(--accent);
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
   min-height: 28px;
   margin: 0;
+  background: none;
+  cursor: pointer;
+}
+
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--accent) var(--pct, 0%), var(--fill-strong) var(--pct, 0%));
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  margin-top: -9px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  box-shadow:
+    0 0 0 0.5px rgb(0 0 0 / 0.08),
+    0 2px 5px rgb(0 0 0 / 0.25);
+}
+
+input[type='range']::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fill-strong);
+}
+
+input[type='range']::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  box-shadow:
+    0 0 0 0.5px rgb(0 0 0 / 0.08),
+    0 2px 5px rgb(0 0 0 / 0.25);
+}
+
+/* ---------------------------------------------------------------------------
+   iOS switch: a checkbox drawn as a pill with a sliding knob. */
+
+input[type='checkbox'].switch {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 44px;
+  height: 26px;
+  margin: 0;
+  border-radius: 13px;
+  background: var(--fill-strong);
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+input[type='checkbox'].switch::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.25);
+  transition: transform 0.2s;
+}
+
+input[type='checkbox'].switch:checked {
+  background: var(--accent);
+}
+
+input[type='checkbox'].switch:checked::before {
+  transform: translateX(18px);
 }
 
 input[type='checkbox'],
@@ -169,6 +340,39 @@ input[type='radio'] {
   margin: 0;
 }
 
+/* ---------------------------------------------------------------------------
+   Segmented control: a grey track with the chosen segment raised. */
+
+.segmented {
+  display: flex;
+  padding: 2px;
+  gap: 2px;
+  background: var(--fill);
+  border-radius: 9px;
+}
+
+.segmented button {
+  flex: 1;
+  min-height: 30px;
+  padding: 4px 12px;
+  background: none;
+  border-radius: 7px;
+  font-size: 0.9rem;
+}
+
+.segmented button:hover:not(:disabled) {
+  background: none;
+}
+
+.segmented button.on {
+  background: var(--card);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+   Misc */
+
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -176,6 +380,11 @@ input[type='radio'] {
 
 a {
   color: var(--accent);
+}
+
+code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.9em;
 }
 
 .dim {
@@ -192,16 +401,20 @@ a {
 }
 
 dialog {
-  background: var(--bg);
+  background: var(--card);
   color: var(--fg);
-  border: var(--border);
+  border: none;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 10px 40px rgb(0 0 0 / 0.3);
   padding: 0;
-  width: min(720px, calc(100vw - 32px));
+  width: min(640px, calc(100vw - 32px));
   max-height: calc(100dvh - 32px);
 }
 
 dialog::backdrop {
-  background: rgb(0 0 0 / 0.55);
+  background: rgb(0 0 0 / 0.35);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
 }
 
 @media (pointer: coarse) {
@@ -218,5 +431,12 @@ dialog::backdrop {
   input,
   select {
     font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before {
+    transition: none !important;
   }
 }

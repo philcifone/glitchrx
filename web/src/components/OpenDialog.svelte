@@ -1,7 +1,7 @@
 <script lang="ts">
   // Open a photo: upload from this device, or browse the server's --root.
   import Upload from '@lucide/svelte/icons/upload';
-  import X from '@lucide/svelte/icons/x';
+  import Folder from '@lucide/svelte/icons/folder';
   import { app } from '../lib/app.svelte';
   import * as api from '../lib/api';
   import type { Listing } from '../lib/types';
@@ -50,14 +50,14 @@
 <dialog bind:this={dialog} aria-labelledby="open-title">
   <div class="head">
     <h2 id="open-title">Open a photo</h2>
-    <button class="icon" onclick={() => dialog.close()} aria-label="Close"><X size={18} strokeWidth={2.5} /></button>
+    <button class="plain" onclick={() => dialog.close()}>Cancel</button>
   </div>
 
   <div class="body">
     <section>
       <input bind:this={fileInput} type="file" accept="image/jpeg,image/png,image/tiff,.jpg,.jpeg,.png,.tif,.tiff" class="visually-hidden" onchange={pickFile} tabindex="-1" />
       <button class="primary wide" onclick={() => fileInput.click()}>
-        <Upload size={18} strokeWidth={2.5} /> From this device
+        <Upload size={18} strokeWidth={2} /> From this device
       </button>
       <p class="dim small">The photo is sent to this glitchrx server only. JPEG, PNG or TIFF.</p>
     </section>
@@ -77,14 +77,14 @@
           {#if listing.dirs.length}
             <ul class="dirs">
               {#if listing.parent !== null}
-                <li><button onclick={() => go(listing!.parent ?? '')}>..</button></li>
+                <li><button onclick={() => go(listing!.parent ?? '')}>Up</button></li>
               {/if}
               {#each listing.dirs as d (d.path)}
-                <li><button onclick={() => go(d.path)}>{d.name}/</button></li>
+                <li><button onclick={() => go(d.path)}><Folder size={16} strokeWidth={1.75} /> {d.name}</button></li>
               {/each}
             </ul>
           {:else if listing.parent !== null}
-            <ul class="dirs"><li><button onclick={() => go(listing!.parent ?? '')}>..</button></li></ul>
+            <ul class="dirs"><li><button onclick={() => go(listing!.parent ?? '')}>Up</button></li></ul>
           {/if}
           {#if listing.files.length}
             <ul class="files">
@@ -113,8 +113,12 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 10px var(--pad);
-    border-bottom: var(--border);
+    padding: 10px 10px 10px var(--pad);
+    border-bottom: var(--hairline);
+  }
+
+  .head h2 {
+    font-size: 1.06rem;
   }
 
   .body {
@@ -128,15 +132,16 @@
 
   .wide {
     width: 100%;
+    min-height: 44px;
   }
 
   .small {
-    font-size: 0.85em;
-    margin: 6px 0 0;
+    font-size: 0.85rem;
+    margin: 8px 0 0;
   }
 
   .browse {
-    border-top: var(--border);
+    border-top: var(--hairline);
     padding-top: var(--pad);
   }
 
@@ -144,17 +149,16 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 4px;
-    margin-bottom: 8px;
+    gap: 2px;
+    margin-bottom: 10px;
+    font-size: 0.9rem;
   }
 
   .link {
-    border: none;
     background: none;
-    padding: 2px 4px;
+    padding: 2px 6px;
     min-height: 30px;
     color: var(--accent);
-    text-decoration: underline;
   }
 
   ul {
@@ -169,33 +173,51 @@
     gap: 6px;
   }
 
+  .dirs button {
+    border-radius: 999px;
+    font-size: 0.9rem;
+  }
+
   .files {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 12px;
   }
 
   .files button {
     width: 100%;
     flex-direction: column;
-    padding: 4px;
-    gap: 4px;
+    align-items: stretch;
+    padding: 0;
+    gap: 6px;
+    background: none;
+    font-weight: 400;
+  }
+
+  .files button:hover:not(:disabled) {
+    background: none;
+  }
+
+  .files button:hover img {
+    filter: brightness(0.9);
   }
 
   .files img {
     width: 100%;
     aspect-ratio: 4 / 3;
     object-fit: cover;
-    background: var(--bg2);
+    border-radius: 10px;
+    background: var(--fill);
     display: block;
   }
 
   .files span {
-    font-size: 0.8em;
+    font-size: 0.78rem;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    text-align: center;
   }
 
   .err {

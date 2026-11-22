@@ -8,7 +8,7 @@
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import Copy from '@lucide/svelte/icons/copy';
-  import X from '@lucide/svelte/icons/x';
+  import Trash2 from '@lucide/svelte/icons/trash-2';
   import { app, CHANNELS_KEY, ENCODING_KEY } from '../lib/app.svelte';
   import { iconFor } from '../lib/icons';
   import type { Channels, StepState } from '../lib/types';
@@ -39,16 +39,16 @@
   <header>
     <span class="n">{index + 1}</span>
     <button class="name" onclick={() => (open = !open)} aria-expanded={open} title={info?.summary}>
-      <Icon size={18} strokeWidth={2.25} />
-      {step.effect}
-      {#if stepEncoding}<span class="enc dim">{stepEncoding}</span>{/if}
+      <span class="glyph"><Icon size={18} strokeWidth={1.75} /></span>
+      <span class="label">{step.effect}</span>
+      {#if stepEncoding}<span class="enc">{stepEncoding}</span>{/if}
     </button>
     <label class="toggle" title={step.enabled ? 'Turn this step off' : 'Turn this step on'}>
-      <input type="checkbox" checked={step.enabled} onchange={() => app.toggleStep(step.uid)} />
+      <input class="switch" type="checkbox" checked={step.enabled} onchange={() => app.toggleStep(step.uid)} />
       <span class="visually-hidden">Enabled</span>
     </label>
     <button class="icon" onclick={() => app.shake(step.uid)} disabled={!info} title="Shake: random settings for this step (placement stays)" aria-label="Shake settings">
-      <WandSparkles size={18} strokeWidth={2.25} />
+      <WandSparkles size={18} strokeWidth={1.75} />
     </button>
     <button
       class="icon"
@@ -59,28 +59,30 @@
         : 'Nothing random here: with hits=0 the step covers its whole region. Set hits above 0 to scatter it.'}
       aria-label="Re-roll seed"
     >
-      <Dices size={18} strokeWidth={2.25} />
+      <Dices size={18} strokeWidth={1.75} />
     </button>
   </header>
 
   {#if open}
     <div class="body">
       {#if info}
-        {#each own as spec (spec.name)}
-          <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
-        {/each}
+        <section class="group">
+          {#each own as spec (spec.name)}
+            <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
+          {/each}
+        </section>
         <div class="sample">
           <label>
-            <span>encoding</span>
+            <span>Encoding</span>
             <select value={stepEncoding} onchange={(e) => app.setStepEncoding(step.uid, e.currentTarget.value || null)}>
-              <option value="">recipe ({app.recipe.encoding})</option>
+              <option value="">Recipe ({app.recipe.encoding})</option>
               {#each encodings as enc (enc.id)}
                 <option value={enc.id}>{enc.id}</option>
               {/each}
             </select>
           </label>
           <label>
-            <span>channels</span>
+            <span>Channels</span>
             <select
               value={stepChannels}
               onchange={(e) => {
@@ -88,14 +90,14 @@
                 app.setStepChannels(step.uid, v ? (Number(v) as Channels) : null);
               }}
             >
-              <option value="">recipe ({app.recipe.channels === 2 ? 'stereo' : 'mono'})</option>
-              <option value="1">mono</option>
-              <option value="2">stereo</option>
+              <option value="">Recipe ({app.recipe.channels === 2 ? 'stereo' : 'mono'})</option>
+              <option value="1">Mono</option>
+              <option value="2">Stereo</option>
             </select>
           </label>
         </div>
-        <section class="placement" aria-label="Placement">
-          <h3>Placement</h3>
+        <section class="group" aria-label="Placement">
+          <h3 class="section-label">Placement</h3>
           {#each placement as spec (spec.name)}
             <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
           {/each}
@@ -106,7 +108,7 @@
 
       <div class="foot">
         <label class="seed">
-          <span>seed</span>
+          <span>Seed</span>
           <input
             type="text"
             inputmode="numeric"
@@ -117,16 +119,16 @@
           />
         </label>
         <button class="icon" onclick={() => app.moveStep(step.uid, -1)} disabled={index === 0} aria-label="Move up" title="Move up">
-          <ChevronUp size={18} strokeWidth={2.25} />
+          <ChevronUp size={18} strokeWidth={1.75} />
         </button>
         <button class="icon" onclick={() => app.moveStep(step.uid, 1)} disabled={index === count - 1} aria-label="Move down" title="Move down">
-          <ChevronDown size={18} strokeWidth={2.25} />
+          <ChevronDown size={18} strokeWidth={1.75} />
         </button>
         <button class="icon" onclick={() => app.duplicateStep(step.uid)} aria-label="Duplicate" title="Duplicate (new seed)">
-          <Copy size={18} strokeWidth={2.25} />
+          <Copy size={18} strokeWidth={1.75} />
         </button>
         <button class="icon danger" onclick={() => app.removeStep(step.uid)} aria-label="Remove" title="Remove step">
-          <X size={18} strokeWidth={2.5} />
+          <Trash2 size={18} strokeWidth={1.75} />
         </button>
       </div>
     </div>
@@ -134,70 +136,99 @@
 </article>
 
 <style>
+  /* A grouped card, as in iOS Settings. */
   article {
-    border: var(--border);
-    background: var(--bg);
+    background: var(--card);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    transition: opacity 0.2s;
   }
 
   article.off {
-    opacity: 0.55;
+    opacity: 0.5;
   }
 
   header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 4px;
-    background: var(--bg1);
+    gap: 2px;
+    padding: 6px 6px 6px 12px;
   }
 
   .n {
-    min-width: 2ch;
-    text-align: center;
-    font-weight: 700;
+    min-width: 1.6em;
+    font-size: 0.8rem;
+    font-weight: 600;
     color: var(--fg-dim);
+    font-variant-numeric: tabular-nums;
   }
 
   .name {
     flex: 1;
     min-width: 0;
     justify-content: flex-start;
-    border: none;
+    gap: 8px;
     background: none;
-    font-family: var(--font-head);
-    font-size: 1.15rem;
-    padding: 0 4px;
+    padding: 4px 2px;
+    font-size: 1rem;
+    font-weight: 600;
   }
 
   .name:hover:not(:disabled) {
     background: none;
-    text-decoration: underline;
+  }
+
+  .glyph {
+    display: inline-flex;
+    color: var(--accent);
+  }
+
+  .label {
+    text-transform: capitalize;
+  }
+
+  /* An encoding override, as a small tag. */
+  .enc {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--fg-dim);
+    background: var(--fill);
+    padding: 1px 6px;
+    border-radius: 5px;
   }
 
   .toggle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 36px;
+    padding: 0 6px;
     min-height: 36px;
     cursor: pointer;
   }
 
   .body {
-    padding: 8px 10px 10px;
+    padding: 0 14px 4px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
   }
 
-  .enc {
-    font-family: var(--font-body);
-    font-size: 0.8rem;
+  /* Sections inside the card, divided by hairlines. */
+  .group,
+  .sample,
+  .foot {
+    border-top: var(--hairline);
+    padding: 12px 0;
+  }
+
+  .group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
   }
 
   .sample {
     display: flex;
-    gap: 8px;
+    gap: 10px;
   }
 
   .sample label {
@@ -205,41 +236,29 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
   }
 
-  .sample span {
-    font-weight: 700;
-  }
-
-  /* Placement is set off by a bold rule rather than hidden away. */
-  .placement {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    border-top: var(--border);
-    padding-top: 8px;
-  }
-
-  .placement h3 {
-    font-size: 1rem;
-    margin: 0;
+  .sample span,
+  .seed span {
+    font-size: 0.85rem;
+    font-weight: 500;
   }
 
   .foot {
     display: flex;
     align-items: center;
-    gap: 6px;
-    border-top: 1.5px dashed var(--fg-dim);
-    padding-top: 8px;
+    gap: 2px;
+    padding: 8px 0;
   }
 
   .seed {
     flex: 1;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     min-width: 0;
+    margin-right: 4px;
   }
 
   .seed input {
@@ -247,19 +266,14 @@
     width: 100%;
   }
 
-  .danger:hover:not(:disabled) {
-    color: var(--danger);
-    border-color: var(--danger);
-  }
-
   .err {
     color: var(--danger);
     margin: 0;
+    padding: 12px 0;
   }
 
   @media (pointer: coarse) {
     .toggle {
-      min-width: var(--touch);
       min-height: var(--touch);
     }
   }

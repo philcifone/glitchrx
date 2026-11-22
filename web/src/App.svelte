@@ -102,8 +102,8 @@
   }
 
   .app.dragging {
-    outline: 4px dashed var(--accent);
-    outline-offset: -4px;
+    outline: 3px dashed var(--accent);
+    outline-offset: -6px;
   }
 
   .stage {
@@ -116,7 +116,8 @@
   .sheet {
     grid-area: sheet;
     min-height: 0;
-    border-left: var(--border);
+    border-left: var(--hairline);
+    background: var(--bg);
     display: flex;
     flex-direction: column;
   }
@@ -137,25 +138,35 @@
       grid-template-rows: auto minmax(0, 22fr) minmax(0, 78fr) auto;
     }
 
+    /* A bottom sheet: rounded top corners over the stage, with a grabber. */
     .sheet {
       border-left: none;
-      border-top: var(--border);
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      margin-top: calc(-1 * var(--radius-lg));
+      box-shadow: 0 -4px 20px rgb(0 0 0 / 0.12);
+      position: relative;
+      z-index: 1;
     }
 
     .handle {
       display: flex;
       min-height: 22px;
       padding: 0;
-      border: none;
-      background: var(--bg);
+      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+      background: none;
       width: 100%;
       flex: none;
     }
 
+    .handle:hover:not(:disabled) {
+      background: none;
+    }
+
     .handle span {
-      width: 48px;
-      height: 4px;
-      background: var(--fg-dim);
+      width: 36px;
+      height: 5px;
+      border-radius: 3px;
+      background: var(--fill-strong);
     }
   }
 </style>

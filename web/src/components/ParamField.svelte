@@ -84,7 +84,7 @@
     <span class="help dim" title={spec.help}>{spec.help}</span>
     {#if overridden}
       <button class="icon reset" onclick={() => set(null)} title="Back to the default ({spec.default})" aria-label="Reset {spec.name}">
-        <RotateCcw size={14} strokeWidth={2.5} />
+        <RotateCcw size={14} strokeWidth={2} />
       </button>
     {/if}
   </div>
@@ -97,6 +97,7 @@
         max={SLIDER_STEPS}
         step="1"
         value={scale.toSlider(Number(text))}
+        style:--pct="{(scale.toSlider(Number(text)) / SLIDER_STEPS) * 100}%"
         oninput={(e) => live(String(scale.fromSlider(Number(e.currentTarget.value))))}
         onchange={() => app.commit()}
         aria-label="{spec.name} slider"
@@ -126,6 +127,7 @@
           max={SLIDER_STEPS}
           step="1"
           value={sl.scale.toSlider(sl.value)}
+          style:--pct="{(sl.scale.toSlider(sl.value) / SLIDER_STEPS) * 100}%"
           oninput={(e) => live(`${sl.scale.fromSlider(Number(e.currentTarget.value))}${sl.unit}`)}
           onchange={() => app.commit()}
           aria-label="{spec.name} slider"
@@ -211,13 +213,15 @@
   }
 
   label {
-    font-weight: 700;
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-transform: capitalize;
   }
 
   .help {
     flex: 1;
     min-width: 0;
-    font-size: 0.8em;
+    font-size: 0.75rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -226,32 +230,32 @@
   .reset {
     min-height: 24px;
     min-width: 24px;
-    padding: 2px;
-    border-width: 1.5px;
+    padding: 3px;
     align-self: center;
   }
 
   .ctl {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 12px;
   }
 
   .num {
-    width: 9ch;
+    width: 8ch;
     flex: none;
+    text-align: right;
   }
 
   .num[type='text'] {
-    width: 11ch;
+    width: 10ch;
   }
 
-  /* Two-handle region slider. */
+  /* Two-handle region slider: two range inputs stacked on one track. */
   .dual {
     position: relative;
     flex: 1;
     min-width: 0;
-    height: 32px;
+    height: 28px;
   }
 
   /* The track, drawn once for both inputs. */
@@ -262,14 +266,15 @@
     right: 0;
     top: 50%;
     height: 4px;
+    border-radius: 2px;
     transform: translateY(-50%);
-    background: var(--bg2);
+    background: var(--fill-strong);
   }
 
   .fill {
     position: absolute;
     top: 50%;
-    height: 6px;
+    height: 4px;
     transform: translateY(-50%);
     background: var(--accent);
   }
@@ -278,10 +283,8 @@
     position: absolute;
     inset: 0;
     height: 100%;
-    background: none;
+    min-height: 0;
     pointer-events: none;
-    -webkit-appearance: none;
-    appearance: none;
   }
 
   .dual .hi {
@@ -297,43 +300,27 @@
   }
 
   .dual input::-webkit-slider-thumb {
-    -webkit-appearance: none;
     pointer-events: auto;
-    width: 18px;
-    height: 26px;
-    background: var(--bg);
-    border: 3px solid var(--accent);
     cursor: grab;
   }
 
-  .dual input::-moz-range-track {
+  .dual input::-moz-range-track,
+  .dual input::-moz-range-progress {
     background: none;
   }
 
   .dual input::-moz-range-thumb {
     pointer-events: auto;
-    width: 12px;
-    height: 20px;
-    border-radius: 0;
-    background: var(--bg);
-    border: 3px solid var(--accent);
     cursor: grab;
-  }
-
-  @media (pointer: coarse) {
-    .dual {
-      height: 44px;
-    }
-    .dual input::-webkit-slider-thumb {
-      width: 26px;
-      height: 36px;
-    }
   }
 
   @media (pointer: coarse) {
     .reset {
       min-height: 32px;
       min-width: 32px;
+    }
+    .dual {
+      height: 44px;
     }
   }
 </style>

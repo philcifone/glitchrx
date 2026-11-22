@@ -22,7 +22,7 @@
 </script>
 
 <div class="stack">
-  <section class="sample">
+  <section class="card sample">
     <div class="row">
       <label for="encoding">Encoding</label>
       <select id="encoding" value={app.recipe.encoding} onchange={(e) => app.setEncoding(e.currentTarget.value)}>
@@ -30,7 +30,7 @@
           <option value={enc.id}>{enc.id}</option>
         {/each}
       </select>
-      <div class="seg" role="radiogroup" aria-label="Channels">
+      <div class="segmented" role="radiogroup" aria-label="Channels">
         {#each [1, 2] as n (n)}
           <button
             role="radio"
@@ -39,7 +39,7 @@
             onclick={() => app.setChannels(n as Channels)}
             title={n === 1 ? 'Mono: every sample in one stream' : 'Stereo: alternate samples are left and right, processed separately'}
           >
-            {n === 1 ? 'mono' : 'stereo'}
+            {n === 1 ? 'Mono' : 'Stereo'}
           </button>
         {/each}
       </div>
@@ -53,18 +53,18 @@
     {#each app.effects as e (e.id)}
       {@const Icon = iconFor(e.id)}
       <button onclick={() => add(e.id)} title="{e.summary} (Audacity: {e.audacity})" disabled={!app.config}>
-        <Icon size={24} strokeWidth={2.25} />
+        <Icon size={22} strokeWidth={1.75} />
         <span>{e.id}</span>
       </button>
     {/each}
   </section>
 
   <div class="head">
-    <h2>Steps</h2>
+    <h2 class="section-label">Steps</h2>
     <button class="icon" onclick={() => app.rerollAll()} disabled={!app.anySeeded} title="New seeds for every step that has something random" aria-label="Re-roll all seeds">
-      <Dices size={18} strokeWidth={2.25} />
+      <Dices size={18} strokeWidth={1.75} />
     </button>
-    <button onclick={() => app.clearSteps()} disabled={app.recipe.steps.length === 0}>Clear</button>
+    <button class="plain" onclick={() => app.clearSteps()} disabled={app.recipe.steps.length === 0}>Clear</button>
   </div>
 
   <ol class="steps" bind:this={list}>
@@ -82,17 +82,25 @@
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: var(--pad);
+    scrollbar-width: thin;
+    scrollbar-color: var(--fill-strong) transparent;
+    padding: 12px var(--pad);
     padding-bottom: calc(var(--pad) + env(safe-area-inset-bottom));
     display: flex;
     flex-direction: column;
-    gap: var(--pad);
+    gap: 14px;
+  }
+
+  .card {
+    background: var(--card);
+    border-radius: var(--radius-lg);
+    padding: 12px 14px;
   }
 
   .row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
   }
 
   .row select {
@@ -101,32 +109,21 @@
   }
 
   .sample label {
-    font-weight: 700;
+    font-weight: 600;
   }
 
   .note {
-    margin: 6px 0 0;
-    font-size: 0.88em;
+    margin: 8px 0 0;
+    font-size: 0.85rem;
   }
 
-  /* Segmented mono/stereo switch: two buttons sharing one border. */
-  .seg {
-    display: flex;
+  /* Encoding descriptions come from the server in lower case. */
+  .note::first-letter {
+    text-transform: uppercase;
+  }
+
+  .segmented {
     flex: none;
-  }
-
-  .seg button {
-    padding: 0 10px;
-  }
-
-  .seg button + button {
-    border-left: none;
-  }
-
-  .seg button.on {
-    background: var(--accent);
-    color: var(--accent-fg);
-    border-color: var(--accent);
   }
 
   /* Effect palette: one tap adds a step. Five columns, so the ten effects
@@ -134,40 +131,43 @@
   .palette {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 6px;
+    gap: 8px;
   }
 
   .palette button {
     flex-direction: column;
-    gap: 4px;
-    padding: 8px 2px 6px;
-    min-height: 64px;
+    gap: 5px;
+    padding: 10px 2px 8px;
+    min-height: 62px;
+    background: var(--card);
+    border-radius: 12px;
+    color: var(--accent);
   }
 
   .palette button span {
-    font-size: 0.68rem;
-    letter-spacing: -0.05em;
+    color: var(--fg);
+    font-size: 0.7rem;
+    font-weight: 500;
+    text-transform: capitalize;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   .palette button:hover:not(:disabled) {
-    color: var(--accent);
-    border-color: var(--accent);
+    background: var(--card);
+    box-shadow: inset 0 0 0 1.5px var(--accent-soft);
   }
 
   .head {
     display: flex;
     align-items: center;
-    gap: 6px;
-    border-top: var(--border);
-    padding-top: var(--pad);
+    gap: 2px;
+    padding: 4px 0 0 4px;
   }
 
   .head h2 {
     flex: 1;
-    font-size: 1.25rem;
   }
 
   .steps {
@@ -176,10 +176,11 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
   }
 
   .none {
-    padding: 8px 0;
+    padding: 4px;
+    font-size: 0.9rem;
   }
 </style>
