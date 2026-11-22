@@ -97,11 +97,12 @@ impl Step {
             .join(",")
     }
 
-    /// This step's encoding override, if any.
+    /// This step's encoding override, if any. A bad value is a parameter
+    /// error naming the effect, like any other parameter.
     pub fn encoding(&self) -> Result<Option<Encoding>> {
         self.params
             .get(ENCODING_KEY)
-            .map(|e| Encoding::parse(e))
+            .map(|e| Encoding::parse(e).map_err(|err| self.param_error(err)))
             .transpose()
     }
 
@@ -109,8 +110,19 @@ impl Step {
     pub fn channels(&self) -> Result<Option<usize>> {
         self.params
             .get(CHANNELS_KEY)
-            .map(|c| parse_channels(c))
+            .map(|c| parse_channels(c).map_err(|err| self.param_error(err)))
             .transpose()
+    }
+
+    fn param_error(&self, err: Error) -> Error {
+        let msg = match err {
+            Error::Recipe(m) => m,
+            other => other.to_string(),
+        };
+        Error::Param {
+            effect: self.effect.clone(),
+            msg,
+        }
     }
 
     /// Validate and construct the effect and its placement, with the
@@ -159,6 +171,14 @@ impl Prepared {
 
     /// Apply this step to raster bytes measured by `units`.
     pub fn apply(&self, bytes: &mut [u8], units: &Units, cancel: Cancel<'_>) -> Result<()> {
+        assert_eq!(
+            bytes.len(),
+            units.len(),
+            "raster of {} bytes measured as {}x{}",
+            bytes.len(),
+            units.width,
+            units.height
+        );
         let windows = self.placement.windows(units, self.frame(), self.seed);
         for (h, w) in windows.into_iter().enumerate() {
             if cancel() {

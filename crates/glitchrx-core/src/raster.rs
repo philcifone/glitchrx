@@ -76,11 +76,25 @@ impl Raster {
         }
     }
 
-    /// Downscale to fit `max_w` x `max_h` by averaging the source pixels
-    /// that cover each output pixel (a box filter). Good enough for
-    /// previews and thumbnails, and fast.
+    /// Downscale to fit `max_w` x `max_h` (see [`Raster::fit`]).
     pub fn downscale(&self, max_w: usize, max_h: usize) -> Raster {
-        let (ow, oh) = self.fit(max_w, max_h);
+        let (w, h) = self.fit(max_w, max_h);
+        self.resize(w, h)
+    }
+
+    /// Shrink to exactly `ow` x `oh` (each no larger than the raster) by
+    /// averaging the source pixels that cover each output pixel (a box
+    /// filter). Good enough for previews and thumbnails, and fast.
+    ///
+    /// Callers that already chose a size must use this rather than
+    /// [`Raster::downscale`]: `fit` is not idempotent (fitting 480x320 into
+    /// 200x200 gives 200x133, but fitting it into 200x133 gives 199x133,
+    /// since the rounding flips which side limits).
+    pub fn resize(&self, ow: usize, oh: usize) -> Raster {
+        let (ow, oh) = (
+            ow.clamp(1, self.width.max(1)),
+            oh.clamp(1, self.height.max(1)),
+        );
         if (ow, oh) == (self.width, self.height) {
             return self.clone();
         }
