@@ -2,7 +2,7 @@
 // card, kept here so they can be tested.
 //
 // A mask is a stack of components (brushes, linear gradients, radials,
-// brightness ranges), each added, subtracted or intersected with the mask
+// rectangles, pen paths, brightness ranges), each added, subtracted or intersected with the mask
 // so far. Every component stays editable: a radial keeps its centre and
 // edge, so it can be dragged and resized later; a brush keeps its strokes,
 // and its eraser only takes back its own paint.
@@ -54,6 +54,8 @@ export const SHAPE_LABEL: Record<MaskShape, string> = {
   brush: 'Brush',
   linear: 'Linear',
   radial: 'Radial',
+  rect: 'Rectangle',
+  path: 'Pen',
   brightness: 'Brightness',
 };
 
@@ -68,6 +70,12 @@ export function opDetail(op: MaskOp): string {
     }
     case 'brightness':
       return `${Math.round(op.low * 100)}-${Math.round(op.high * 100)}`;
+    case 'path': {
+      const n = op.points.length;
+      return n === 0 ? 'no points yet' : `${n} ${n === 1 ? 'point' : 'points'}`;
+    }
+    case 'rect':
+      return op.angle ? `turned ${Math.round(op.angle)}\u00b0` : '';
     default:
       return '';
   }
@@ -90,6 +98,16 @@ export function newComponent(shape: MaskShape, aspect: number, others: number): 
       const r = 0.2 * Math.max(1, 1 / aspect);
       return { shape, mode: 'add', from: [0.5, 0.5], to: [roundCoord(0.5 + r), 0.5], hardness: 1 };
     }
+    case 'rect':
+      // Half the picture each way, centred.
+      return {
+        shape,
+        mode: 'add',
+        center: [0.5, 0.5],
+        size: [roundCoord(0.5 * Math.min(1, aspect)), roundCoord(0.5 * Math.min(1, 1 / aspect))],
+      };
+    case 'path':
+      return { shape, mode: 'add', points: [] };
     case 'brightness':
       // With other components, a brightness range is most useful as a limit.
       return { shape, mode: others > 0 ? 'intersect' : 'add', low: 0.5, high: 1, soft: 0.1 };

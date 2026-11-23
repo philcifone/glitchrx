@@ -11,6 +11,10 @@
   import Blinds from '@lucide/svelte/icons/blinds';
   import CircleDot from '@lucide/svelte/icons/circle-dot';
   import SunMedium from '@lucide/svelte/icons/sun-medium';
+  import RectangleHorizontal from '@lucide/svelte/icons/rectangle-horizontal';
+  import PenTool from '@lucide/svelte/icons/pen-tool';
+  import Spline from '@lucide/svelte/icons/spline';
+  import Check from '@lucide/svelte/icons/check';
   import Plus from '@lucide/svelte/icons/plus';
   import Copy from '@lucide/svelte/icons/copy';
   import Scissors from '@lucide/svelte/icons/scissors';
@@ -35,9 +39,11 @@
     brush: Paintbrush,
     linear: Blinds,
     radial: CircleDot,
+    rect: RectangleHorizontal,
+    path: PenTool,
     brightness: SunMedium,
   };
-  const SHAPES: MaskShape[] = ['brush', 'linear', 'radial', 'brightness'];
+  const SHAPES: MaskShape[] = ['brush', 'linear', 'radial', 'rect', 'path', 'brightness'];
   const MODES: { id: MaskMode; label: string }[] = [
     { id: 'add', label: 'Add' },
     { id: 'subtract', label: 'Subtract' },
@@ -47,8 +53,17 @@
     brush: 'Paint on the photo. Erase takes back only this brush.',
     linear: 'Full at the solid line, faded out at the other. Drag a line or the middle; drag elsewhere to draw it again.',
     radial: 'Drag the centre to move it and the ring to resize it; drag elsewhere to draw it again. Feather softens its edge.',
+    rect: 'Drag a corner to resize, the top handle to turn (shift: 15 degree steps), inside to move; drag elsewhere to draw it again.',
+    path: 'Drag a point to move it, its handles to bend the sides; tap a side to add a point, drag inside to move it all.',
     brightness: 'Pixels in this range, read from the picture as it reaches this step.',
   };
+  /** While a pen path is being drawn. */
+  const PLACING_HINT = 'Tap to add points; drag as you place one to curve its sides. Tap the first point to close.';
+
+  /** The picked pen point on the active path, if it is this row's. */
+  function penPicked(op: MaskOp): number[] | null {
+    return op.shape === 'path' && app.penPoint !== null ? (op.points[app.penPoint] ?? null) : null;
+  }
 
   /** The + menu under the list. */
   let adding = $state(false);
@@ -337,8 +352,32 @@
                 />
                 <span class="val">{Math.round(op.soft * 100)}</span>
               </div>
+            {:else if op.shape === 'path'}
+              {@const picked = penPicked(op)}
+              {#if app.penPlacing}
+                <div class="row sub">
+                  <span class="grow note dim">{PLACING_HINT}</span>
+                  <button onclick={() => app.finishPen()} title="Stop adding points (Enter)">
+                    <Check size={15} strokeWidth={1.75} /> Finish
+                  </button>
+                </div>
+              {:else if picked}
+                <div class="row sub">
+                  <span class="lbl">Point</span>
+                  <span class="grow"></span>
+                  <button onclick={() => app.togglePenSmooth()} title={picked.length === 4 ? 'Make it a sharp corner' : 'Give it handles, to curve its sides'}>
+                    <Spline size={15} strokeWidth={1.75} />
+                    {picked.length === 4 ? 'Corner' : 'Smooth'}
+                  </button>
+                  <button onclick={() => app.removePenPoint()} disabled={op.points.length <= 1} title="Remove this point (Delete)">
+                    <X size={15} strokeWidth={1.75} /> Remove
+                  </button>
+                </div>
+              {/if}
             {/if}
-            <p class="note dim">{HINT[op.shape]}</p>
+            {#if !(op.shape === 'path' && app.penPlacing)}
+              <p class="note dim">{HINT[op.shape]}</p>
+            {/if}
           {/if}
         </li>
       {/each}
@@ -439,7 +478,7 @@
 
   .adds {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 6px;
   }
 

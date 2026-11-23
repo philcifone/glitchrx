@@ -25,6 +25,7 @@ import {
 import { usesSamples } from './palette';
 import { usesSeed } from './seed';
 import { shakeParams } from './shake';
+import { toggleSmooth } from './shapes';
 import { FIT, clampView, geometry, isZoomed, toggle, visible, type Geometry, type Point, type Rect, type View } from './view';
 import type {
   Channels,
@@ -202,6 +203,14 @@ export class App {
   selected = $state<number[]>([]);
   /** Components copied or cut, ready to paste into any step's mask. */
   maskClipboard = $state<MaskOp[]>([]);
+  /**
+   * The active pen path is still being drawn: taps on the photo add points
+   * until the first one is tapped again (or Finish). A path with fewer
+   * than three points starts out this way.
+   */
+  penPlacing = $state(false);
+  /** The pen point last touched on the active path, for Remove and Corner / Smooth. */
+  penPoint = $state<number | null>(null);
   /** Opening another photo: ask, keep the steps, or start fresh (per device). */
   newPhoto = $state<NewPhotoChoice>(loadNewPhoto());
   /** Steps carried onto a photo just opened, waiting for keep or start fresh (0: not asking). */
@@ -427,6 +436,8 @@ export class App {
         if (this.activeOp !== null && this.activeOp >= n) this.activeOp = n ? n - 1 : null;
         this.selected = this.selected.filter((i) => i < n);
         if (this.activeOp !== null && !this.selected.includes(this.activeOp)) this.selected.push(this.activeOp);
+        const op = this.activeMaskOp;
+        if (this.penPoint !== null && (op?.shape !== 'path' || this.penPoint >= op.points.length)) this.penPoint = null;
       }
     }
     this.revision++;
@@ -574,7 +585,50 @@ export class App {
     else {
       this.activeOp = index;
       this.selected = [index];
+      this.resetPen();
     }
+  }
+
+  /** The component being edited, if any. */
+  get activeMaskOp(): MaskOp | null {
+    if (this.activeOp === null) return null;
+    return this.maskTarget?.step.mask?.op?.[this.activeOp] ?? null;
+  }
+
+  /** A newly active path with too few points to enclose anything carries on being drawn. */
+  private resetPen(): void {
+    const op = this.activeMaskOp;
+    this.penPoint = null;
+    this.penPlacing = op?.shape === 'path' && op.points.length < 3;
+  }
+
+  /** Stop adding points to the path being drawn. */
+  finishPen(): void {
+    this.penPlacing = false;
+  }
+
+  /** Change the active path's points (a drag, or a point added). */
+  setPenPoints(points: number[][], commit = true): void {
+    if (!this.masking || this.activeOp === null || this.activeMaskOp?.shape !== 'path') return;
+    this.updateMaskOp(this.masking, this.activeOp, { points }, commit);
+  }
+
+  /** Remove the picked point from the active path. */
+  removePenPoint(): void {
+    const op = this.activeMaskOp;
+    const i = this.penPoint;
+    if (op?.shape !== 'path' || i === null || !op.points[i]) return;
+    this.setPenPoints(op.points.filter((_, k) => k !== i));
+    this.penPoint = null;
+  }
+
+  /** Switch the picked point between a corner and a smooth point. */
+  togglePenSmooth(): void {
+    const op = this.activeMaskOp;
+    const i = this.penPoint;
+    if (op?.shape !== 'path' || i === null || !op.points[i] || !this.doc) return;
+    // Handles are laid out in the photo's own proportions.
+    this.setPenPoints(toggleSmooth($state.snapshot(op.points) as number[][], i, this.doc.width, this.doc.height));
   }
 
   /**
@@ -590,7 +644,10 @@ export class App {
       return;
     }
     this.selected = this.selected.filter((i) => i !== index);
-    if (this.activeOp === index) this.activeOp = this.selected.at(-1) ?? null;
+    if (this.activeOp === index) {
+      this.activeOp = this.selected.at(-1) ?? null;
+      this.resetPen();
+    }
   }
 
   /** The components that copy, cut and the sliders act on. */
@@ -696,7 +753,9 @@ export class App {
       if (this.masking === uid) this.stopMasking();
       delete s.mask;
     } else if (this.masking === uid) {
+      const before = this.activeOp;
       this.activeOp = afterRemoval(this.activeOp, indices);
+      if (this.activeOp === null || before === null || indices.includes(before)) this.resetPen();
       this.selected = this.selected.flatMap((i) => {
         const j = afterRemoval(i, indices);
         return j === null ? [] : [j];
@@ -720,6 +779,7 @@ export class App {
     this.masking = uid;
     this.activeOp = index ?? (n ? n - 1 : null);
     this.selected = this.activeOp === null ? [] : [this.activeOp];
+    this.resetPen();
     this.maskKey = '';
     this.refreshMask();
   }
@@ -728,6 +788,8 @@ export class App {
     this.masking = null;
     this.activeOp = null;
     this.selected = [];
+    this.penPlacing = false;
+    this.penPoint = null;
     this.maskKey = '';
     this.setMaskUrl(null);
   }
