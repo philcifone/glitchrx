@@ -41,6 +41,8 @@ glitchrx --echo --encoding ulaw photo.jpg       # read the pixels as mu-law audi
 glitchrx --shift by=0.5rows,phase=2,hits=12 photo.jpg
 glitchrx --pixelsort low=0.3 photo.jpg          # melt the bright areas into streaks
 glitchrx --echo opacity=0.5 photo.jpg           # blend the step at half strength
+glitchrx --pixelsort --work-size 1024 photo.jpg # run on a 1024 px copy: coarser, faster
+glitchrx --shift --work-size 1024 --scale-back photo.jpg   # ...enlarged back, hard pixel edges
 glitchrx --stutter --batch *.jpg                # every file, automatic names
 glitchrx --info photo.jpg                       # format, size, orientation, colour profile
 glitchrx --list                                 # every effect and parameter
@@ -135,6 +137,7 @@ In the GUI:
 - **Presets** (the bookmark) are your own saved recipes, kept by the server in `~/.config/glitchrx/presets` (`--presets DIR` to move them), so your phone and desktop share them. Use one to replace the steps, or add its steps to the current recipe. Its steps stay together in the stack under the preset's name and move as a block; once you change one, the group shows Modified, with Revert (back to the preset) and Update preset (save the changes to it). They are ordinary recipe files: `glitchrx --recipe ~/.config/glitchrx/presets/NAME.toml photo.jpg`.
 - **Press and hold the photo** (or the `\` key) to see the untouched original; while masking, hold the compare button in the top bar instead.
 - **Zoom** with a pinch, ctrl + wheel or a trackpad pinch; double-tap, tap the magnifier or press Z for 100% and back. Zoomed in, drag (or use the wheel) to pan. Once the view holds still, what is on screen is cut from the full-resolution render, so it is sharp and exactly the export. While masking, one finger paints and two fingers zoom and pan; the brush keeps its size on screen, so zooming in paints finer lines.
+- **Work size** (Full, 4K, 2K, 1K, on the photo at the bottom left) runs the steps on a smaller copy: the glitch texture gets coarser and everything gets faster. At 1K the live preview is already exact. Export writes that size, or enlarges it back to the photo's size with hard pixel edges. It is saved in the recipe.
 - **Undo and redo** with the buttons or Ctrl+Z / Ctrl+Shift+Z. History holds recipes, not images.
 - **Export** at full resolution as TIFF, PNG, JPEG (with quality), WebP (quality, or lossless) or AVIF (quality and speed; slow). Download it to this device, save it next to an original from the library using the CLI's `-glitch`, `-glitch-1` naming, or **Save As** into any folder in the server's home folder under a name you choose. Nothing is ever overwritten. The format and its settings are remembered on each device. The recipe can be downloaded, then loaded again later or replayed with `glitchrx --recipe`.
 - **Settings** (the gear): light, dark or system appearance; the library folder (what Open browses) and the export folder (where Save As starts), picked from the server's home folder and kept in `~/.config/glitchrx/config.toml` for every device; and what opening another photo does with the steps.
