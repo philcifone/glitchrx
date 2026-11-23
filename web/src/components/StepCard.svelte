@@ -46,7 +46,7 @@
     <button class="name" onclick={() => (open = !open)} aria-expanded={open} title={info?.summary}>
       <span class="glyph"><Icon size={18} strokeWidth={1.75} /></span>
       <!-- The number in the system font: Young Serif's old-style 1 reads as "i". -->
-      <span class="label serif">{step.effect}<span class="num">{app.stepNumber(step)}</span></span>
+      <span class="label serif">{step.effect}{#if app.stepNumber(step)}<span class="num">-{app.stepNumber(step)}</span>{/if}</span>
       {#if stepEncoding}<span class="enc">{stepEncoding}</span>{/if}
       {#if step.mask}
         <span class="enc tag-icon" class:live={app.masking === step.uid} title="Masked" aria-label="Masked">

@@ -1,6 +1,6 @@
 // Step names: the effect's name, numbered when the stack holds more than
-// one of it (echo0, echo1, ...). A step keeps its number for life, so it
-// stays "echo1" when moved; a new step takes the next number after the
+// one of it (echo-0, echo-1, ...). A step keeps its number for life, so it
+// stays "echo-1" when moved; a new step takes the next number after the
 // highest in use, and numbers start again at 0 once none are left.
 
 import type { StepState } from './types';
@@ -26,7 +26,8 @@ export function stepNumber(step: StepState, steps: StepState[]): string {
   return twins > 1 ? String(step.n ?? '') : '';
 }
 
-/** How a step is labelled in the stack: echo, or echo0, echo1, ... */
+/** How a step is labelled in the stack: echo, or echo-0, echo-1, ... */
 export function stepName(step: StepState, steps: StepState[]): string {
-  return step.effect + stepNumber(step, steps);
+  const n = stepNumber(step, steps);
+  return n ? `${step.effect}-${n}` : step.effect;
 }

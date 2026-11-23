@@ -437,7 +437,7 @@ export class App {
     this.render('fast');
   }
 
-  /** The step's label: its effect, numbered when there are several (echo0, echo1). */
+  /** The step's label: its effect, numbered when there are several (echo-0, echo-1). */
   stepName(step: StepState): string {
     return stepName(step, this.recipe.steps);
   }
