@@ -59,6 +59,7 @@ Background, mostly from the archived JPEG byte engine (`archive/jpeg-bytes`). JP
 - **Effect.** One operation, such as echo or shuffle. Most follow one of Audacity's and work on the raster's raw bytes as samples. **Pixel effects** (pixelsort) work on whole pixels as colours, in rows and columns, instead.
 - **Adjustment.** A photo tool rather than a glitch (levels, curves, hsl, balance), in the effect group `adjust`. Adjustments are ordinary steps, so masks, opacity and placement apply.
 - **Levels.** Black point (input values at or below it become black), white point, and **gamma**, which bends the midtones lighter (above 1) or darker.
+- **Histogram.** How many pixels have each value, 0 to 255, drawn as a mountain range behind a curve: the picture as it reaches the step.
 - **Curve.** A tone curve: points `IN:OUT` mapping input values to output values, joined by a **monotone cubic**, a smooth curve that never overshoots between its points (Fritsch-Carlson).
 - **Colour balance.** Tinting one tone range (shadows, midtones or highlights) towards red or cyan, green or magenta, blue or yellow; with luminosity kept, only the colour changes.
 - **Pixel sorting.** Reordering pixels along a column or row by a key (brightness, hue, saturation). The classic version (Kim Asendorf's ASDF sort) only sorts **runs**: stretches of pixels whose brightness lies inside a band (`low` to `high`). Pixels outside the band stay put and break the runs, which is why shadows keep the picture recognisable while bright areas melt into streaks.
