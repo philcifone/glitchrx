@@ -58,7 +58,7 @@
     color: var(--fg);
     font-size: 0.7rem;
     font-weight: 500;
-    text-transform: capitalize;
+    /* Effect names stay lower case, as typed on the command line. */
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;

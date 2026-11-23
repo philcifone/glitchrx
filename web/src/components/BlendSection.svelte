@@ -20,6 +20,7 @@
   import Scissors from '@lucide/svelte/icons/scissors';
   import ClipboardPaste from '@lucide/svelte/icons/clipboard-paste';
   import X from '@lucide/svelte/icons/x';
+  import { revealIn } from '../lib/scroll';
   import { app } from '../lib/app.svelte';
   import { SLIDER_STEPS } from '../lib/slider';
   import { SHAPE_LABEL, brushScale, featherScale, opDetail, opFeather, opOpacity, percent } from '../lib/mask';
@@ -143,7 +144,7 @@
   // Bring the controls into view when editing starts (the phone sheet is short).
   let section = $state<HTMLElement>();
   $effect(() => {
-    if (editing) section?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    if (editing) revealIn(section);
   });
 
   const sliderPct = (t: number) => `${(t / SLIDER_STEPS) * 100}%`;
@@ -365,12 +366,14 @@
                 <div class="row sub">
                   <span class="lbl">Point</span>
                   <span class="grow"></span>
-                  <button onclick={() => app.togglePenSmooth()} title={picked.length === 4 ? 'Make it a sharp corner' : 'Give it handles, to curve its sides'}>
-                    <Spline size={15} strokeWidth={1.75} />
-                    {picked.length === 4 ? 'Corner' : 'Smooth'}
-                  </button>
-                  <button onclick={() => app.removePenPoint()} disabled={op.points.length <= 1} title="Remove this point (Delete)">
-                    <X size={15} strokeWidth={1.75} /> Remove
+                  <div class="segmented kind" role="radiogroup" aria-label="Point kind">
+                    <button role="radio" aria-checked={picked.length !== 4} class:on={picked.length !== 4} onclick={() => picked.length === 4 && app.togglePenSmooth()} title="A sharp corner">Corner</button>
+                    <button role="radio" aria-checked={picked.length === 4} class:on={picked.length === 4} onclick={() => picked.length !== 4 && app.togglePenSmooth()} title="Handles that curve its sides">
+                      <Spline size={14} strokeWidth={1.75} /> Smooth
+                    </button>
+                  </div>
+                  <button class="icon" onclick={() => app.removePenPoint()} disabled={op.points.length <= 1} title="Remove this point (Delete)" aria-label="Remove this point">
+                    <X size={17} strokeWidth={1.75} />
                   </button>
                 </div>
               {/if}
@@ -430,6 +433,14 @@
 </section>
 
 <style>
+  .kind {
+    flex: none;
+  }
+
+  .kind button {
+    gap: 4px;
+  }
+
   .group {
     border-top: var(--hairline);
     padding: 12px 0;

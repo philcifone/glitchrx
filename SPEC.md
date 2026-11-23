@@ -332,12 +332,12 @@ Pixel-domain glitches stay close to where they are applied, so masking works lik
 
 ### 9.4 Presets (Phase 3, D-39)
 
-A Presets button in the top bar: save the recipe under a name, use a preset (replaces the steps, undoable), add a preset's steps to the current recipe, delete. Presets with an effect version this build no longer has are listed with the reason and cannot be used. The dialog also holds what opening another photo does with the steps (Ask, Keep steps, Start fresh; D-41).
+A Presets button in the top bar: save the recipe under a name, use a preset (replaces the steps, undoable), add a preset's steps to the current recipe, delete. Presets with an effect version this build no longer has are listed with the reason and cannot be used. What opening another photo does with the steps (Ask, Keep steps, Start fresh; D-41) moved to Settings in 4c (D-45).
 
 ### 9.5 Step card
 
-- **Header:** number, effect icon and name, tags (encoding override, a venetian-mask icon when masked, opacity below 100%), the on/off switch, and Shake (shuffle arrows).
-- **Body:** the effect's settings; Samples (encoding, channels); Placement, ending with the seed and the dice that re-rolls it (the seed only decides where hits land, so it belongs there); Blend (9.3); then the step's own actions in a row of their own: Up, Down, Duplicate, Remove.
+- **Header:** number, effect icon and name, tags (encoding override, a venetian-mask icon when masked, opacity below 100%), and the on/off switch. Effect names are lower case, as on the command line. When an effect is in the stack more than once, each step is numbered (`echo0`, `echo1`, ...); a step keeps its number when moved, a new one takes the next after the highest in use, and duplicates get a new number (Phil, 2026-11-23).
+- **Body:** the effect's settings, headed by Shake (moved off the header, where it was easy to bump; Phil, 2026-11-23); Samples (encoding, channels); Placement, ending with the seed and the dice that re-rolls it (the seed only decides where hits land, so it belongs there); Blend (9.3); then the step's own actions in a row of their own: Up, Down, Duplicate, Remove.
 
 ### 9.6 Zoom (Phase 4a, D-42)
 

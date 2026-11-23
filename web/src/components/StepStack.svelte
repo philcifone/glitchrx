@@ -10,6 +10,7 @@
   import type { PresetGroup, StepState } from '../lib/types';
   import { tick } from 'svelte';
   import { app } from '../lib/app.svelte';
+  import { revealIn } from '../lib/scroll';
   import { CHANNEL_CHOICES } from '../lib/channels';
   import EffectPalette from './EffectPalette.svelte';
   import StepCard from './StepCard.svelte';
@@ -25,7 +26,7 @@
     if (sheet?.open) sheet.close();
     app.addStep(effect);
     await tick();
-    list?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    revealIn(list?.lastElementChild);
   }
 
   // The stack as blocks: loose steps, and preset groups holding theirs.

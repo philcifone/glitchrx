@@ -226,7 +226,9 @@
           <button onclick={() => run(() => app.downloadRecipe())} disabled={app.recipe.steps.length === 0}>Download recipe</button>
         {/if}
         <button onclick={() => recipeInput.click()}>Load recipe</button>
-        <input bind:this={recipeInput} type="file" accept=".toml,text/plain,application/toml" class="visually-hidden" onchange={loadRecipe} tabindex="-1" />
+        <!-- No accept filter: iOS has no file type for .toml and would grey the
+             recipe out. The server checks what is picked. -->
+        <input bind:this={recipeInput} type="file" class="visually-hidden" onchange={loadRecipe} tabindex="-1" />
       </div>
     </section>
   </div>
