@@ -88,10 +88,14 @@
   box-sizing: border-box;
 }
 
+/* The app is exactly one screen; the page itself never scrolls (only
+   panels and sheets inside it do). */
 html,
 body {
   margin: 0;
   height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
   background: var(--bg);
   color: var(--fg);
   font-family: var(--font);
