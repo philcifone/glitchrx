@@ -11,6 +11,7 @@ import type {
   Listing,
   PresetInfo,
   RecipeDto,
+  SavedRecipe,
   ServerConfig,
 } from './types';
 
@@ -266,6 +267,17 @@ export async function recipeToToml(recipe: RecipeDto): Promise<string> {
   const res = await postJson('/api/recipe/to-toml', recipe);
   if (!res.ok) await fail(res);
   return res.text();
+}
+
+/** Recipes saved in the library and export folders, newest first. */
+export async function listRecipes(): Promise<SavedRecipe[]> {
+  return json<SavedRecipe[]>(await fetch('/api/recipes'));
+}
+
+/** Read one of them. */
+export async function readRecipe(r: SavedRecipe): Promise<RecipeDto> {
+  const q = new URLSearchParams({ place: r.place, path: r.path });
+  return json<RecipeDto>(await fetch(`/api/recipe?${q}`));
 }
 
 export async function recipeFromToml(text: string): Promise<RecipeDto> {

@@ -51,6 +51,20 @@ export interface DocInfo {
   file_len: number;
   /** Raw RGB bytes the effects work on. */
   raw_len: number;
+  /** Recipes on the server made on this photo, newest first. */
+  recipes?: SavedRecipe[];
+}
+
+/** A recipe file in the library or export folder on the server. */
+export interface SavedRecipe {
+  place: 'library' | 'export';
+  /** Relative to that folder. */
+  path: string;
+  name: string;
+  /** Seconds since 1970. */
+  modified: number;
+  /** The photo it was made on, when the recipe says. */
+  source: string | null;
 }
 
 /** A sample encoding (Audacity's Import Raw Data choices). */
@@ -150,6 +164,8 @@ export interface RecipeDto {
   scale_back?: boolean;
   /** The part of the photo kept, before anything else. */
   crop?: Crop;
+  /** The photo's file name, recorded in saved recipes. */
+  source?: string;
   steps: StepDto[];
 }
 

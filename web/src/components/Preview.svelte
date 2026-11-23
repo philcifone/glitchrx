@@ -23,6 +23,9 @@
   import ZoomOut from '@lucide/svelte/icons/zoom-out';
   import CropIcon from '@lucide/svelte/icons/crop';
   import CropTool from './CropTool.svelte';
+  import RecipePicker from './RecipePicker.svelte';
+  import X from '@lucide/svelte/icons/x';
+  import { ago, recipeTitle } from '../lib/age';
   import { app } from '../lib/app.svelte';
   import { WORK_SIZES } from '../lib/canvas';
   import { pan, percent, pinch, placement, spread, wheelZoom, type Point, type Spread, type View } from '../lib/view';
@@ -221,6 +224,8 @@
     }
   }
 
+  let recipes: RecipePicker;
+
   const cursor = $derived(
     app.masking ? paintCursor : panning ? 'grabbing' : app.zoomed ? 'grab' : 'default',
   );
@@ -308,6 +313,24 @@
     </div>
   {/if}
 
+  {#if app.continueFrom.length && app.doc && !app.cropping && !app.masking && !app.working}
+    <!-- Picking up an old edit (5e): this photo has recipes saved on the
+         server. The newest is one tap away; More lists them all. -->
+    {@const r = app.continueFrom[0]}
+    <div class="continue glass" role="status">
+      <span class="ct">
+        Continue from <span class="rname">{recipeTitle(r.name)}</span>
+        <span class="dim">{ago(r.modified)}</span>
+      </span>
+      {#if app.continueFrom.length > 1}
+        <button class="plain" onclick={() => recipes.open()}>More</button>
+      {/if}
+      <button class="primary go" onclick={() => app.loadSaved(r)}>Continue</button>
+      <button class="icon" onclick={() => (app.continueFrom = [])} aria-label="Not now" title="Not now">
+        <X size={18} strokeWidth={1.75} />
+      </button>
+    </div>
+  {/if}
   {#if app.cropping && app.doc}
     <CropTool />
   {:else if app.doc && app.imageUrl && g}
@@ -356,7 +379,46 @@
   {/if}
 </div>
 
+<RecipePicker bind:this={recipes} />
+
 <style>
+  .continue {
+    position: absolute;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: calc(100% - 24px);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 4px 4px 14px;
+    border-radius: 999px;
+    background: var(--glass);
+    backdrop-filter: saturate(180%) blur(16px);
+    -webkit-backdrop-filter: saturate(180%) blur(16px);
+    box-shadow: var(--shadow);
+    z-index: 2;
+    font-size: 0.9rem;
+  }
+
+  .ct {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .rname {
+    font-weight: 600;
+  }
+
+  .continue .go {
+    min-height: 34px;
+    padding: 4px 14px;
+    border-radius: 999px;
+  }
+
   .box {
     position: absolute;
     inset: 0;

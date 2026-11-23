@@ -11,11 +11,13 @@
   import { WEBP_MAX_SIDE, cleanPrefs, isLossy, optionsOf, type ExportPrefs } from '../lib/exportprefs';
   import { storageGet, storageSet } from '../lib/storage';
   import type { ExportFormat } from '../lib/types';
+  import RecipePicker from './RecipePicker.svelte';
   import FolderPicker from './FolderPicker.svelte';
 
   const PREFS_KEY = 'glitchrx.export';
 
   let dialog: HTMLDialogElement;
+  let recipes: RecipePicker;
   let recipeInput: HTMLInputElement;
   let picker: FolderPicker;
   let prefs = $state<ExportPrefs>(load());
@@ -244,6 +246,7 @@
           <button onclick={() => run(() => app.downloadRecipe())} disabled={app.recipe.steps.length === 0}>Download recipe</button>
         {/if}
         <button onclick={() => recipeInput.click()}>Load recipe</button>
+        <button onclick={() => recipes.open()}>Saved on the server</button>
         <!-- No accept filter: iOS has no file type for .toml and would grey the
              recipe out. The server checks what is picked. -->
         <input bind:this={recipeInput} type="file" class="visually-hidden" onchange={loadRecipe} tabindex="-1" />
@@ -253,6 +256,7 @@
 </dialog>
 
 <FolderPicker bind:this={picker} />
+<RecipePicker bind:this={recipes} />
 
 <style>
   .head {
