@@ -5,6 +5,9 @@
   // steps get the room.
   import Dices from '@lucide/svelte/icons/dices';
   import Plus from '@lucide/svelte/icons/plus';
+  import ChevronUp from '@lucide/svelte/icons/chevron-up';
+  import ChevronDown from '@lucide/svelte/icons/chevron-down';
+  import type { PresetGroup, StepState } from '../lib/types';
   import { tick } from 'svelte';
   import { app } from '../lib/app.svelte';
   import { CHANNEL_CHOICES } from '../lib/channels';
@@ -24,6 +27,22 @@
     await tick();
     list?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
+
+  // The stack as blocks: loose steps, and preset groups holding theirs.
+  type Block =
+    | { kind: 'step'; step: StepState; i: number }
+    | { kind: 'group'; group: PresetGroup; steps: { step: StepState; i: number }[] };
+  const blocks = $derived.by(() => {
+    const out: Block[] = [];
+    app.recipe.steps.forEach((step, i) => {
+      const last = out[out.length - 1];
+      const g = step.group ? app.groupOf(step.group) : undefined;
+      if (!g) out.push({ kind: 'step', step, i });
+      else if (last?.kind === 'group' && last.group.id === g.id) last.steps.push({ step, i });
+      else out.push({ kind: 'group', group: g, steps: [{ step, i }] });
+    });
+    return out;
+  });
 
   /** A tap on the backdrop (the dialog element itself) closes the sheet. */
   function backdrop(e: MouseEvent) {
@@ -73,8 +92,46 @@
   </div>
 
   <ol class="steps" bind:this={list}>
-    {#each app.recipe.steps as step, i (step.uid)}
-      <li><StepCard {step} index={i} count={app.recipe.steps.length} /></li>
+    {#each blocks as b (b.kind === 'step' ? b.step.uid : b.group.id)}
+      {#if b.kind === 'step'}
+        <li><StepCard step={b.step} index={b.i} /></li>
+      {:else}
+        {@const id = b.group.id}
+        {@const modified = app.groupModified(id)}
+        <li class="group" aria-label="From preset {b.group.preset}">
+          <div class="ghead">
+            <span class="gname">
+              <span class="from">From preset</span>
+              <span class="serif pname">{b.group.preset}</span>
+            </span>
+            {#if modified}<span class="badge">Modified</span>{/if}
+            <button class="icon" onclick={() => app.moveGroup(id, -1)} disabled={!app.canMoveGroup(id, -1)} title="Move the group up" aria-label="Move the group up">
+              <ChevronUp size={18} strokeWidth={1.75} />
+            </button>
+            <button class="icon" onclick={() => app.moveGroup(id, 1)} disabled={!app.canMoveGroup(id, 1)} title="Move the group down" aria-label="Move the group down">
+              <ChevronDown size={18} strokeWidth={1.75} />
+            </button>
+          </div>
+          <ol class="steps inner">
+            {#each b.steps as s (s.step.uid)}
+              <li><StepCard step={s.step} index={s.i} /></li>
+            {/each}
+          </ol>
+          <div class="gfoot">
+            <button class="plain" onclick={() => app.revertGroup(id)} disabled={!modified} title="Back to the preset's settings">Revert</button>
+            <button
+              class="plain"
+              onclick={() => app.updatePreset(id)}
+              disabled={!modified || !app.config?.presets}
+              title="Save these steps as the preset {b.group.preset}"
+            >
+              Update preset
+            </button>
+            <span class="grow"></span>
+            <button class="plain" onclick={() => app.ungroup(id)} title="Keep the steps, drop the group">Ungroup</button>
+          </div>
+        </li>
+      {/if}
     {:else}
       <li class="dim none">
         No steps yet. <span class="wide-only">Pick an effect above</span><span class="phone-only">Tap + to add an effect</span>;
@@ -280,5 +337,69 @@
   .none {
     padding: 4px;
     font-size: 0.9rem;
+  }
+
+  /* A preset group: its cards on a tinted panel, a label above them and
+     its actions below. */
+  .group {
+    background: var(--fill);
+    border-radius: calc(var(--radius-lg) + 4px);
+    padding: 4px 6px 2px;
+  }
+
+  .ghead {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0 6px 8px;
+    margin-bottom: 8px;
+    border-bottom: var(--hairline);
+    min-width: 0;
+  }
+
+  .gname {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+
+  .from {
+    flex: none;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+  }
+
+  .pname {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .badge {
+    flex: none;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .gfoot {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 2px 0;
+  }
+
+  .gfoot .plain {
+    font-size: 0.9rem;
+  }
+
+  .grow {
+    flex: 1;
   }
 </style>

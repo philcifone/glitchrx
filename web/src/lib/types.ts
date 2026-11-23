@@ -153,12 +153,28 @@ export interface StepState extends StepDto {
   uid: string;
   /** Disabled steps stay in the stack but are left out of the render. */
   enabled: boolean;
+  /** The preset group this step came in with (see groups.ts). */
+  group?: string;
+}
+
+/**
+ * Steps added from a preset, kept together under its name. `base` is the
+ * preset's steps as added, written for its own `encoding` and `channels`.
+ */
+export interface PresetGroup {
+  id: string;
+  preset: string;
+  encoding: string;
+  channels: Channels;
+  base: StepDto[];
 }
 
 export interface RecipeState {
   encoding: string;
   channels: Channels;
   steps: StepState[];
+  /** Preset groups; UI only, never sent to the server or saved in recipes. */
+  groups?: PresetGroup[];
 }
 
 /** A saved preset, as listed. */
