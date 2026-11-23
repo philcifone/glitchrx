@@ -55,7 +55,8 @@
   /**
    * Mask editing shortcuts, Photoshop style: B and E paint and erase with
    * a brush (the active one, else the last, else a new one), [ and ] size
-   * it, Enter or Esc finish.
+   * it, Enter or Esc finish (a pen path being drawn first, then editing),
+   * Delete removes the picked pen point.
    */
   function maskKey(e: KeyboardEvent) {
     const uid = app.masking!;
@@ -71,7 +72,9 @@
       app.setTool({ tool: k === 'e' ? 'erase' : 'paint' });
     } else if (e.key === '[') app.setTool({ size: Math.max(0.005, Math.round(app.tool.size * 0.85 * 10000) / 10000) });
     else if (e.key === ']') app.setTool({ size: Math.min(0.3, Math.round(app.tool.size * 1.18 * 10000) / 10000) });
+    else if ((e.key === 'Escape' || e.key === 'Enter') && app.penPlacing) app.finishPen();
     else if (e.key === 'Escape' || e.key === 'Enter') app.stopMasking();
+    else if ((e.key === 'Delete' || e.key === 'Backspace') && app.penPoint !== null) app.removePenPoint();
     else return;
     e.preventDefault();
   }

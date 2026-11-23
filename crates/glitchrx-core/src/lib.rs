@@ -12,6 +12,7 @@ pub mod codec;
 pub mod dsp;
 pub mod effects;
 pub mod error;
+pub mod fill;
 pub mod mask;
 pub mod params;
 pub mod placement;

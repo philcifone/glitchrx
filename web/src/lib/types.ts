@@ -100,6 +100,10 @@ export type MaskOp = MaskCommon &
     | { shape: 'linear'; from: [number, number]; to: [number, number] }
     /** A circle: centre `from`, edge through `to`. Hard-edged unless `hardness` < 1. */
     | { shape: 'radial'; from: [number, number]; to: [number, number]; hardness?: number }
+    /** A rectangle: centre (fractions), size (shares of the longer side), clockwise turn in degrees. */
+    | { shape: 'rect'; center: [number, number]; size: [number, number]; angle?: number }
+    /** A closed pen outline: [x, y] corners and [x, y, hx, hy] smooth points (see lib/shapes.ts). */
+    | { shape: 'path'; points: number[][] }
     | { shape: 'brightness'; low: number; high: number; soft: number }
   );
 
