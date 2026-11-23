@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Title, open, presets, undo/redo, export, theme toggle. While a mask is
+  // Title, open, presets, undo/redo, export, settings. While a mask is
   // being painted it becomes an edit bar, as in iOS: what is being masked,
   // undo/redo (used constantly while painting) and Done. Nothing floats
   // over the photo, and Open and Export wait until painting is done.
@@ -9,15 +9,15 @@
   import Undo2 from '@lucide/svelte/icons/undo-2';
   import Redo2 from '@lucide/svelte/icons/redo-2';
   import SquareSplitHorizontal from '@lucide/svelte/icons/square-split-horizontal';
-  import Sun from '@lucide/svelte/icons/sun';
-  import Moon from '@lucide/svelte/icons/moon';
+  import Settings from '@lucide/svelte/icons/settings';
   import { app } from '../lib/app.svelte';
-  import { currentTheme, toggleTheme, type Theme } from '../lib/theme';
-  import { onMount } from 'svelte';
 
-  let { onopen, onexport, onpresets }: { onopen: () => void; onexport: () => void; onpresets: () => void } = $props();
-  let theme = $state<Theme>('dark');
-  onMount(() => (theme = currentTheme()));
+  let {
+    onopen,
+    onexport,
+    onpresets,
+    onsettings,
+  }: { onopen: () => void; onexport: () => void; onpresets: () => void; onsettings: () => void } = $props();
 </script>
 
 <header>
@@ -75,13 +75,8 @@
         <Download size={18} strokeWidth={2} />
         <span class="label">Export</span>
       </button>
-      <button
-        class="icon"
-        onclick={() => (theme = toggleTheme())}
-        title="Switch to {theme === 'dark' ? 'light' : 'dark'} theme"
-        aria-label="Toggle theme"
-      >
-        {#if theme === 'dark'}<Sun size={18} strokeWidth={1.75} />{:else}<Moon size={18} strokeWidth={1.75} />{/if}
+      <button class="icon" onclick={onsettings} title="Settings: appearance, folders" aria-label="Settings">
+        <Settings size={18} strokeWidth={1.75} />
       </button>
     </div>
   {/if}

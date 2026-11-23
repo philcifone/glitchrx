@@ -44,6 +44,10 @@ export interface DocInfo {
   /** EXIF orientation that was applied (1 = none). */
   orientation: number;
   has_icc: boolean;
+  /** The colour profile's name, if it has one. */
+  profile: string | null;
+  /** An AVIF export keeps these colours (no profile, sRGB or Display P3). */
+  avif_keeps_profile: boolean;
   file_len: number;
   /** Raw RGB bytes the effects work on. */
   raw_len: number;
@@ -62,6 +66,8 @@ export interface ServerConfig {
   desktop: boolean;
   /** Saved presets are available on this server. */
   presets: boolean;
+  /** The Settings sheet can choose library and export folders. */
+  settings: boolean;
   version: string;
   browse: boolean;
   root_name: string | null;
@@ -179,4 +185,30 @@ export interface Listing {
   files: BrowseEntry[];
 }
 
-export type ExportFormat = 'tiff' | 'png' | 'jpeg';
+export type ExportFormat = 'tiff' | 'png' | 'jpeg' | 'webp' | 'avif';
+
+/** An export's format and, for the lossy ones, how to encode it. */
+export interface ExportOptions {
+  format: ExportFormat;
+  /** JPEG, lossy WebP and AVIF, 1 to 100. */
+  quality?: number;
+  /** WebP: lossless. */
+  lossless?: boolean;
+  /** AVIF: 1 (slowest, smallest) to 10 (fastest). */
+  speed?: number;
+}
+
+/** The Settings sheet's folders, relative to the server's home folder. */
+export interface FolderSettings {
+  library: string | null;
+  export: string | null;
+  /** Set when --root decides what Open browses (its path, for display). */
+  fixed_root?: string | null;
+}
+
+/** Folders inside a folder under home, for the folder picker. */
+export interface FolderListing {
+  path: string;
+  parent: string | null;
+  dirs: { name: string; path: string }[];
+}
