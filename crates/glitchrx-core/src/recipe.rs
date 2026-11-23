@@ -515,9 +515,7 @@ impl Recipe {
     /// The whole run, as the CLI and the exports do it: canvas, steps,
     /// finish.
     pub fn render(&self, original: &Raster) -> Result<Raster> {
-        let mut canvas = self.canvas(original);
-        self.apply(&mut canvas)?;
-        Ok(self.finish(canvas, (original.width, original.height)))
+        self.run_on(original)
     }
 
     /// Validate and build every step.
@@ -529,7 +527,40 @@ impl Recipe {
             .collect()
     }
 
-    /// Bend a raster at full resolution.
+    /// How masks drawn on a `w` x `h` photo land on this recipe's canvas
+    /// (none without a crop: they already fit).
+    pub fn mask_frame(&self, photo: (usize, usize)) -> Option<crate::mask::Frame> {
+        self.crop
+            .as_ref()
+            .map(|_| crate::mask::Frame::new(self.crop_rect(photo.0, photo.1), photo.0, photo.1))
+    }
+
+    /// Every step built, with its mask moved onto the canvas cut from a
+    /// photo of `photo` pixels (see `mask::Frame`).
+    pub fn prepare_for(&self, photo: (usize, usize)) -> Result<Vec<Prepared>> {
+        let mut steps = self.prepare_all()?;
+        if let Some(f) = self.mask_frame(photo) {
+            for s in &mut steps {
+                if let Some(m) = &mut s.mask {
+                    *m = m.reframed(&f);
+                }
+            }
+        }
+        Ok(steps)
+    }
+
+    /// The whole run on a photo: canvas, steps, finish.
+    fn run_on(&self, original: &Raster) -> Result<Raster> {
+        let mut canvas = self.canvas(original);
+        let units = Units::full(canvas.width, canvas.height);
+        for s in self.prepare_for((original.width, original.height))? {
+            s.apply(&mut canvas.bytes, &units, NEVER)?;
+        }
+        Ok(self.finish(canvas, (original.width, original.height)))
+    }
+
+    /// Bend a raster at full resolution. The raster is the canvas itself
+    /// (no crop is taken here); use `render` to start from the photo.
     pub fn apply(&self, raster: &mut Raster) -> Result<()> {
         let units = Units::full(raster.width, raster.height);
         self.apply_with(&mut raster.bytes, &units, NEVER)
@@ -749,6 +780,67 @@ mod tests {
     /// A 6 x 4 picture whose every pixel differs, so resizing shows.
     fn ramp(w: usize, h: usize) -> Raster {
         Raster::new(w, h, (0..w * h * 3).map(|i| (i * 7 % 251) as u8).collect())
+    }
+
+    /// D-52: a mask is drawn on the whole photo, so a crop shows exactly the
+    /// same masked pixels as cropping the uncropped result.
+    #[test]
+    fn masks_stay_on_the_photo_when_it_is_cropped() {
+        use crate::mask::{Mask, MaskOp, Mode, Shape, Stroke};
+        let (w, h) = (256, 128);
+        let photo = Raster::new(w, h, (0..w * h * 3).map(|i| (i * 7 % 253) as u8).collect());
+        let mut step = Step::new("invert", "hits=0", 1).unwrap();
+        step.mask = Some(Mask {
+            invert: false,
+            ops: vec![
+                MaskOp::new(
+                    Shape::Radial {
+                        from: [0.75, 0.5],
+                        to: [0.8125, 0.5],
+                        hardness: 1.0,
+                    },
+                    Mode::Add,
+                ),
+                MaskOp::new(
+                    Shape::Rect {
+                        center: [0.625, 0.25],
+                        size: [0.125, 0.0625],
+                        angle: 0.0,
+                    },
+                    Mode::Add,
+                ),
+                MaskOp::new(
+                    Shape::Brush {
+                        strokes: vec![Stroke {
+                            erase: false,
+                            size: 0.03125,
+                            hardness: 1.0,
+                            points: vec![0.5625, 0.75, 0.9375, 0.875],
+                        }],
+                    },
+                    Mode::Add,
+                ),
+            ],
+        });
+        let mut r = Recipe {
+            steps: vec![step],
+            ..Recipe::default()
+        };
+        let whole = r.render(&photo).unwrap();
+        // The right half: x from 128 px, the full height.
+        r.crop = Some(Crop {
+            x: 0.5,
+            y: 0.0,
+            w: 0.5,
+            h: 1.0,
+        });
+        let cropped = r.render(&photo).unwrap();
+        assert_eq!((cropped.width, cropped.height), (128, 128));
+        assert_eq!(cropped, whole.crop(128, 0, 128, 128));
+        // And the mask did something, inside and outside.
+        assert_ne!(cropped, photo.crop(128, 0, 128, 128));
+        let f = r.mask_frame((w, h)).unwrap();
+        assert_eq!((f.x, f.sx, f.sy, f.sl), (0.5, 2.0, 1.0, 2.0));
     }
 
     #[test]

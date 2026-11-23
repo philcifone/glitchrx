@@ -28,6 +28,7 @@
   import { ago, recipeTitle } from '../lib/age';
   import { app } from '../lib/app.svelte';
   import { WORK_SIZES } from '../lib/canvas';
+  import { photoRect } from '../lib/mask';
   import { pan, percent, pinch, placement, spread, wheelZoom, type Point, type Spread, type View } from '../lib/view';
   import MaskPainter from './MaskPainter.svelte';
 
@@ -61,6 +62,7 @@
   const g = $derived(app.geometry);
   /** Where the picture sits on the stage, in CSS pixels. */
   const rect = $derived(g ? placement(app.view, g) : { x: 0, y: 0, w: 0, h: 0 });
+  const maskRect = $derived(app.maskFrame ? photoRect(rect, app.maskFrame) : rect);
   const shown = $derived(app.comparing && app.originalUrl ? app.originalUrl : app.imageUrl);
   /** The sharp patch to lay on top, if it is current. */
   const patch = $derived(
@@ -289,7 +291,9 @@
     {#if app.masking && !app.comparing && app.maskTarget && g}
       <!-- What is being painted, Done and compare are in the top bar:
            nothing floats over the photo while painting. -->
-      <MaskPainter bind:this={painter} bind:cursor={paintCursor} {rect} stage={g.box} />
+      <!-- The painter measures against the whole photo, which reaches past
+           a crop: masks are shares of the photo (D-52). -->
+      <MaskPainter bind:this={painter} bind:cursor={paintCursor} rect={maskRect} canvas={rect} stage={g.box} />
     {/if}
   {:else if !app.doc}
     <div class="empty">

@@ -56,11 +56,17 @@
 
   let {
     rect,
+    canvas = rect,
     stage,
     cursor: cursorStyle = $bindable('default'),
   }: {
-    /** Where the picture is drawn on the stage (it may reach past the edges). */
+    /**
+     * Where the whole photo sits on the stage (it may reach past the edges,
+     * and past a crop): every mask position is a share of it (D-52).
+     */
     rect: { x: number; y: number; w: number; h: number };
+    /** Where the cropped canvas, and so the server's mask view, is drawn. */
+    canvas?: { x: number; y: number; w: number; h: number };
     /** The stage's size, in CSS pixels. */
     stage: { w: number; h: number };
     /** The mouse cursor the stage should show. */
@@ -605,10 +611,10 @@
       src={app.maskUrl}
       alt=""
       draggable="false"
-      style:left="{rect.x}px"
-      style:top="{rect.y}px"
-      style:width="{rect.w}px"
-      style:height="{rect.h}px"
+      style:left="{canvas.x}px"
+      style:top="{canvas.y}px"
+      style:width="{canvas.w}px"
+      style:height="{canvas.h}px"
     />
   {/if}
   <canvas class="strokes" bind:this={paint}></canvas>
