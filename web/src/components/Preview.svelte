@@ -21,6 +21,8 @@
   import { onMount } from 'svelte';
   import ZoomIn from '@lucide/svelte/icons/zoom-in';
   import ZoomOut from '@lucide/svelte/icons/zoom-out';
+  import CropIcon from '@lucide/svelte/icons/crop';
+  import CropTool from './CropTool.svelte';
   import { app } from '../lib/app.svelte';
   import { WORK_SIZES } from '../lib/canvas';
   import { pan, percent, pinch, placement, spread, wheelZoom, type Point, type Spread, type View } from '../lib/view';
@@ -306,7 +308,9 @@
     </div>
   {/if}
 
-  {#if app.doc && app.imageUrl && g}
+  {#if app.cropping && app.doc}
+    <CropTool />
+  {:else if app.doc && app.imageUrl && g}
     <!-- Work size (5b): the size the steps run on. Smaller is faster and
          exact at once, with coarser glitch texture. -->
     <div class="work glass" role="radiogroup" aria-label="Work size" title="The size the steps run on: smaller is faster, with coarser texture">
@@ -316,12 +320,22 @@
           aria-checked={(app.recipe.work_size ?? null) === ws.size}
           class:on={(app.recipe.work_size ?? null) === ws.size}
           onclick={() => app.setWorkSize(ws.size)}
-          disabled={ws.size !== null && Math.max(app.doc.width, app.doc.height) <= ws.size}
+          disabled={ws.size !== null && !!app.croppedSize && Math.max(app.croppedSize.w, app.croppedSize.h) <= ws.size}
         >
           {ws.label}
         </button>
       {/each}
     </div>
+    <div class="tools">
+    <button
+      class="zoom crop-btn"
+      class:on={!!app.recipe.crop}
+      onclick={() => app.startCrop()}
+      title="Crop: keep part of the photo, before the steps"
+      aria-label="Crop"
+    >
+      <CropIcon size={18} strokeWidth={1.75} />
+    </button>
     <button
       class="zoom"
       class:on={app.zoomed}
@@ -338,6 +352,7 @@
         <ZoomIn size={18} strokeWidth={1.75} />
       {/if}
     </button>
+    </div>
   {/if}
 </div>
 
@@ -469,10 +484,15 @@
   }
 
   /* The magnifier: a round glass button, a pill with the zoom when zoomed. */
-  .zoom {
+  .tools {
     position: absolute;
     right: 12px;
     bottom: 12px;
+    display: flex;
+    gap: 8px;
+  }
+
+  .zoom {
     display: flex;
     align-items: center;
     gap: 6px;

@@ -148,7 +148,17 @@ export interface RecipeDto {
   work_size?: number;
   /** Enlarge the result back to full size, with hard pixel edges. */
   scale_back?: boolean;
+  /** The part of the photo kept, before anything else. */
+  crop?: Crop;
   steps: StepDto[];
+}
+
+/** A crop: shares (0 to 1) of the photo's width and height. */
+export interface Crop {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 /** A step in the editor: the DTO plus UI-only fields. */
@@ -181,6 +191,7 @@ export interface RecipeState {
   /** See RecipeDto. */
   work_size?: number;
   scale_back?: boolean;
+  crop?: Crop;
   steps: StepState[];
   /** Preset groups; UI only, never sent to the server or saved in recipes. */
   groups?: PresetGroup[];

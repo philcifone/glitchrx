@@ -21,8 +21,8 @@
     <span class="ok" role="status">{app.notice}</span>
   {:else if app.doc}
     <span class="name" title={app.doc.path ?? app.doc.name}>{app.doc.name}</span>
-    <span title={app.recipe.work_size ? 'The photo, and the work size the steps run on' : undefined}>
-      {app.doc.width}x{app.doc.height}{#if app.canvasSize && app.canvasSize.w !== app.doc.width}<span class="dim">{` at ${app.canvasSize.w}x${app.canvasSize.h}`}</span>{/if}
+    <span title={app.recipe.work_size || app.recipe.crop ? 'The photo, and the canvas the steps run on (cropped, at the work size)' : undefined}>
+      {app.doc.width}x{app.doc.height}{#if app.canvasSize && (app.canvasSize.w !== app.doc.width || app.canvasSize.h !== app.doc.height)}<span class="dim">{` at ${app.canvasSize.w}x${app.canvasSize.h}`}</span>{/if}
     </span>
     <span class="wide">
       {app.doc.format}{app.doc.orientation !== 1 ? ', turned upright' : ''}{app.doc.has_icc ? ', ICC' : ''},

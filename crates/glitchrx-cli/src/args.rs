@@ -162,6 +162,12 @@ pub struct Cli {
     #[arg(long)]
     pub scale_back: bool,
 
+    /// Keep only part of the photo, before anything else: X,Y,W,H as
+    /// shares of its width and height (0.1,0,0.8,1 trims a tenth off each
+    /// side). Saved in the recipe.
+    #[arg(long, value_name = "X,Y,W,H", value_parser = parse_crop)]
+    pub crop: Option<glitchrx_core::recipe::Crop>,
+
     /// How steps read the pixels as audio samples [default: u8]. A step can
     /// override it with encoding=... in its parameters.
     #[arg(long, value_name = "ENC", value_parser = parse_encoding)]
@@ -248,6 +254,21 @@ pub fn list_text() -> String {
          Columns: parameter, default, meaning.\n",
     );
     s
+}
+
+/// `X,Y,W,H`, four shares of the photo; the recipe checks they fit.
+fn parse_crop(s: &str) -> Result<glitchrx_core::recipe::Crop, String> {
+    let v: Vec<f64> = s
+        .split(',')
+        .map(|p| p.trim().parse::<f64>())
+        .collect::<Result<_, _>>()
+        .map_err(|_| format!("`{s}` should be four numbers X,Y,W,H, e.g. 0.1,0,0.8,1"))?;
+    match v[..] {
+        [x, y, w, h] => Ok(glitchrx_core::recipe::Crop { x, y, w, h }),
+        _ => Err(format!(
+            "`{s}` should be four numbers X,Y,W,H, e.g. 0.1,0,0.8,1"
+        )),
+    }
 }
 
 #[cfg(test)]

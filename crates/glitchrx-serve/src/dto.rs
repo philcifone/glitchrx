@@ -11,6 +11,7 @@ use glitchrx_core::codec::Image;
 use glitchrx_core::effects::{self, REGISTRY};
 use glitchrx_core::mask::Mask;
 use glitchrx_core::params::Kind;
+use glitchrx_core::recipe::Crop;
 use glitchrx_core::{Encoding, Recipe, Result, Step};
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +28,9 @@ pub struct RecipeDto {
     pub work_size: Option<u32>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub scale_back: bool,
+    /// The part of the photo kept, as shares of it (see `Recipe::crop`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<Crop>,
     #[serde(default)]
     pub steps: Vec<StepDto>,
 }
@@ -42,6 +46,7 @@ impl Default for RecipeDto {
             channels: 1,
             work_size: None,
             scale_back: false,
+            crop: None,
             steps: Vec::new(),
         }
     }
@@ -114,6 +119,7 @@ impl RecipeDto {
             channels: self.channels,
             work_size: self.work_size,
             scale_back: self.scale_back,
+            crop: self.crop,
             steps,
             ..Recipe::default()
         };
@@ -127,6 +133,7 @@ impl RecipeDto {
             channels: r.channels,
             work_size: r.work_size,
             scale_back: r.scale_back,
+            crop: r.crop,
             steps: r
                 .steps
                 .iter()

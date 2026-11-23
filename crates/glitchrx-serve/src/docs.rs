@@ -27,7 +27,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use glitchrx_core::codec::{self, Image};
-use glitchrx_core::recipe::Cancel;
+use glitchrx_core::recipe::{Cancel, Crop};
+
+/// What decides a photo's canvas: work size and crop (`Recipe::framing`).
+type Framing = (Option<u32>, Option<Crop>);
 use glitchrx_core::{Encoding, Raster, Recipe, Result, Step, Units};
 
 /// Upper bound on cached per-step preview rasters, in bytes, per document.
@@ -54,11 +57,11 @@ pub struct Doc {
     zoom_generation: AtomicU64,
     cache: Mutex<RenderCache>,
     full: Mutex<FullCache>,
-    /// The work size last asked for, and the image shrunk to it (none at
-    /// full size: the canvas is then the image itself, not a copy). Both
-    /// caches above hold renders of this canvas, so they are cleared when
-    /// it changes.
-    canvas: Mutex<(Option<u32>, Option<Arc<Raster>>)>,
+    /// The framing (work size and crop) last asked for, and the image
+    /// cropped and shrunk to it (none for the whole photo at full size:
+    /// the canvas is then the image itself, not a copy). Both caches above
+    /// hold renders of this canvas, so they are cleared when it changes.
+    canvas: Mutex<(Framing, Option<Arc<Raster>>)>,
 }
 
 /// The raster a recipe's steps run on: the image itself, or a shrunk copy.
@@ -119,7 +122,7 @@ impl Doc {
             zoom_generation: AtomicU64::new(0),
             cache: Mutex::new(RenderCache::default()),
             full: Mutex::new(FullCache::default()),
-            canvas: Mutex::new((None, None)),
+            canvas: Mutex::new(((None, None), None)),
             image: Arc::new(image),
         })
     }
@@ -157,15 +160,16 @@ impl Doc {
         *self.lock_full() = FullCache::default();
     }
 
-    /// The raster `recipe`'s steps run on: the image, shrunk to its work
-    /// size. A new work size drops every cached render.
+    /// The raster `recipe`'s steps run on: the image, cropped and shrunk
+    /// to its work size. A new framing drops every cached render.
     pub fn canvas(&self, recipe: &Recipe) -> Canvas<'_> {
         let mut c = self.canvas.lock().unwrap_or_else(|p| p.into_inner());
-        if c.0 != recipe.work_size {
-            let size = recipe.canvas_size(self.image.raster.width, self.image.raster.height);
-            let shrunk = (size != (self.image.raster.width, self.image.raster.height))
-                .then(|| Arc::new(recipe.canvas(&self.image.raster)));
-            *c = (recipe.work_size, shrunk);
+        if c.0 != recipe.framing() {
+            let (w, h) = (self.image.raster.width, self.image.raster.height);
+            let whole =
+                recipe.crop_rect(w, h) == (0, 0, w, h) && recipe.canvas_size(w, h) == (w, h);
+            let made = (!whole).then(|| Arc::new(recipe.canvas(&self.image.raster)));
+            *c = (recipe.framing(), made);
             *self.lock() = RenderCache::default();
             self.drop_full();
         }

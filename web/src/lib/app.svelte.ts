@@ -28,11 +28,12 @@ import { shakeParams } from './shake';
 import { storageGet, storageSet } from './storage';
 import * as groups from './groups';
 import { numberSteps, stepName, stepNumber } from './stepnames';
-import { fitSize } from './canvas';
+import { cropRect, fitSize } from './canvas';
 import { CHANNELS_KEY, ENCODING_KEY } from './groups';
 import { toggleSmooth } from './shapes';
 import { FIT, clampView, geometry, isZoomed, toggle, visible, type Geometry, type Point, type Rect, type Size, type View } from './view';
 import type {
+  Crop,
   Channels,
   DocInfo,
   EffectInfo,
@@ -114,6 +115,7 @@ function normalize(r: Partial<RecipeState>, known: (effect: string) => boolean):
     channels: r.channels === 2 || r.channels === 3 ? r.channels : 1,
     ...(work ? { work_size: work } : {}),
     ...(work && r.scale_back === true ? { scale_back: true } : {}),
+    ...(validCrop(r.crop) ? { crop: { ...r.crop } } : {}),
     ...groups.tidy(steps, groups.cleanGroups(r.groups)),
   };
 }
@@ -136,6 +138,14 @@ export interface Patch {
 }
 
 /** A patch's pixel rectangle as fractions of the photo. */
+/** A crop that lies inside the photo (from storage or a recipe file). */
+function validCrop(c: unknown): c is Crop {
+  if (!c || typeof c !== 'object') return false;
+  const { x, y, w, h } = c as Record<string, unknown>;
+  const ok = (v: unknown): v is number => typeof v === 'number' && v >= 0 && v <= 1;
+  return ok(x) && ok(y) && ok(w) && ok(h) && w > 0 && h > 0 && x + w <= 1 + 1e-9 && y + h <= 1 + 1e-9;
+}
+
 function fractions(px: { x: number; y: number; w: number; h: number }, size: Size): Rect {
   return { x: px.x / size.w, y: px.y / size.h, w: px.w / size.w, h: px.h / size.h };
 }
@@ -377,6 +387,7 @@ export class App {
       channels: r.channels,
       ...(r.work_size ? { work_size: r.work_size } : {}),
       ...(r.scale_back ? { scale_back: true } : {}),
+      ...(r.crop ? { crop: { ...r.crop } } : {}),
       steps: r.steps
         .filter((s) => s.enabled)
         .map(({ effect, effect_version, seed, params, mask }) => ({
@@ -923,6 +934,7 @@ export class App {
         channels: dto.channels,
         work_size: dto.work_size,
         scale_back: dto.scale_back,
+        crop: dto.crop,
         steps: dto.steps.map((s) => ({
           ...s,
           params: { ...s.params },
@@ -1132,20 +1144,86 @@ export class App {
   // -------------------------------------------------------------------------
   // Work size (SPEC 5b): the canvas the steps run on.
 
-  /** The size the steps run on: the photo, shrunk to the work size. 100% zoom is this. */
-  get canvasSize(): Size | null {
+  /** The size of the crop (the whole photo without one). */
+  get croppedSize(): Size | null {
     const d = this.doc;
     if (!d) return null;
+    const c = cropRect(this.recipe.crop, d.width, d.height);
+    return { w: c.w, h: c.h };
+  }
+
+  /** The size the steps run on: the crop, shrunk to the work size. 100% zoom is this. */
+  get canvasSize(): Size | null {
+    const c = this.croppedSize;
+    if (!c) return null;
     const n = this.recipe.work_size;
-    const [w, h] = n ? fitSize(d.width, d.height, n, n) : [d.width, d.height];
+    const [w, h] = n ? fitSize(c.w, c.h, n, n) : [c.w, c.h];
     return { w, h };
   }
 
-  /** The exported file's size: the canvas, or scaled back to the photo's. */
+  /** The exported file's size: the canvas, or scaled back to the crop's. */
   get outputSize(): Size | null {
+    return this.recipe.scale_back ? this.croppedSize : this.canvasSize;
+  }
+
+  // -------------------------------------------------------------------------
+  // Crop (SPEC 5d): a frame over the whole, unbent photo; Done applies it.
+
+  /** The crop being edited, as shares of the photo, and the photo to edit it on. */
+  cropping = $state<{ rect: Crop; url: string | null } | null>(null);
+
+  async startCrop(): Promise<void> {
+    const doc = this.doc;
+    if (!doc || this.cropping) return;
+    if (this.masking) this.stopMasking();
+    if (this.zoomed) this.toggleZoom();
+    this.cropping = { rect: { ...(this.recipe.crop ?? { x: 0, y: 0, w: 1, h: 1 }) }, url: null };
+    // The whole photo, unbent: the steps run on the crop, so they cannot
+    // be shown outside it.
+    const { crop: _c, work_size: _w, ...rest } = this.dto();
+    const { w, h } = this.target('full');
+    try {
+      const res = await api.preview(doc.id, rest, w, h, false, undefined, true);
+      if (!res || !this.cropping) return;
+      const url = URL.createObjectURL(res.blob);
+      await preload(url);
+      if (this.cropping) this.cropping.url = url;
+      else URL.revokeObjectURL(url);
+    } catch (e) {
+      this.cancelCrop();
+      this.fail(e);
+    }
+  }
+
+  setCropRect(r: Crop): void {
+    if (this.cropping) this.cropping.rect = r;
+  }
+
+  private endCrop(): void {
+    if (this.cropping?.url) URL.revokeObjectURL(this.cropping.url);
+    this.cropping = null;
+  }
+
+  cancelCrop(): void {
+    this.endCrop();
+  }
+
+  /** Apply the frame (the whole photo removes the crop). One undo step. */
+  applyCrop(): void {
+    const c = this.cropping;
     const d = this.doc;
-    if (!d) return null;
-    return this.recipe.scale_back ? { w: d.width, h: d.height } : this.canvasSize;
+    if (!c || !d) return this.endCrop();
+    const px = cropRect(c.rect, d.width, d.height);
+    const whole = px.w === d.width && px.h === d.height;
+    const old = JSON.stringify(this.recipe.crop ?? null);
+    // Shares rounded to 6 places: plenty for 100 megapixels, and a tidy recipe.
+    const r6 = (v: number) => Math.round(v * 1e6) / 1e6;
+    const next = whole ? null : { x: r6(c.rect.x), y: r6(c.rect.y), w: r6(c.rect.w), h: r6(c.rect.h) };
+    this.endCrop();
+    if (JSON.stringify(next) === old) return;
+    if (next) this.recipe.crop = next;
+    else delete this.recipe.crop;
+    this.changed();
   }
 
   /** Choose the work size (none: full). Undoable, like any recipe change. */
@@ -1259,7 +1337,7 @@ export class App {
     const doc = this.doc;
     const t = this.cropTarget();
     if (!doc || !t) return;
-    const key = JSON.stringify([doc.id, t, this.recipe.work_size]);
+    const key = JSON.stringify([doc.id, t, this.recipe.work_size, this.recipe.crop]);
     if (key === this.originalCropKey) return;
     this.originalCropKey = key;
     try {
@@ -1377,7 +1455,7 @@ export class App {
     const doc = this.doc;
     if (!doc) return;
     const { w, h } = this.target('full');
-    const key = `${doc.id}:${w}x${h}:${this.recipe.work_size ?? 'full'}`;
+    const key = JSON.stringify([doc.id, w, h, this.recipe.work_size, this.recipe.crop]);
     if (key === this.originalKey) return;
     this.originalKey = key;
     try {
