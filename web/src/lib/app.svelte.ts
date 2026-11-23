@@ -26,6 +26,8 @@ import { usesSamples } from './palette';
 import { usesSeed } from './seed';
 import { shakeParams } from './shake';
 import { storageGet, storageSet } from './storage';
+import * as groups from './groups';
+import { CHANNELS_KEY, ENCODING_KEY } from './groups';
 import { toggleSmooth } from './shapes';
 import { FIT, clampView, geometry, isZoomed, toggle, visible, type Geometry, type Point, type Rect, type View } from './view';
 import type {
@@ -39,6 +41,7 @@ import type {
   MaskOp,
   MaskShape,
   Stroke,
+  PresetGroup,
   PresetInfo,
   RecipeDto,
   RecipeState,
@@ -50,8 +53,7 @@ import type {
 /** Recipe-wide encoding for new recipes, matching the CLI default. */
 export const DEFAULT_ENCODING = 'u8';
 /** Step parameter keys that override the recipe's encoding and channels. */
-export const ENCODING_KEY = 'encoding';
-export const CHANNELS_KEY = 'channels';
+export { ENCODING_KEY, CHANNELS_KEY };
 /** Step key for how strongly the result is blended over the step's input. */
 export const OPACITY_KEY = 'opacity';
 /** How long the region band stays on the preview after a drag ends. */
@@ -101,12 +103,13 @@ const emptyRecipe = (): RecipeState => ({ encoding: DEFAULT_ENCODING, channels: 
  * operation per brush stroke; those become brushes.
  */
 function normalize(r: Partial<RecipeState>, known: (effect: string) => boolean): RecipeState {
+  const steps = (r.steps ?? [])
+    .filter((s) => known(s.effect))
+    .map((s) => (s.mask ? { ...s, mask: migrateMask(s.mask) } : s));
   return {
     encoding: typeof r.encoding === 'string' ? r.encoding : DEFAULT_ENCODING,
     channels: r.channels === 2 || r.channels === 3 ? r.channels : 1,
-    steps: (r.steps ?? [])
-      .filter((s) => known(s.effect))
-      .map((s) => (s.mask ? { ...s, mask: migrateMask(s.mask) } : s)),
+    ...groups.tidy(steps, groups.cleanGroups(r.groups)),
   };
 }
 
@@ -385,6 +388,7 @@ export class App {
 
   /** Call after every recipe mutation. */
   changed(commit = true): void {
+    this.tidyGroups();
     this.revision++;
     this.render('fast');
     if (commit) this.commit();
@@ -445,13 +449,16 @@ export class App {
     this.changed();
   }
 
+  /** Move a step: inside its preset group, or past a neighbouring step or whole group. */
   moveStep(uid: string, by: -1 | 1): void {
-    const steps = this.recipe.steps;
-    const i = steps.findIndex((s) => s.uid === uid);
-    const j = i + by;
-    if (i < 0 || j < 0 || j >= steps.length) return;
-    [steps[i], steps[j]] = [steps[j], steps[i]];
+    const moved = groups.moveStep(this.recipe.steps, uid, by);
+    if (!moved) return;
+    this.recipe.steps = moved;
     this.changed();
+  }
+
+  canMoveStep(uid: string, by: -1 | 1): boolean {
+    return groups.moveStep(this.recipe.steps, uid, by) !== null;
   }
 
   duplicateStep(uid: string): void {
@@ -854,36 +861,141 @@ export class App {
     this.changed();
   }
 
-  /** Replace the recipe with one loaded from a file. */
-  loadRecipe(dto: RecipeDto): void {
+  /**
+   * Replace the recipe with one loaded from a file, or with a preset
+   * (`preset` names it; its steps then form a group).
+   */
+  loadRecipe(dto: RecipeDto, preset?: string): void {
     this.stopMasking(); // every step is replaced
+    const group = preset ? this.newGroup(preset, dto) : undefined;
     this.recipe = normalize(
       {
         encoding: dto.encoding,
         channels: dto.channels,
-        steps: dto.steps.map((s) => ({ ...s, params: { ...s.params }, uid: newUid(), enabled: true })),
+        steps: dto.steps.map((s) => ({
+          ...s,
+          params: { ...s.params },
+          uid: newUid(),
+          enabled: true,
+          ...(group ? { group: group.id } : {}),
+        })),
+        groups: group ? [group] : [],
       },
       () => true, // the server already checked the effects
     );
     this.changed();
   }
 
-  /** Add a recipe's steps after the current ones. */
-  appendRecipe(dto: RecipeDto): void {
+  /** Add a recipe's steps after the current ones; from a preset, as a group. */
+  appendRecipe(dto: RecipeDto, preset?: string): void {
     // The added steps keep the sample format they were saved with, even if
     // this recipe's differs. (Pixel effects have none to keep.)
-    const pin = (s: StepDto) =>
-      !usesSamples(this.effect(s.effect))
-        ? s.params
-        : {
-            ...(dto.encoding !== this.recipe.encoding ? { [ENCODING_KEY]: dto.encoding } : {}),
-            ...(dto.channels !== this.recipe.channels ? { [CHANNELS_KEY]: String(dto.channels) } : {}),
-            ...s.params,
-          };
+    const group = preset ? this.newGroup(preset, dto) : undefined;
     for (const s of dto.steps) {
-      this.recipe.steps.push({ ...s, params: { ...pin(s) }, uid: newUid(), enabled: true });
+      this.recipe.steps.push({
+        ...groups.stackForm(s, dto, this.recipe, this.samples),
+        uid: newUid(),
+        enabled: true,
+        ...(group ? { group: group.id } : {}),
+      });
     }
+    if (group) this.recipe.groups = [...(this.recipe.groups ?? []), group];
     this.changed();
+  }
+
+  // -------------------------------------------------------------------------
+  // Preset groups (SPEC 4e): see groups.ts.
+
+  /** Whether an effect reads samples (and so can have its encoding pinned). */
+  private samples = (effect: string) => usesSamples(this.effect(effect));
+
+  /** A group for a preset's steps; its base is the preset as saved. */
+  private newGroup(preset: string, dto: RecipeDto): PresetGroup {
+    return {
+      id: newUid(),
+      preset,
+      encoding: dto.encoding,
+      channels: dto.channels,
+      base: dto.steps.map((s) => groups.presetForm(s, dto, dto, this.samples)),
+    };
+  }
+
+  /** Drop group marks that no longer hold (a step removed, the stack cleared). */
+  private tidyGroups(): void {
+    const t = groups.tidy(this.recipe.steps, this.recipe.groups);
+    if (t.steps.some((s, i) => s !== this.recipe.steps[i])) this.recipe.steps = t.steps;
+    if (t.groups.length !== (this.recipe.groups?.length ?? 0)) this.recipe.groups = t.groups;
+  }
+
+  groupOf(id: string): PresetGroup | undefined {
+    return this.recipe.groups?.find((g) => g.id === id);
+  }
+
+  /** The group's steps differ from the preset's settings. */
+  groupModified(id: string): boolean {
+    const g = this.groupOf(id);
+    return !!g && groups.isModified(g, this.recipe.steps, this.recipe, this.samples);
+  }
+
+  moveGroup(id: string, by: -1 | 1): void {
+    const moved = groups.moveGroup(this.recipe.steps, id, by);
+    if (!moved) return;
+    this.recipe.steps = moved;
+    this.changed();
+  }
+
+  canMoveGroup(id: string, by: -1 | 1): boolean {
+    return groups.moveGroup(this.recipe.steps, id, by) !== null;
+  }
+
+  /** Put the preset's steps back as they were added, in place. Undoable. */
+  revertGroup(id: string): void {
+    const g = this.groupOf(id);
+    const steps = this.recipe.steps;
+    const i = steps.findIndex((s) => s.group === id);
+    if (!g || i < 0) return;
+    const [a, b] = groups.blockAt(steps, i);
+    if (this.masking && steps.slice(a, b).some((s) => s.uid === this.masking)) this.stopMasking();
+    const fresh = g.base.map((s) => ({
+      ...groups.stackForm($state.snapshot(s) as StepDto, g, this.recipe, this.samples),
+      uid: newUid(),
+      enabled: true,
+      group: id,
+    }));
+    this.recipe.steps = [...steps.slice(0, a), ...fresh, ...steps.slice(b)];
+    this.changed();
+  }
+
+  /** Keep the steps but drop the label. Undoable. */
+  ungroup(id: string): void {
+    this.recipe.groups = (this.recipe.groups ?? []).filter((g) => g.id !== id);
+    this.changed();
+  }
+
+  /**
+   * Write the group's steps (the ones switched on) to its preset, after
+   * the user confirms, and make them the group's new base.
+   */
+  async updatePreset(id: string): Promise<void> {
+    const g = this.groupOf(id);
+    if (!g) return;
+    const steps = groups.currentForm(g, this.recipe.steps, this.recipe, this.samples);
+    if (!steps.length) {
+      this.flash('Turn a step on first: a preset needs at least one');
+      return;
+    }
+    const n = steps.length === 1 ? '1 step' : `${steps.length} steps`;
+    if (!confirm(`Replace the preset "${g.preset}" with these ${n}?`)) return;
+    try {
+      const recipe: RecipeDto = { encoding: g.encoding, channels: g.channels, steps: $state.snapshot(steps) as StepDto[] };
+      await api.savePreset(g.preset, recipe, true);
+      g.base = recipe.steps;
+      this.changed();
+      this.flash(`Updated preset ${g.preset}`);
+      await this.loadPresets();
+    } catch (e) {
+      this.fail(e);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -902,8 +1014,8 @@ export class App {
   async applyPreset(name: string, append = false): Promise<void> {
     try {
       const dto = await api.getPreset(name);
-      if (append) this.appendRecipe(dto);
-      else this.loadRecipe(dto);
+      if (append) this.appendRecipe(dto, name);
+      else this.loadRecipe(dto, name);
       this.flash(`${append ? 'Added' : 'Loaded'} ${name}`);
     } catch (e) {
       this.fail(e);

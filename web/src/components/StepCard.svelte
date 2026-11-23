@@ -18,7 +18,7 @@
   import ParamField from './ParamField.svelte';
   import BlendSection from './BlendSection.svelte';
 
-  let { step, index, count }: { step: StepState; index: number; count: number } = $props();
+  let { step, index }: { step: StepState; index: number } = $props();
 
   const info = $derived(app.effect(step.effect));
   const own = $derived(info?.params.filter((p) => !p.placement) ?? []);
@@ -137,10 +137,10 @@
 
       <!-- What to do with the step itself, apart from its settings. -->
       <div class="foot" role="group" aria-label="Step">
-        <button class="plain" onclick={() => app.moveStep(step.uid, -1)} disabled={index === 0} title="Move up" aria-label="Move up">
+        <button class="plain" onclick={() => app.moveStep(step.uid, -1)} disabled={!app.canMoveStep(step.uid, -1)} title="Move up" aria-label="Move up">
           <ChevronUp size={18} strokeWidth={1.75} /> <span class="txt">Up</span>
         </button>
-        <button class="plain" onclick={() => app.moveStep(step.uid, 1)} disabled={index === count - 1} title="Move down" aria-label="Move down">
+        <button class="plain" onclick={() => app.moveStep(step.uid, 1)} disabled={!app.canMoveStep(step.uid, 1)} title="Move down" aria-label="Move down">
           <ChevronDown size={18} strokeWidth={1.75} /> <span class="txt">Down</span>
         </button>
         <button class="plain" onclick={() => app.duplicateStep(step.uid)} title="Duplicate (with a new seed)" aria-label="Duplicate">
