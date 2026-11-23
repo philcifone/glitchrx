@@ -21,6 +21,13 @@ thiserror = "2"
 anyhow = "1"
 png = "0.18"
 tiff = "0.11"
+# WebP: libwebp built from its bundled source (pinned, so output is the same everywhere).
+libwebp-sys = "0.14"
+# AVIF: rav1e, pure Rust. Without the asm feature, so no nasm is needed to build.
+ravif = { version = "0.13", default-features = false, features = ["threading"] }
+rgb = "0.8"
+# The AVIF container, to rewrap ravif's output with Display P3 colour.
+avif-serialize = "0.8"
 tempfile = "3"
 same-file = "1"
 clap = { version = "4", features = ["derive"] }
