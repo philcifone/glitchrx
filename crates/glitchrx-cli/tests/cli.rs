@@ -331,3 +331,59 @@ fn info_and_list() {
         );
     }
 }
+
+#[test]
+fn work_size_shrinks_or_scales_back_and_is_saved_in_the_recipe() {
+    let d = workdir();
+    let size = |name: &str| {
+        let img = codec::decode(&fs::read(d.path().join(name)).unwrap()).unwrap();
+        (img.raster.width, img.raster.height)
+    };
+    let o = run(
+        d.path(),
+        &[
+            "--invert",
+            "--work-size",
+            "120",
+            "--save-recipe",
+            "photo.jpg",
+            "small.png",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert_eq!(size("small.png"), (120, 80));
+    let recipe = fs::read_to_string(d.path().join("small.recipe.toml")).unwrap();
+    assert!(recipe.contains("work_size = 120"), "{recipe}");
+
+    let o = run(
+        d.path(),
+        &[
+            "--invert",
+            "--work-size",
+            "120",
+            "--scale-back",
+            "photo.jpg",
+            "big.png",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert_eq!(size("big.png"), (480, 320));
+
+    // Replaying the recipe gives the same file.
+    let o = run(
+        d.path(),
+        &["--recipe", "small.recipe.toml", "photo.jpg", "again.png"],
+    );
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert_eq!(
+        fs::read(d.path().join("again.png")).unwrap(),
+        fs::read(d.path().join("small.png")).unwrap()
+    );
+    assert_eq!(
+        code(&run(
+            d.path(),
+            &["--invert", "--work-size", "10", "photo.jpg"]
+        )),
+        2
+    );
+}

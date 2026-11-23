@@ -54,6 +54,27 @@ pub struct Doc {
     zoom_generation: AtomicU64,
     cache: Mutex<RenderCache>,
     full: Mutex<FullCache>,
+    /// The work size last asked for, and the image shrunk to it (none at
+    /// full size: the canvas is then the image itself, not a copy). Both
+    /// caches above hold renders of this canvas, so they are cleared when
+    /// it changes.
+    canvas: Mutex<(Option<u32>, Option<Arc<Raster>>)>,
+}
+
+/// The raster a recipe's steps run on: the image itself, or a shrunk copy.
+pub enum Canvas<'a> {
+    Full(&'a Raster),
+    Work(Arc<Raster>),
+}
+
+impl std::ops::Deref for Canvas<'_> {
+    type Target = Raster;
+    fn deref(&self) -> &Raster {
+        match self {
+            Canvas::Full(r) => r,
+            Canvas::Work(r) => r,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -94,11 +115,12 @@ impl Doc {
             name,
             source,
             file_len: bytes.len(),
-            image: Arc::new(image),
             generation: AtomicU64::new(0),
             zoom_generation: AtomicU64::new(0),
             cache: Mutex::new(RenderCache::default()),
             full: Mutex::new(FullCache::default()),
+            canvas: Mutex::new((None, None)),
+            image: Arc::new(image),
         })
     }
 
@@ -135,11 +157,29 @@ impl Doc {
         *self.lock_full() = FullCache::default();
     }
 
-    /// Units for a raster of `w` x `h` standing in for this image.
-    fn units(&self, w: usize, h: usize) -> Units {
+    /// The raster `recipe`'s steps run on: the image, shrunk to its work
+    /// size. A new work size drops every cached render.
+    pub fn canvas(&self, recipe: &Recipe) -> Canvas<'_> {
+        let mut c = self.canvas.lock().unwrap_or_else(|p| p.into_inner());
+        if c.0 != recipe.work_size {
+            let size = recipe.canvas_size(self.image.raster.width, self.image.raster.height);
+            let shrunk = (size != (self.image.raster.width, self.image.raster.height))
+                .then(|| Arc::new(recipe.canvas(&self.image.raster)));
+            *c = (recipe.work_size, shrunk);
+            *self.lock() = RenderCache::default();
+            self.drop_full();
+        }
+        match &c.1 {
+            Some(r) => Canvas::Work(r.clone()),
+            None => Canvas::Full(&self.image.raster),
+        }
+    }
+
+    /// Units for a raster of `w` x `h` standing in for `canvas`.
+    fn units(canvas: &Raster, w: usize, h: usize) -> Units {
         Units {
-            full_width: self.image.raster.width,
-            full_height: self.image.raster.height,
+            full_width: canvas.width,
+            full_height: canvas.height,
             width: w,
             height: h,
         }
@@ -162,12 +202,13 @@ impl Doc {
     ) -> Result<Raster> {
         // Validate every step before touching the cache.
         let prepared = recipe.prepare_all()?;
-        let size = self.image.raster.fit(max_w, max_h);
+        let canvas = self.canvas(recipe);
+        let size = canvas.fit(max_w, max_h);
 
         let mut cache = self.lock();
         if !matches!(&cache.base, Some(b) if (b.raster.width, b.raster.height) == size) {
             cache.base = Some(Base {
-                raster: self.image.raster.resize(size.0, size.1),
+                raster: canvas.resize(size.0, size.1),
                 steps: Vec::new(),
             });
         }
@@ -192,7 +233,7 @@ impl Doc {
             0 => base.raster.bytes.clone(),
             n => base.steps[n - 1].1.clone(),
         };
-        let units = self.units(size.0, size.1);
+        let units = Self::units(&canvas, size.0, size.1);
         let max_cached = (STEP_CACHE_BYTES / bytes.len().max(1)).max(1);
         for (key, p) in keys.into_iter().zip(&prepared).skip(keep) {
             p.apply(&mut bytes, &units, cancel)?;
@@ -238,6 +279,7 @@ impl Doc {
     /// since each step only sees the bytes the one before it left.
     pub fn render_full(&self, recipe: &Recipe, cancel: Cancel<'_>) -> Result<Arc<Raster>> {
         let prepared = recipe.prepare_all()?;
+        let canvas = self.canvas(recipe);
         let keys = step_keys(recipe, &prepared);
         let (start, mut bytes, edit) = {
             let mut full = self.lock_full();
@@ -260,11 +302,11 @@ impl Doc {
             full.last = keys.clone();
             match &full.before {
                 Some((k, b)) if keys.starts_with(k) => (k.len(), b.as_ref().clone(), edit),
-                _ => (0, self.image.raster.bytes.clone(), edit),
+                _ => (0, canvas.bytes.clone(), edit),
             }
         };
-        let (w, h) = (self.image.raster.width, self.image.raster.height);
-        let units = self.units(w, h);
+        let (w, h) = (canvas.width, canvas.height);
+        let units = Self::units(&canvas, w, h);
         for (i, p) in prepared.iter().enumerate().skip(start) {
             if i == edit && i > start {
                 // Keep the picture as it arrives at the step being edited,
@@ -408,7 +450,7 @@ mod tests {
             for r in &sequence {
                 let got = d.preview(r, w, h, NEVER).unwrap();
                 let mut want = d.original(w, h);
-                let units = d.units(want.width, want.height);
+                let units = Doc::units(&d.image.raster, want.width, want.height);
                 r.apply_with(&mut want.bytes, &units, NEVER).unwrap();
                 assert_eq!(got, want, "{r:?} at {w}x{h}");
             }

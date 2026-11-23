@@ -28,9 +28,10 @@ import { shakeParams } from './shake';
 import { storageGet, storageSet } from './storage';
 import * as groups from './groups';
 import { numberSteps, stepName, stepNumber } from './stepnames';
+import { fitSize } from './canvas';
 import { CHANNELS_KEY, ENCODING_KEY } from './groups';
 import { toggleSmooth } from './shapes';
-import { FIT, clampView, geometry, isZoomed, toggle, visible, type Geometry, type Point, type Rect, type View } from './view';
+import { FIT, clampView, geometry, isZoomed, toggle, visible, type Geometry, type Point, type Rect, type Size, type View } from './view';
 import type {
   Channels,
   DocInfo,
@@ -107,9 +108,12 @@ function normalize(r: Partial<RecipeState>, known: (effect: string) => boolean):
   const steps = (r.steps ?? [])
     .filter((s) => known(s.effect))
     .map((s) => (s.mask ? { ...s, mask: migrateMask(s.mask) } : s));
+  const work = typeof r.work_size === 'number' && r.work_size >= 64 ? Math.round(r.work_size) : undefined;
   return {
     encoding: typeof r.encoding === 'string' ? r.encoding : DEFAULT_ENCODING,
     channels: r.channels === 2 || r.channels === 3 ? r.channels : 1,
+    ...(work ? { work_size: work } : {}),
+    ...(work && r.scale_back === true ? { scale_back: true } : {}),
     ...groups.tidy(steps, groups.cleanGroups(r.groups)),
   };
 }
@@ -132,8 +136,8 @@ export interface Patch {
 }
 
 /** A patch's pixel rectangle as fractions of the photo. */
-function fractions(px: { x: number; y: number; w: number; h: number }, doc: DocInfo): Rect {
-  return { x: px.x / doc.width, y: px.y / doc.height, w: px.w / doc.width, h: px.h / doc.height };
+function fractions(px: { x: number; y: number; w: number; h: number }, size: Size): Rect {
+  return { x: px.x / size.w, y: px.y / size.h, w: px.w / size.w, h: px.h / size.h };
 }
 
 export class App {
@@ -371,6 +375,8 @@ export class App {
     return {
       encoding: r.encoding,
       channels: r.channels,
+      ...(r.work_size ? { work_size: r.work_size } : {}),
+      ...(r.scale_back ? { scale_back: true } : {}),
       steps: r.steps
         .filter((s) => s.enabled)
         .map(({ effect, effect_version, seed, params, mask }) => ({
@@ -605,7 +611,8 @@ export class App {
     if (!s) return;
     s.mask ??= emptyMask();
     const ops = s.mask.op ?? [];
-    const aspect = this.doc ? this.doc.width / this.doc.height : 1;
+    const c = this.canvasSize;
+    const aspect = c ? c.w / c.h : 1;
     const { ops: next, index } = insertOp(ops, newComponent(shape, aspect, ops.length));
     s.mask.op = next;
     if (shape === 'brush') this.setTool({ tool: 'paint' });
@@ -662,7 +669,8 @@ export class App {
     const i = this.penPoint;
     if (op?.shape !== 'path' || i === null || !op.points[i] || !this.doc) return;
     // Handles are laid out in the photo's own proportions.
-    this.setPenPoints(toggleSmooth($state.snapshot(op.points) as number[][], i, this.doc.width, this.doc.height));
+    const c = this.canvasSize!;
+    this.setPenPoints(toggleSmooth($state.snapshot(op.points) as number[][], i, c.w, c.h));
   }
 
   /**
@@ -913,6 +921,8 @@ export class App {
       {
         encoding: dto.encoding,
         channels: dto.channels,
+        work_size: dto.work_size,
+        scale_back: dto.scale_back,
         steps: dto.steps.map((s) => ({
           ...s,
           params: { ...s.params },
@@ -1114,9 +1124,42 @@ export class App {
 
   /** The stage and photo sizes the zoom works with, once both are known. */
   get geometry(): Geometry | null {
+    const c = this.canvasSize;
+    if (!c || this.box.w <= 0 || this.box.h <= 0) return null;
+    return geometry(this.box, c, this.box.dpr);
+  }
+
+  // -------------------------------------------------------------------------
+  // Work size (SPEC 5b): the canvas the steps run on.
+
+  /** The size the steps run on: the photo, shrunk to the work size. 100% zoom is this. */
+  get canvasSize(): Size | null {
     const d = this.doc;
-    if (!d || this.box.w <= 0 || this.box.h <= 0) return null;
-    return geometry(this.box, { w: d.width, h: d.height }, this.box.dpr);
+    if (!d) return null;
+    const n = this.recipe.work_size;
+    const [w, h] = n ? fitSize(d.width, d.height, n, n) : [d.width, d.height];
+    return { w, h };
+  }
+
+  /** The exported file's size: the canvas, or scaled back to the photo's. */
+  get outputSize(): Size | null {
+    const d = this.doc;
+    if (!d) return null;
+    return this.recipe.scale_back ? { w: d.width, h: d.height } : this.canvasSize;
+  }
+
+  /** Choose the work size (none: full). Undoable, like any recipe change. */
+  setWorkSize(n: number | null): void {
+    if ((this.recipe.work_size ?? null) === n) return;
+    if (n === null) delete this.recipe.work_size;
+    else this.recipe.work_size = n;
+    this.changed();
+  }
+
+  setScaleBack(on: boolean): void {
+    if (on) this.recipe.scale_back = true;
+    else delete this.recipe.scale_back;
+    this.changed();
   }
 
   get zoomed(): boolean {
@@ -1199,7 +1242,9 @@ export class App {
         URL.revokeObjectURL(url);
         return;
       }
-      this.setPatch('crop', { url, rect: fractions(res.crop, doc), rev });
+      const size = this.canvasSize;
+      if (!size) return;
+      this.setPatch('crop', { url, rect: fractions(res.crop, size), rev });
       this.renderMs = res.ms;
       this.heavy = null;
     } catch (e) {
@@ -1214,15 +1259,15 @@ export class App {
     const doc = this.doc;
     const t = this.cropTarget();
     if (!doc || !t) return;
-    const key = JSON.stringify([doc.id, t]);
+    const key = JSON.stringify([doc.id, t, this.recipe.work_size]);
     if (key === this.originalCropKey) return;
     this.originalCropKey = key;
     try {
-      const res = await api.preview(doc.id, null, t.w, t.h, false, t.crop);
-      if (!res?.crop || this.originalCropKey !== key) return;
+      const res = await api.preview(doc.id, this.dto(), t.w, t.h, false, t.crop, true);
+      if (!res?.crop || this.originalCropKey !== key || !this.canvasSize) return;
       const url = URL.createObjectURL(res.blob);
       await preload(url);
-      this.setPatch('originalCrop', { url, rect: fractions(res.crop, doc), rev: 0 });
+      this.setPatch('originalCrop', { url, rect: fractions(res.crop, this.canvasSize), rev: 0 });
     } catch (e) {
       this.originalCropKey = '';
       this.fail(e);
@@ -1271,15 +1316,19 @@ export class App {
     const exact = quality === 'exact';
     const { w, h } = this.target(exact ? 'full' : quality);
     const rev = this.revision;
+    // A canvas no larger than the preview (a small work size) is shown
+    // whole, unshrunk: that is already exactly the export.
+    const c = this.canvasSize;
+    const whole = !!c && c.w <= w && c.h <= h;
     // The progress line shows while it works; no message, since settling
     // to exact happens after every change.
     this.busy = true;
-    this.queue.request(() => this.runPreview(doc.id, recipe, w, h, quality, rev));
+    this.queue.request(() => this.runPreview(doc.id, recipe, w, h, quality, rev, whole));
     if (this.masking) this.refreshMask();
     if (!exact && this.zoomed) {
       // The whole picture stays approximate behind the patch.
       this.idleTimer = setTimeout(() => this.requestCrop(), EXACT_IDLE_MS);
-    } else if (!exact && this.needsExact) {
+    } else if (!exact && this.needsExact && !whole) {
       // Approximate while things change; exact once they stop.
       this.idleTimer = setTimeout(() => this.render('exact'), EXACT_IDLE_MS);
     } else if (quality === 'fast' && this.box.dpr > 1) {
@@ -1295,6 +1344,7 @@ export class App {
     h: number,
     quality: 'fast' | 'full' | 'exact',
     rev: number,
+    whole = false,
   ): Promise<void> {
     try {
       const res = await api.preview(docId, recipe, w, h, quality === 'exact');
@@ -1304,7 +1354,7 @@ export class App {
       this.setImage(url);
       this.imageRevision = rev;
       this.renderMs = res.ms;
-      this.baseQuality = quality;
+      this.baseQuality = whole ? 'exact' : quality;
       this.heavy = null;
       this.error = null;
     } catch (e) {
@@ -1327,11 +1377,11 @@ export class App {
     const doc = this.doc;
     if (!doc) return;
     const { w, h } = this.target('full');
-    const key = `${doc.id}:${w}x${h}`;
+    const key = `${doc.id}:${w}x${h}:${this.recipe.work_size ?? 'full'}`;
     if (key === this.originalKey) return;
     this.originalKey = key;
     try {
-      const res = await api.preview(doc.id, null, w, h);
+      const res = await api.preview(doc.id, this.dto(), w, h, false, undefined, true);
       if (!res || this.originalKey !== key) return;
       const url = URL.createObjectURL(res.blob);
       await preload(url);

@@ -151,6 +151,17 @@ pub struct Cli {
     #[arg(long, value_name = "1-10", value_parser = clap::value_parser!(u8).range(1..=10))]
     pub avif_speed: Option<u8>,
 
+    /// Run the steps on a copy whose longer side is N pixels (never larger
+    /// than the photo): faster, with coarser glitch texture. The output is
+    /// that size, unless --scale-back.
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(64..))]
+    pub work_size: Option<u32>,
+
+    /// With --work-size: enlarge the result back to the photo's size, with
+    /// hard pixel edges (nearest neighbour).
+    #[arg(long)]
+    pub scale_back: bool,
+
     /// How steps read the pixels as audio samples [default: u8]. A step can
     /// override it with encoding=... in its parameters.
     #[arg(long, value_name = "ENC", value_parser = parse_encoding)]

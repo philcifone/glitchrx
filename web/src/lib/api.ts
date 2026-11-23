@@ -103,14 +103,17 @@ function parseCrop(v: string | null): PreviewResult['crop'] {
 
 export async function preview(
   docId: string,
-  recipe: RecipeDto | null,
+  recipe: RecipeDto,
   maxW: number,
   maxH: number,
   exact = false,
   crop?: { x: number; y: number; w: number; h: number },
+  original = false,
 ): Promise<PreviewResult | null> {
+  // The original comes with the recipe too: its work size frames it.
   const body = {
-    ...(recipe ? { recipe, exact } : { original: true }),
+    recipe,
+    ...(original ? { original: true } : { exact }),
     max_w: maxW,
     max_h: maxH,
     ...(crop ? { crop } : {}),

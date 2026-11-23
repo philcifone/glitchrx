@@ -81,16 +81,7 @@ impl Raster {
     /// The size that fits inside `max_w` x `max_h` keeping the aspect ratio
     /// (never larger than the raster itself).
     pub fn fit(&self, max_w: usize, max_h: usize) -> (usize, usize) {
-        let (w, h) = (self.width.max(1), self.height.max(1));
-        if w <= max_w && h <= max_h {
-            return (w, h);
-        }
-        // Compare w/max_w with h/max_h without floats.
-        if w * max_h >= h * max_w {
-            (max_w.max(1), (h * max_w / w).max(1))
-        } else {
-            ((w * max_h / h).max(1), max_h.max(1))
-        }
+        fit_size(self.width, self.height, max_w, max_h)
     }
 
     /// Downscale to fit `max_w` x `max_h` (see [`Raster::fit`]).
@@ -152,11 +143,64 @@ impl Raster {
         }
         Raster::new(ow, oh, out)
     }
+
+    /// Enlarge to exactly `ow` x `oh` (each no smaller than the raster) by
+    /// repeating pixels (nearest neighbour): hard edges, no new colours.
+    /// Integer arithmetic only, so it is the same everywhere.
+    pub fn enlarge(&self, ow: usize, oh: usize) -> Raster {
+        let (ow, oh) = (ow.max(self.width), oh.max(self.height));
+        if (ow, oh) == (self.width, self.height) {
+            return self.clone();
+        }
+        let cols: Vec<usize> = (0..ow).map(|ox| ox * self.width / ow).collect();
+        let mut out = Vec::with_capacity(ow * oh * 3);
+        let mut row = Vec::with_capacity(ow * 3);
+        let mut last = usize::MAX;
+        for oy in 0..oh {
+            let sy = oy * self.height / oh;
+            if sy != last {
+                let src = &self.bytes[sy * self.width * 3..(sy + 1) * self.width * 3];
+                row.clear();
+                for &sx in &cols {
+                    row.extend_from_slice(&src[sx * 3..sx * 3 + 3]);
+                }
+                last = sy;
+            }
+            out.extend_from_slice(&row);
+        }
+        Raster::new(ow, oh, out)
+    }
+}
+
+/// The size that fits a `w` x `h` picture inside `max_w` x `max_h`,
+/// keeping the aspect ratio and never enlarging. Integer arithmetic only.
+pub fn fit_size(w: usize, h: usize, max_w: usize, max_h: usize) -> (usize, usize) {
+    let (w, h) = (w.max(1), h.max(1));
+    if w <= max_w && h <= max_h {
+        return (w, h);
+    }
+    // Compare w/max_w with h/max_h without floats.
+    if w * max_h >= h * max_w {
+        (max_w.max(1), (h * max_w / w).max(1))
+    } else {
+        ((w * max_h / h).max(1), max_h.max(1))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enlarge_repeats_pixels() {
+        // 2 x 1: red, blue. Three wide: red, red, blue (0*2/3, 1*2/3, 2*2/3).
+        let r = Raster::new(2, 1, vec![255, 0, 0, 0, 0, 255]);
+        let e = r.enlarge(3, 2);
+        assert_eq!((e.width, e.height), (3, 2));
+        assert_eq!(&e.bytes[..9], &[255, 0, 0, 255, 0, 0, 0, 0, 255]);
+        assert_eq!(e.bytes[..9], e.bytes[9..]);
+        assert_eq!(r.enlarge(2, 1), r);
+    }
 
     /// 3x2 raster whose pixels are numbered 0..6 (in the red channel).
     fn numbered() -> Raster {
