@@ -21,6 +21,6 @@ describe('step names', () => {
 
   it('shows the number only when an effect is there more than once', () => {
     const s = [step('a', 'echo', 0), step('b', 'echo', 1), step('c', 'invert', 4)];
-    expect(s.map((x) => stepName(x, s))).toEqual(['echo0', 'echo1', 'invert']);
+    expect(s.map((x) => stepName(x, s))).toEqual(['echo-0', 'echo-1', 'invert']);
   });
 });
