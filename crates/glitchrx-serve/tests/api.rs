@@ -1160,3 +1160,46 @@ async fn work_size_runs_the_steps_on_a_smaller_canvas() {
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert!(String::from_utf8_lossy(&b).contains("work_size"));
 }
+
+#[tokio::test]
+async fn crop_comes_before_the_steps() {
+    let app = app(None, None);
+    let original = fixture("baseline-444.jpg");
+    let doc = upload(&app, "photo.jpg", original.clone()).await;
+    let id = doc["id"].as_str().unwrap();
+    let mut recipe = sample_recipe();
+    recipe["crop"] = json!({"x": 0.25, "y": 0.0, "w": 0.5, "h": 0.75});
+    let export = |r: Value| {
+        post_json(
+            &format!("/api/docs/{id}/export"),
+            json!({"recipe": r, "format": "png"}),
+        )
+    };
+
+    // The same bytes as the CLI's run.
+    let (s, _, b) = send(&app, export(recipe.clone())).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let img = codec::decode(&original).unwrap();
+    let core = Recipe {
+        crop: Some(glitchrx_core::recipe::Crop {
+            x: 0.25,
+            y: 0.0,
+            w: 0.5,
+            h: 0.75,
+        }),
+        ..core_recipe()
+    };
+    let want = core.render(&img.raster).unwrap();
+    let got = codec::decode(&b).unwrap().raster;
+    assert_eq!(
+        (got.width, got.height),
+        (img.raster.width / 2, img.raster.height * 3 / 4)
+    );
+    assert_eq!(got.bytes, want.bytes);
+
+    // A crop outside the photo is refused with a message.
+    recipe["crop"] = json!({"x": 0.75, "y": 0.0, "w": 0.5, "h": 1.0});
+    let (s, _, b) = send(&app, export(recipe)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(String::from_utf8_lossy(&b).contains("crop"));
+}

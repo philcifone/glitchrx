@@ -387,3 +387,30 @@ fn work_size_shrinks_or_scales_back_and_is_saved_in_the_recipe() {
         2
     );
 }
+
+#[test]
+fn crop_keeps_part_of_the_photo_and_is_saved_in_the_recipe() {
+    let d = workdir();
+    let o = run(
+        d.path(),
+        &[
+            "--invert",
+            "--crop",
+            "0.25,0,0.5,0.5",
+            "--save-recipe",
+            "photo.jpg",
+            "crop.png",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    let img = codec::decode(&fs::read(d.path().join("crop.png")).unwrap()).unwrap();
+    assert_eq!((img.raster.width, img.raster.height), (240, 160));
+    let recipe = fs::read_to_string(d.path().join("crop.recipe.toml")).unwrap();
+    assert!(recipe.contains("[crop]"), "{recipe}");
+    let o = run(
+        d.path(),
+        &["--invert", "--crop", "0.75,0,0.5,1", "photo.jpg", "bad.png"],
+    );
+    assert_ne!(code(&o), 0);
+    assert!(stderr(&o).contains("crop"), "{}", stderr(&o));
+}

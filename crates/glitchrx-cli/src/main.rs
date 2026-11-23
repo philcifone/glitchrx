@@ -209,6 +209,9 @@ fn build_recipe(cli: &Cli, effects: &[EffectArg]) -> Result<(Recipe, Option<u64>
     if cli.scale_back {
         recipe.scale_back = true;
     }
+    if let Some(c) = cli.crop {
+        recipe.crop = Some(c);
+    }
     recipe.validate()?;
     Ok((recipe, master))
 }

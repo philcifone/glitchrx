@@ -14,6 +14,12 @@
 //! work_size = 2048    # optional: steps run on a copy this long (see below)
 //! scale_back = true   # optional: and the result is enlarged to full size
 //!
+//! [crop]              # optional: the part of the photo kept (see below)
+//! x = 0.1             # left edge, share of the width
+//! y = 0.0
+//! w = 0.8             # share of the width
+//! h = 1.0
+//!
 //! [[step]]
 //! effect = "echo"
 //! effect_version = 1
@@ -45,6 +51,12 @@
 //! effect covers more of the picture. The file is written at that size,
 //! or with `scale_back`, enlarged to the original size with hard pixel
 //! edges (nearest neighbour), so the coarse texture stays crisp.
+//!
+//! **Crop** comes first: the canvas is made from the cropped photo, so
+//! the work size, the steps, their masks and positions, and `scale_back`
+//! all measure against the crop, and the file is the crop's size. The
+//! crop is kept as shares of the photo, which turn into whole pixels by
+//! rounding (`crop_rect`).
 
 use std::collections::BTreeMap;
 
@@ -308,12 +320,56 @@ pub struct Recipe {
     /// Enlarge the result back to the full size (nearest neighbour).
     #[serde(default, skip_serializing_if = "is_false")]
     pub scale_back: bool,
+    /// The part of the photo kept, before anything else. See the module
+    /// documentation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<Crop>,
     #[serde(rename = "step", default)]
     pub steps: Vec<Step>,
 }
 
 fn is_false(b: &bool) -> bool {
     !*b
+}
+
+/// A crop rectangle, as shares (0 to 1) of the photo's width and height.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Crop {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+impl Crop {
+    /// Whole pixels `(x, y, w, h)` in a `width` x `height` photo: each edge
+    /// rounded to the nearest pixel (basic operations only, D-25), at least
+    /// one pixel each way, inside the photo.
+    pub fn rect(&self, width: usize, height: usize) -> (usize, usize, usize, usize) {
+        let edge =
+            |share: f64, n: usize| ((share * n as f64 + 0.5).floor().max(0.0) as usize).min(n);
+        let span = |a: f64, len: f64, n: usize| {
+            let lo = edge(a, n).min(n - 1);
+            let hi = edge(a + len, n).clamp(lo + 1, n);
+            (lo, hi - lo)
+        };
+        let (x, w) = span(self.x, self.w, width);
+        let (y, h) = span(self.y, self.h, height);
+        (x, y, w, h)
+    }
+
+    fn check(&self) -> std::result::Result<(), String> {
+        let ok = |v: f64| v.is_finite() && (0.0..=1.0).contains(&v);
+        // A hair of slack for shares that add up to 1 with rounding.
+        let fits = |a: f64, l: f64| ok(a) && ok(l) && l > 0.0 && a + l <= 1.0 + 1e-9;
+        if fits(self.x, self.w) && fits(self.y, self.h) {
+            Ok(())
+        } else {
+            Err(format!(
+                "crop must lie inside the photo (shares 0 to 1, width and height above 0): {self:?}"
+            ))
+        }
+    }
 }
 
 /// The smallest work size accepted: below it there is too little picture.
@@ -328,6 +384,7 @@ impl Default for Recipe {
             channels: 1,
             work_size: None,
             scale_back: false,
+            crop: None,
             steps: Vec::new(),
         }
     }
@@ -388,12 +445,36 @@ impl Recipe {
                 "work_size must be at least {MIN_WORK_SIZE} pixels, not {w}"
             )));
         }
+        if let Some(c) = &self.crop {
+            c.check().map_err(Error::Recipe)?;
+        }
         self.prepare_all().map(|_| ())
     }
 
-    /// The canvas size for a picture of `w` x `h`: shrunk to the work
-    /// size, if there is one and the picture is larger.
+    /// Everything that decides the canvas, for telling when it changes.
+    pub fn framing(&self) -> (Option<u32>, Option<Crop>) {
+        (self.work_size, self.crop)
+    }
+
+    /// The crop in whole pixels of a `w` x `h` photo (all of it without one).
+    pub fn crop_rect(&self, w: usize, h: usize) -> (usize, usize, usize, usize) {
+        match &self.crop {
+            Some(c) => c.rect(w, h),
+            None => (0, 0, w, h),
+        }
+    }
+
+    /// The size of the crop of a `w` x `h` photo: the file's size with
+    /// `scale_back`.
+    pub fn cropped_size(&self, w: usize, h: usize) -> (usize, usize) {
+        let (_, _, cw, ch) = self.crop_rect(w, h);
+        (cw, ch)
+    }
+
+    /// The canvas size for a photo of `w` x `h`: cropped, then shrunk to
+    /// the work size if there is one and the crop is larger.
     pub fn canvas_size(&self, w: usize, h: usize) -> (usize, usize) {
+        let (w, h) = self.cropped_size(w, h);
         match self.work_size {
             Some(n) => crate::raster::fit_size(w, h, n as usize, n as usize),
             None => (w, h),
@@ -402,13 +483,20 @@ impl Recipe {
 
     /// The raster the steps run on (see the module documentation).
     pub fn canvas(&self, original: &Raster) -> Raster {
+        let (x, y, cw, ch) = self.crop_rect(original.width, original.height);
         let (w, h) = self.canvas_size(original.width, original.height);
-        original.resize(w, h)
+        if (cw, ch) == (original.width, original.height) {
+            original.resize(w, h)
+        } else {
+            original.crop(x, y, cw, ch).resize(w, h)
+        }
     }
 
     /// What the bent canvas becomes in the file: itself, or with
-    /// `scale_back`, enlarged to `full` (the size before the work size).
-    pub fn finish(&self, bent: Raster, full: (usize, usize)) -> Raster {
+    /// `scale_back`, enlarged to the crop's size (the size before the
+    /// work size). `original` is the photo's size.
+    pub fn finish(&self, bent: Raster, original: (usize, usize)) -> Raster {
+        let full = self.cropped_size(original.0, original.1);
         if self.scale_back && (bent.width, bent.height) != full {
             bent.enlarge(full.0, full.1)
         } else {
@@ -653,6 +741,60 @@ mod tests {
     /// A 6 x 4 picture whose every pixel differs, so resizing shows.
     fn ramp(w: usize, h: usize) -> Raster {
         Raster::new(w, h, (0..w * h * 3).map(|i| (i * 7 % 251) as u8).collect())
+    }
+
+    #[test]
+    fn crop_comes_first_and_rounds_to_whole_pixels() {
+        let c = Crop {
+            x: 0.1,
+            y: 0.25,
+            w: 0.5,
+            h: 0.5,
+        };
+        assert_eq!(c.rect(480, 320), (48, 80, 240, 160));
+        // Rounding each edge, never empty, never outside.
+        let tiny = Crop {
+            x: 0.999,
+            y: 0.0,
+            w: 0.0001,
+            h: 1.0,
+        };
+        assert_eq!(tiny.rect(100, 10), (99, 0, 1, 10));
+        let mut r = Recipe {
+            crop: Some(c),
+            work_size: Some(120),
+            ..Recipe::default()
+        };
+        let original = Raster::new(
+            480,
+            320,
+            (0..480 * 320 * 3).map(|i| (i % 251) as u8).collect(),
+        );
+        assert_eq!(r.canvas_size(480, 320), (120, 80));
+        assert_eq!(r.render(&original).unwrap().width, 120);
+        r.scale_back = true;
+        let out = r.render(&original).unwrap();
+        assert_eq!((out.width, out.height), (240, 160));
+        // Without a work size the canvas is exactly the cropped pixels.
+        r.work_size = None;
+        assert_eq!(r.canvas(&original), original.crop(48, 80, 240, 160));
+        // Kept in the file, refused when it leaves the photo.
+        let back = Recipe::from_toml(&r.to_toml()).unwrap();
+        assert_eq!(back.crop, Some(c));
+        r.crop = Some(Crop {
+            x: 0.6,
+            y: 0.0,
+            w: 0.5,
+            h: 1.0,
+        });
+        assert!(r.validate().unwrap_err().to_string().contains("crop"));
+        r.crop = Some(Crop {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 1.0,
+        });
+        assert!(r.validate().is_err());
     }
 
     #[test]
