@@ -12,8 +12,14 @@
 //! - **linear**: a gradient, 1 at `from` fading to 0 at `to`;
 //! - **radial**: a circle centred on `from` and reaching `to`, hard-edged
 //!   unless given a lower `hardness` (soften it with its feather);
+//! - **rect**: a rectangle, which may be turned about its centre;
+//! - **path**: a closed outline drawn with the pen, of corners and smooth
+//!   points (whose handles bend the sides into curves);
 //! - **brightness**: the pixels whose brightness lies in a range, read from
 //!   the picture as it arrives at the step.
+//!
+//! Rectangles and paths are filled with exact area coverage (`fill.rs`), so
+//! their edges are anti-aliased and crisp; feather softens them.
 //!
 //! Each component has its own **feather** (a blur of its edges) and
 //! **opacity** (how strongly it counts). Starting from an empty mask
@@ -34,7 +40,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::dsp;
 use crate::error::{Error, Result};
+use crate::fill::{self, Pt};
 use crate::recipe::Cancel;
 
 /// How a component combines with the mask so far.
@@ -114,6 +122,25 @@ pub enum Shape {
         #[serde(default = "hard")]
         hardness: f64,
     },
+    /// A rectangle, turned clockwise by `angle` degrees about its centre.
+    Rect {
+        /// Centre, as fractions of the width and height.
+        center: [f64; 2],
+        /// Width and height before turning, as shares of the longer side
+        /// (so a square stays square on any picture).
+        size: [f64; 2],
+        #[serde(default, skip_serializing_if = "is_zero")]
+        angle: f64,
+    },
+    /// A closed outline drawn with the pen; the last point joins the first.
+    /// Each point is `[x, y]`, a corner, or `[x, y, hx, hy]`, a smooth point
+    /// whose handle sits at `hx, hy`. The handle bends the side after the
+    /// point, and its mirror image the side before, so the outline passes
+    /// through smoothly.
+    Path {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        points: Vec<Vec<f64>>,
+    },
     Brightness {
         /// Brightness range that is fully on, 0..1.
         low: f64,
@@ -191,6 +218,9 @@ const MAX_OPS: usize = 2000;
 const MAX_POINTS: usize = 400_000;
 /// Largest feather, as a share of the longer side.
 pub const MAX_FEATHER: f64 = 0.25;
+/// Largest rectangle side, as a share of the longer side: room to reach
+/// past every corner even when turned.
+const MAX_SIDE: f64 = 4.0;
 
 impl Mask {
     /// Check every value; a bad mask fails before any work.
@@ -244,6 +274,35 @@ impl Mask {
                     if !unit(*hardness) {
                         return bad(format!("circle hardness {hardness} must be 0..1"));
                     }
+                }
+                Shape::Rect {
+                    center,
+                    size,
+                    angle,
+                } => {
+                    if !center.iter().all(|&v| pos(v)) {
+                        return bad("rectangle centre must be near the picture".into());
+                    }
+                    if !size
+                        .iter()
+                        .all(|&v| v.is_finite() && (0.0..=MAX_SIDE).contains(&v))
+                    {
+                        return bad(format!("rectangle size must be 0..{MAX_SIDE}"));
+                    }
+                    if !(angle.is_finite() && angle.abs() <= 360.0) {
+                        return bad(format!("rectangle angle {angle} must be -360..360"));
+                    }
+                }
+                Shape::Path { points: p } => {
+                    for q in p {
+                        if !(q.len() == 2 || q.len() == 4) || !q.iter().all(|&v| pos(v)) {
+                            return bad(
+                                "path points must be [x, y] or [x, y, hx, hy] near the picture"
+                                    .into(),
+                            );
+                        }
+                    }
+                    points += p.len();
                 }
                 Shape::Brightness { low, high, soft } => {
                     if !(unit(*low) && unit(*high) && unit(*soft) && low <= high) {
@@ -324,6 +383,12 @@ fn coverage(shape: &Shape, c: &mut [f32], w: usize, h: usize, long: f64, input: 
                 soft_edge(r, (dx * dx + dy * dy).sqrt(), edge)
             });
         }
+        Shape::Rect {
+            center,
+            size,
+            angle,
+        } => fill::fill(c, w, h, &[rect_corners(center, size, *angle, w, h, long)]),
+        Shape::Path { points } => fill::fill(c, w, h, &[path_outline(points, w, h)]),
         Shape::Brightness { low, high, soft } => {
             let (low, high, soft) = (*low, *high, *soft);
             for (i, v) in c.iter_mut().enumerate() {
@@ -342,6 +407,71 @@ fn coverage(shape: &Shape, c: &mut [f32], w: usize, h: usize, long: f64, input: 
             }
         }
     }
+}
+
+/// A rectangle's corners in pixels, in order around it.
+fn rect_corners(
+    center: &[f64; 2],
+    size: &[f64; 2],
+    angle: f64,
+    w: usize,
+    h: usize,
+    long: f64,
+) -> Vec<Pt> {
+    let (cx, cy) = (center[0] * w as f64, center[1] * h as f64);
+    let (hu, hv) = (size[0] * long * 0.5, size[1] * long * 0.5);
+    // Unturned is the common case; keep it exact (cos_turns(0) is 1 only
+    // to within the last bit).
+    let (cos, sin) = if angle == 0.0 {
+        (1.0, 0.0)
+    } else {
+        let t = angle / 360.0;
+        (dsp::cos_turns(t), dsp::sin_turns(t))
+    };
+    // Clockwise on screen, since y points down: the width runs along
+    // (cos, sin) and the height along (-sin, cos).
+    let corner = |su: f64, sv: f64| {
+        (
+            cx + su * hu * cos - sv * hv * sin,
+            cy + su * hu * sin + sv * hv * cos,
+        )
+    };
+    vec![
+        corner(-1.0, -1.0),
+        corner(1.0, -1.0),
+        corner(1.0, 1.0),
+        corner(-1.0, 1.0),
+    ]
+}
+
+/// A pen path's outline in pixels: straight sides between corners, and
+/// cubic curves where a side starts or ends at a smooth point.
+fn path_outline(points: &[Vec<f64>], w: usize, h: usize) -> Vec<Pt> {
+    let (wf, hf) = (w as f64, h as f64);
+    let anchor = |p: &[f64]| (p[0] * wf, p[1] * hf);
+    let handle = |p: &[f64]| (p.len() == 4).then(|| (p[2] * wf, p[3] * hf));
+    let n = points.len();
+    if n < 2 {
+        return Vec::new();
+    }
+    let mut out = vec![anchor(&points[0])];
+    for i in 0..n {
+        let (p, q) = (&points[i], &points[(i + 1) % n]);
+        let (a, d) = (anchor(p), anchor(q));
+        match (handle(p), handle(q)) {
+            (None, None) => out.push(d),
+            (hp, hq) => {
+                // The side leaves p along p's handle and arrives at q along
+                // the mirror of q's.
+                let b = hp.unwrap_or(a);
+                let c = hq.map_or(d, |hq| (2.0 * d.0 - hq.0, 2.0 * d.1 - hq.1));
+                fill::flatten_cubic(a, b, c, d, &mut out);
+            }
+        }
+    }
+    // The last side ended back on the first point.
+    out.pop();
+    out
 }
 
 /// Combine the mask so far with a component's value at one pixel.
@@ -779,6 +909,119 @@ mod tests {
         assert_eq!(op, circle(Mode::Add, [0.5, 0.5], [0.6, 0.5]));
     }
 
+    fn rect(center: [f64; 2], size: [f64; 2], angle: f64) -> Mask {
+        masked(vec![MaskOp::new(
+            Shape::Rect {
+                center,
+                size,
+                angle,
+            },
+            Mode::Add,
+        )])
+    }
+
+    fn sum(m: &[f32]) -> f64 {
+        m.iter().map(|&v| v as f64).sum()
+    }
+
+    #[test]
+    fn a_rectangle_is_crisp_and_turns_about_its_centre() {
+        // 40 x 20 raster: sizes are shares of the longer side (40 px), so
+        // [0.5, 0.25] is 20 x 10 px, centred: x 10..30, y 5..15.
+        let m = render(&rect([0.5, 0.5], [0.5, 0.25], 0.0), 40, 20);
+        assert_eq!(at(&m, 40, 10, 5), 1.0);
+        assert_eq!(at(&m, 40, 29, 14), 1.0);
+        assert_eq!(at(&m, 40, 9, 10), 0.0);
+        assert_eq!(at(&m, 40, 20, 15), 0.0);
+        assert_eq!(sum(&m), 200.0);
+        // Turned a quarter: 10 wide, 20 tall, still centred.
+        let m = render(&rect([0.5, 0.5], [0.5, 0.25], 90.0), 40, 40);
+        assert!(at(&m, 40, 20, 11) > 0.999 && at(&m, 40, 20, 28) > 0.999);
+        assert!(at(&m, 40, 12, 20) < 0.001, "the old width is gone");
+        // Any turn keeps the area, anti-aliased rather than jagged.
+        let m = render(&rect([0.5, 0.5], [0.5, 0.25], 30.0), 40, 40);
+        assert!((sum(&m) - 200.0).abs() < 1e-3, "{}", sum(&m));
+        assert!(
+            m.iter().any(|&v| v > 0.1 && v < 0.9),
+            "edges are anti-aliased"
+        );
+        // Turning by 180 changes nothing visible (to within rounding).
+        let a = render(&rect([0.4, 0.6], [0.3, 0.2], 0.0), 40, 40);
+        let b = render(&rect([0.4, 0.6], [0.3, 0.2], 180.0), 40, 40);
+        assert!(a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-6));
+    }
+
+    #[test]
+    fn a_path_fills_its_outline_and_curves_at_smooth_points() {
+        let path =
+            |points: Vec<Vec<f64>>| masked(vec![MaskOp::new(Shape::Path { points }, Mode::Add)]);
+        // A right triangle with corners: half the square under it.
+        let tri = path(vec![vec![0.0, 0.0], vec![1.0, 0.0], vec![0.0, 1.0]]);
+        let m = render(&tri, 20, 20);
+        assert!((sum(&m) - 200.0).abs() < 1e-3);
+        assert_eq!(at(&m, 20, 2, 2), 1.0);
+        assert_eq!(at(&m, 20, 17, 17), 0.0);
+        // A diamond of corners, then the same points made smooth with
+        // handles along the square's sides: the curves bulge out toward
+        // the square, so more is covered, but never past it.
+        let corners = vec![
+            vec![0.5, 0.1],
+            vec![0.9, 0.5],
+            vec![0.5, 0.9],
+            vec![0.1, 0.5],
+        ];
+        let smooth = vec![
+            vec![0.5, 0.1, 0.7, 0.1],
+            vec![0.9, 0.5, 0.9, 0.7],
+            vec![0.5, 0.9, 0.3, 0.9],
+            vec![0.1, 0.5, 0.1, 0.3],
+        ];
+        let (d, r) = (
+            render(&path(corners), 40, 40),
+            render(&path(smooth), 40, 40),
+        );
+        assert!((sum(&d) - 0.5 * 32.0 * 32.0).abs() < 1e-3);
+        assert!(sum(&r) > sum(&d) + 100.0 && sum(&r) < 32.0 * 32.0);
+        assert_eq!(at(&r, 40, 0, 0), 0.0);
+        // Too few points to enclose anything: nothing, but no error.
+        assert!(
+            render(&path(vec![vec![0.2, 0.2], vec![0.8, 0.8]]), 10, 10)
+                .iter()
+                .all(|&v| v == 0.0)
+        );
+        assert!(render(&path(vec![]), 10, 10).iter().all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn rectangles_and_paths_read_from_a_recipe() {
+        let op: MaskOp = toml::from_str(
+            "shape = \"rect\"\ncenter = [0.5, 0.5]\nsize = [0.2, 0.1]\nmode = \"subtract\"",
+        )
+        .unwrap();
+        assert_eq!(
+            op,
+            MaskOp::new(
+                Shape::Rect {
+                    center: [0.5, 0.5],
+                    size: [0.2, 0.1],
+                    angle: 0.0
+                },
+                Mode::Subtract
+            )
+        );
+        let op: MaskOp = toml::from_str(
+            "shape = \"path\"\npoints = [[0.1, 0.1], [0.9, 0.2, 0.95, 0.4], [0.3, 0.8]]",
+        )
+        .unwrap();
+        let Shape::Path { points } = &op.shape else {
+            panic!("{op:?}")
+        };
+        assert_eq!(points[1], vec![0.9, 0.2, 0.95, 0.4]);
+        // And back out: an unturned rectangle leaves its angle out.
+        let text = toml::to_string(&rect([0.5, 0.5], [0.2, 0.1], 0.0).ops[0]).unwrap();
+        assert!(!text.contains("angle"), "{text}");
+    }
+
     #[test]
     fn brightness_selects_by_level() {
         let mut input = grey(2, 1, 30);
@@ -970,6 +1213,22 @@ mod tests {
             ..dot(Mode::Add, 0.5, 0.5, 0.1)
         }));
         assert!(!bad(dot(Mode::Add, 0.5, 0.5, 0.1)));
+        let shape = |shape| MaskOp::new(shape, Mode::Add);
+        let rect = |size: [f64; 2], angle| {
+            shape(Shape::Rect {
+                center: [0.5, 0.5],
+                size,
+                angle,
+            })
+        };
+        assert!(bad(rect([-0.1, 0.2], 0.0)));
+        assert!(bad(rect([0.1, 0.2], f64::INFINITY)));
+        assert!(bad(rect([0.1, 0.2], 400.0)));
+        assert!(!bad(rect([0.1, 0.2], -45.0)));
+        let path = |points: Vec<Vec<f64>>| shape(Shape::Path { points });
+        assert!(bad(path(vec![vec![0.1, 0.1, 0.2]])));
+        assert!(bad(path(vec![vec![0.1, f64::NAN]])));
+        assert!(!bad(path(vec![vec![0.1, 0.1], vec![0.5, 0.5, 0.6, 0.5]])));
     }
 
     #[test]
