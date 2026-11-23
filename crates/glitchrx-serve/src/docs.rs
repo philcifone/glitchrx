@@ -285,6 +285,41 @@ impl Doc {
         Ok((w, h, coverage))
     }
 
+    /// Histograms of the picture as it arrives at step `index`, at preview
+    /// size (from the cache, like the mask view): 256 counts each for red,
+    /// green, blue and brightness (Rec. 709, as pixel sorting and the
+    /// adjustments measure it). For the curves editor.
+    pub fn histogram(
+        &self,
+        recipe: &Recipe,
+        index: usize,
+        max_w: usize,
+        max_h: usize,
+        cancel: Cancel<'_>,
+    ) -> Result<[Vec<u32>; 4]> {
+        if index > recipe.steps.len() {
+            return Err(glitchrx_core::Error::Recipe(format!(
+                "there is no step {}",
+                index + 1
+            )));
+        }
+        let before = Recipe {
+            steps: recipe.steps[..index].to_vec(),
+            ..recipe.clone()
+        };
+        let input = self.preview(&before, max_w, max_h, cancel)?;
+        let mut h: [Vec<u32>; 4] = std::array::from_fn(|_| vec![0; 256]);
+        for p in input.bytes.chunks_exact(3) {
+            h[0][p[0] as usize] += 1;
+            h[1][p[1] as usize] += 1;
+            h[2][p[2] as usize] += 1;
+            // Integer weights summing to 10000, rounded to the nearest level.
+            let l = (2126 * p[0] as u32 + 7152 * p[1] as u32 + 722 * p[2] as u32 + 5000) / 10000;
+            h[3][l as usize] += 1;
+        }
+        Ok(h)
+    }
+
     /// Bend the full-resolution image, exactly as the CLI would, starting
     /// from the cache where it can ([`FullCache`]). Running the steps after
     /// a cached intermediate gives the same bytes as running them all,

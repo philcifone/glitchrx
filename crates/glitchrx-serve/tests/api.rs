@@ -1279,3 +1279,34 @@ async fn saved_recipes_are_listed_read_and_offered_for_their_photo() {
         assert_eq!(s, StatusCode::NOT_FOUND, "{bad}");
     }
 }
+
+#[tokio::test]
+async fn histogram_of_the_picture_reaching_a_step() {
+    let app = app(None, None);
+    let doc = upload(&app, "photo.jpg", fixture("baseline-444.jpg")).await;
+    let id = doc["id"].as_str().unwrap();
+    let ask = |step: usize| {
+        post_json(
+            &format!("/api/docs/{id}/histogram"),
+            json!({"recipe": sample_recipe(), "step": step, "max_w": 120, "max_h": 120}),
+        )
+    };
+    let (s, _, b) = send(&app, ask(0)).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let h0 = json_of(&b);
+    // 480 x 320 fitted into 120 x 120.
+    let pixels = 120 * 80;
+    for ch in ["red", "green", "blue", "luma"] {
+        let counts = h0[ch].as_array().unwrap();
+        assert_eq!(counts.len(), 256);
+        assert_eq!(
+            counts.iter().map(|v| v.as_u64().unwrap()).sum::<u64>(),
+            pixels
+        );
+    }
+    // After the first step the picture differs; past the last step is refused.
+    let (_, _, b) = send(&app, ask(2)).await;
+    assert_ne!(json_of(&b)["red"], h0["red"]);
+    let (s, _, _) = send(&app, ask(3)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}
