@@ -34,6 +34,7 @@ import { toggleSmooth } from './shapes';
 import { FIT, clampView, geometry, isZoomed, toggle, visible, type Geometry, type Point, type Rect, type Size, type View } from './view';
 import type {
   Crop,
+  SavedRecipe,
   Channels,
   DocInfo,
   EffectInfo,
@@ -336,6 +337,7 @@ export class App {
     try {
       const doc = await load();
       this.doc = doc;
+      this.continueFrom = doc.recipes ?? [];
       storageSet(DOC_KEY, doc.id);
       this.view = FIT;
       this.dropCrops();
@@ -1500,7 +1502,7 @@ export class App {
     if (!doc) return;
     this.working = this.exporting(opts);
     try {
-      const { blob, name } = await api.exportFile(doc.id, this.dto(), opts);
+      const { blob, name } = await api.exportFile(doc.id, this.saved(), opts);
       this.deliver(blob, name);
     } catch (e) {
       this.fail(e);
@@ -1515,7 +1517,7 @@ export class App {
     if (!doc) return;
     this.working = this.exporting(opts);
     try {
-      const r = await api.saveAs(doc.id, this.dto(), opts, withRecipe);
+      const r = await api.saveAs(doc.id, this.saved(), opts, withRecipe);
       if (r) {
         const names = r.saved.map((p) => p.split('/').pop());
         this.flash(`Saved ${names.join(', ')}${r.skipped.length ? `; ${r.skipped.join('; ')}` : ''}`);
@@ -1532,7 +1534,7 @@ export class App {
     if (!doc) return;
     this.working = this.exporting(opts);
     try {
-      const saved = await api.saveOnServer(doc.id, this.dto(), opts, withRecipe);
+      const saved = await api.saveOnServer(doc.id, this.saved(), opts, withRecipe);
       this.flash(`Saved ${saved.join(', ')}`);
     } catch (e) {
       this.fail(e);
@@ -1547,7 +1549,7 @@ export class App {
     if (!doc) return;
     this.working = this.exporting(opts);
     try {
-      const saved = await api.saveTo(doc.id, this.dto(), opts, folder, name, withRecipe);
+      const saved = await api.saveTo(doc.id, this.saved(), opts, folder, name, withRecipe);
       this.flash(`Saved ${saved.join(', ')}`);
     } catch (e) {
       this.fail(e);
@@ -1584,8 +1586,34 @@ export class App {
 
   async downloadRecipe(): Promise<void> {
     try {
-      const text = await api.recipeToToml(this.dto());
+      const text = await api.recipeToToml(this.saved());
       this.deliver(new Blob([text], { type: 'application/toml' }), `${this.stem()}.recipe.toml`);
+    } catch (e) {
+      this.fail(e);
+    }
+  }
+
+  /**
+   * The recipe as saved beside an export or downloaded: with the photo's
+   * name, so opening that photo again offers to continue from it (D-51).
+   * Not for presets, which belong to no photo.
+   */
+  private saved(): RecipeDto {
+    return { ...this.dto(), ...(this.doc ? { source: this.doc.name } : {}) };
+  }
+
+  // -------------------------------------------------------------------------
+  // Picking up old edits (SPEC 5e)
+
+  /** Recipes made on the open photo, offered once it opens; [] once answered. */
+  continueFrom = $state<SavedRecipe[]>([]);
+
+  /** Load a recipe saved on the server (replacing the steps; undoable). */
+  async loadSaved(r: SavedRecipe): Promise<void> {
+    try {
+      this.loadRecipe(await api.readRecipe(r));
+      this.continueFrom = [];
+      this.flash(`Loaded ${r.name}`);
     } catch (e) {
       this.fail(e);
     }

@@ -22,6 +22,7 @@ pub mod dialogs;
 pub mod docs;
 pub mod dto;
 pub mod presets;
+pub mod recipes;
 pub mod render;
 pub mod settings;
 

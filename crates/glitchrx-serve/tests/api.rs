@@ -1203,3 +1203,79 @@ async fn crop_comes_before_the_steps() {
     assert_eq!(s, StatusCode::BAD_REQUEST);
     assert!(String::from_utf8_lossy(&b).contains("crop"));
 }
+
+#[tokio::test]
+async fn saved_recipes_are_listed_read_and_offered_for_their_photo() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join("out")).unwrap();
+    let app = app_with_settings(&home, None);
+    let (s, _, _) = send(
+        &app,
+        put_json("/api/settings", json!({"library": null, "export": "out"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let original = fixture("baseline-444.jpg");
+    let doc = upload(&app, "IMG_7.jpg", original.clone()).await;
+    assert_eq!(doc["recipes"], json!([]));
+    let id = doc["id"].as_str().unwrap();
+
+    // Saved under a name of its own: the recipe names the photo.
+    let mut recipe = sample_recipe();
+    recipe["source"] = json!("../../somewhere/IMG_7.jpg");
+    let (s, _, b) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/save-to"),
+            json!({"recipe": recipe, "format": "png", "folder": "out",
+                   "name": "beach", "with_recipe": true}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let text = fs::read_to_string(home.join("out/beach.recipe.toml")).unwrap();
+    assert!(text.contains("source = \"IMG_7.jpg\""), "{text}");
+    // An older recipe, matched by its export name; and one for another photo.
+    fs::write(
+        home.join("out/IMG_7-glitch-2.recipe.toml"),
+        text.replace("source = \"IMG_7.jpg\"\n", ""),
+    )
+    .unwrap();
+    fs::write(
+        home.join("out/other.recipe.toml"),
+        text.replace("IMG_7.jpg", "IMG_8.jpg"),
+    )
+    .unwrap();
+
+    // The same photo opened again: both of its recipes are offered.
+    let again = upload(&app, "IMG_7.jpg", original).await;
+    let mut names: Vec<_> = again["recipes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["name"].as_str().unwrap().to_string())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["IMG_7-glitch-2.recipe.toml", "beach.recipe.toml"]);
+
+    // All three are listed, and one reads back as the GUI's recipe.
+    let (_, _, b) = send(&app, get("/api/recipes")).await;
+    assert_eq!(json_of(&b).as_array().unwrap().len(), 3);
+    let (s, _, b) = send(&app, get("/api/recipe?place=export&path=beach.recipe.toml")).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(json_of(&b)["steps"][1]["effect"], "shift");
+    assert_eq!(json_of(&b)["steps"][1]["seed"], "42");
+    assert_eq!(json_of(&b)["source"], "IMG_7.jpg");
+
+    // Nothing else is read: other files, other folders, unset folders.
+    fs::write(home.join("out/notes.txt"), "secret").unwrap();
+    for bad in [
+        "place=export&path=notes.txt",
+        "place=export&path=../.config/glitchrx/config.toml",
+        "place=library&path=beach.recipe.toml",
+    ] {
+        let (s, _, _) = send(&app, get(&format!("/api/recipe?{bad}"))).await;
+        assert_eq!(s, StatusCode::NOT_FOUND, "{bad}");
+    }
+}
