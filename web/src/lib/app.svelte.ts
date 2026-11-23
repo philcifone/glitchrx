@@ -462,11 +462,38 @@ export class App {
     this.changed();
   }
 
-  /** Move a step: inside its preset group, or past a neighbouring step or whole group. */
-  moveStep(uid: string, by: -1 | 1): void {
+  /**
+   * Move a step: inside its preset group, or past a neighbouring step or
+   * whole group. `commit: false` while dragging; history records the drop.
+   * Returns whether it moved.
+   */
+  moveStep(uid: string, by: -1 | 1, commit = true): boolean {
     const moved = groups.moveStep(this.recipe.steps, uid, by);
-    if (!moved) return;
+    if (!moved) return false;
     this.recipe.steps = moved;
+    this.changed(commit);
+    return true;
+  }
+
+  /** Remove several steps at once (Edit mode). One undo brings them all back. */
+  removeSteps(uids: string[]): void {
+    const gone = new Set(uids);
+    if (this.masking && gone.has(this.masking)) this.stopMasking();
+    this.recipe.steps = this.recipe.steps.filter((s) => !gone.has(s.uid));
+    this.changed();
+  }
+
+  /** Duplicate several steps, each copy right after its original (Edit mode). */
+  duplicateSteps(uids: string[]): void {
+    const pick = new Set(uids);
+    const out: StepState[] = [];
+    for (const s of this.recipe.steps) {
+      out.push(s);
+      if (!pick.has(s.uid)) continue;
+      const { n: _n, ...orig } = $state.snapshot(s);
+      out.push({ ...orig, uid: newUid(), seed: randomSeed() });
+    }
+    this.recipe.steps = out;
     this.changed();
   }
 
@@ -951,11 +978,12 @@ export class App {
     return !!g && groups.isModified(g, this.recipe.steps, this.recipe, this.samples);
   }
 
-  moveGroup(id: string, by: -1 | 1): void {
+  moveGroup(id: string, by: -1 | 1, commit = true): boolean {
     const moved = groups.moveGroup(this.recipe.steps, id, by);
-    if (!moved) return;
+    if (!moved) return false;
     this.recipe.steps = moved;
-    this.changed();
+    this.changed(commit);
+    return true;
   }
 
   canMoveGroup(id: string, by: -1 | 1): boolean {

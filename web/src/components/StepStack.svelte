@@ -7,18 +7,31 @@
   import Plus from '@lucide/svelte/icons/plus';
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
-  import type { PresetGroup, StepState } from '../lib/types';
+  import { blocksOf } from '../lib/groups';
   import { tick } from 'svelte';
   import { app } from '../lib/app.svelte';
   import { revealIn } from '../lib/scroll';
   import { CHANNEL_CHOICES } from '../lib/channels';
   import EffectPalette from './EffectPalette.svelte';
   import StepCard from './StepCard.svelte';
+  import StepEditList from './StepEditList.svelte';
 
   const encodings = $derived(app.config?.encodings ?? []);
   const current = $derived(encodings.find((e) => e.id === app.recipe.encoding));
 
-  let list: HTMLOListElement;
+  let list = $state<HTMLOListElement>();
+  /** Edit mode: one line per step, select several, drag to reorder. */
+  let editing = $state(false);
+
+  function startEditing() {
+    app.stopMasking();
+    editing = true;
+  }
+
+  // Nothing left to edit: back to the cards.
+  $effect(() => {
+    if (editing && app.recipe.steps.length === 0) editing = false;
+  });
   let sheet: HTMLDialogElement;
 
   /** Add a step and bring its card into view. */
@@ -30,20 +43,7 @@
   }
 
   // The stack as blocks: loose steps, and preset groups holding theirs.
-  type Block =
-    | { kind: 'step'; step: StepState; i: number }
-    | { kind: 'group'; group: PresetGroup; steps: { step: StepState; i: number }[] };
-  const blocks = $derived.by(() => {
-    const out: Block[] = [];
-    app.recipe.steps.forEach((step, i) => {
-      const last = out[out.length - 1];
-      const g = step.group ? app.groupOf(step.group) : undefined;
-      if (!g) out.push({ kind: 'step', step, i });
-      else if (last?.kind === 'group' && last.group.id === g.id) last.steps.push({ step, i });
-      else out.push({ kind: 'group', group: g, steps: [{ step, i }] });
-    });
-    return out;
-  });
+  const blocks = $derived(blocksOf(app.recipe.steps, app.recipe.groups));
 
   /** A tap on the backdrop (the dialog element itself) closes the sheet. */
   function backdrop(e: MouseEvent) {
@@ -52,7 +52,7 @@
 </script>
 
 <div class="wrap">
-<div class="stack">
+<div class="stack" class:editing>
   <section class="card sample">
     <div class="row">
       <label for="encoding">Encoding</label>
@@ -86,11 +86,20 @@
 
   <div class="head">
     <h2 class="section-label">Steps</h2>
-    <button class="icon" onclick={() => app.rerollAll()} disabled={!app.anySeeded} title="New seeds for every step that has something random" aria-label="Re-roll all seeds">
-      <Dices size={18} strokeWidth={1.75} />
-    </button>
-    <button class="plain" onclick={() => app.clearSteps()} disabled={app.recipe.steps.length === 0}>Clear</button>
+    {#if editing}
+      <button class="plain strong" onclick={() => (editing = false)}>Done</button>
+    {:else}
+      <button class="icon" onclick={() => app.rerollAll()} disabled={!app.anySeeded} title="New seeds for every step that has something random" aria-label="Re-roll all seeds">
+        <Dices size={18} strokeWidth={1.75} />
+      </button>
+      <button class="plain" onclick={() => app.clearSteps()} disabled={app.recipe.steps.length === 0}>Clear</button>
+      <button class="plain" onclick={startEditing} disabled={app.recipe.steps.length === 0} title="Select, remove and drag steps into order">Edit</button>
+    {/if}
   </div>
+
+  {#if editing}
+    <StepEditList />
+  {:else}
 
   <ol class="steps" bind:this={list}>
     {#each blocks as b (b.kind === 'step' ? b.step.uid : b.group.id)}
@@ -140,12 +149,13 @@
       </li>
     {/each}
   </ol>
+  {/if}
 </div>
 
 <!-- Hidden while painting a mask: it would sit on the painting tools. -->
 <button
   class="primary fab"
-  class:away={!!app.masking}
+  class:away={!!app.masking || editing}
   onclick={() => sheet.showModal()}
   disabled={!app.config}
   aria-label="Add an effect"
@@ -167,6 +177,13 @@
 </dialog>
 
 <style>
+  /* Edit mode has no floating button to keep room for, and its selection
+     bar is sticky, which honours padding: none at the bottom, so the bar
+     sits on the edge. */
+  .stack.editing {
+    padding-bottom: 0;
+  }
+
   .stack {
     flex: 1;
     min-height: 0;
@@ -324,6 +341,10 @@
 
   .head h2 {
     flex: 1;
+  }
+
+  .strong {
+    font-weight: 600;
   }
 
   .steps {

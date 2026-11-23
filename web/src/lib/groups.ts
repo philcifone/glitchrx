@@ -170,3 +170,21 @@ export function cleanGroups(v: unknown): PresetGroup[] {
       Array.isArray(g.base),
   );
 }
+
+/** The stack as the GUI lays it out: loose steps, and groups holding theirs. */
+export type Block =
+  | { kind: 'step'; step: StepState; i: number }
+  | { kind: 'group'; group: PresetGroup; steps: { step: StepState; i: number }[] };
+
+export function blocksOf(steps: StepState[], groups: PresetGroup[] | undefined): Block[] {
+  const byId = new Map((groups ?? []).map((g) => [g.id, g]));
+  const out: Block[] = [];
+  steps.forEach((step, i) => {
+    const last = out[out.length - 1];
+    const g = step.group ? byId.get(step.group) : undefined;
+    if (!g) out.push({ kind: 'step', step, i });
+    else if (last?.kind === 'group' && last.group.id === g.id) last.steps.push({ step, i });
+    else out.push({ kind: 'group', group: g, steps: [{ step, i }] });
+  });
+  return out;
+}
