@@ -147,7 +147,7 @@
       />
     </div>
   {:else if spec.kind === 'curve'}
-    <CurveField {text} oninput={live} onchange={(v) => set(v)} />
+    <CurveField {uid} {text} oninput={live} onchange={(v) => set(v)} />
     <input
       {id}
       class="num wide"
