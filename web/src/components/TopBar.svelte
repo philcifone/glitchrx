@@ -54,7 +54,7 @@
       <button class="primary" onclick={() => app.stopMasking()} title="Finish painting (Enter)">Done</button>
     </div>
   {:else}
-    <h1>glitchrx</h1>
+    <h1>glitchRx</h1>
     <div class="actions">
       <button class="plain" onclick={onopen} title="Open a photo" aria-label="Open">
         <FolderOpen size={18} strokeWidth={1.75} />
