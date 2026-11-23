@@ -464,7 +464,7 @@ glitchrx --curves points=0:20/128:150/255:235,channel=blue photo.jpg
 
 Turn the hues, and change saturation and lightness.
 
-`hue` turns every colour round the colour wheel, in degrees (120 makes red green, green blue and blue red). `saturation` from -100 (grey) to 100 (twice as vivid, clipping at full). `lightness` from -100 (black) to 100 (white). Greys stay grey under hue and saturation.
+`range` limits it to one family of colours (`reds`, `yellows`, ...), fading softly into the neighbouring ones; greys are left alone. `hue` turns every colour round the colour wheel, in degrees (120 makes red green, green blue and blue red). `saturation` from -100 (grey) to 100 (twice as vivid, clipping at full). `lightness` from -100 (black) to 100 (white). Greys stay grey under hue and saturation.
 
 Version: 1.
 
@@ -474,6 +474,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
+| `range` | `all` | which colours change: all, or one family |
 | `hue` | `0` | turn the colours round the wheel, in degrees |
 | `saturation` | `30` | -100 grey, 0 unchanged, 100 twice as vivid |
 | `lightness` | `0` | -100 black, 0 unchanged, 100 white |

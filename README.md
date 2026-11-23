@@ -102,7 +102,7 @@ A distance of whole pixels keeps colours. `phase=1` or `phase=2` adds one or two
 | `pixelsort` | (pixel effect) | Sorts runs of pixels by brightness, hue or saturation: streaks down or across the picture |
 | `levels` | (adjustment) | Black point, white point and midtone gamma |
 | `curves` | (adjustment) | A tone curve through up to 16 points, `points=0:0/64:52/192:204/255:255` |
-| `hsl` | (adjustment) | Hue turn, saturation and lightness for the whole picture |
+| `hsl` | (adjustment) | Hue turn, saturation and lightness, for every colour or one range (`range=reds`, `blues`, ...) |
 | `balance` | (adjustment) | Tints the shadows, midtones or highlights, keeping brightness |
 
 `pixelsort` and the adjustments are not audio: they work on whole pixels, so the encoding and channels do not apply. Adjustments are ordinary steps, so masks and opacity limit them like any other. Every step also takes `opacity` (0 to 1), which blends its result over the picture it received.

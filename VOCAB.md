@@ -61,6 +61,7 @@ Background, mostly from the archived JPEG byte engine (`archive/jpeg-bytes`). JP
 - **Levels.** Black point (input values at or below it become black), white point, and **gamma**, which bends the midtones lighter (above 1) or darker.
 - **Histogram.** How many pixels have each value, 0 to 255, drawn as a mountain range behind a curve: the picture as it reaches the step.
 - **Curve.** A tone curve: points `IN:OUT` mapping input values to output values, joined by a **monotone cubic**, a smooth curve that never overshoots between its points (Fritsch-Carlson).
+- **Colour range.** One family of colours on the colour wheel (reds, yellows, greens, cyans, blues, magentas) that an hsl step can be limited to; neighbouring ranges fade into each other, and greys belong to none.
 - **Colour balance.** Tinting one tone range (shadows, midtones or highlights) towards red or cyan, green or magenta, blue or yellow; with luminosity kept, only the colour changes.
 - **Pixel sorting.** Reordering pixels along a column or row by a key (brightness, hue, saturation). The classic version (Kim Asendorf's ASDF sort) only sorts **runs**: stretches of pixels whose brightness lies inside a band (`low` to `high`). Pixels outside the band stay put and break the runs, which is why shadows keep the picture recognisable while bright areas melt into streaks.
 - **Luma (Rec. 709).** Perceived brightness from R, G and B: 0.2126 R + 0.7152 G + 0.0722 B. Pixelsort uses it scaled to integers, so its comparisons are exact everywhere.
