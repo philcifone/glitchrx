@@ -26,6 +26,7 @@ use crate::dialogs::Dialogs;
 use crate::docs::{Doc, Store, random_hex};
 use crate::dto::{self, DocDto, RecipeDto};
 use crate::presets::{PresetError, PresetInfo, Presets};
+use crate::recipes;
 use crate::render::{self, Format};
 use crate::settings::{Settings, SettingsStore};
 
@@ -134,6 +135,8 @@ pub fn router(state: AppState) -> Router {
             get(get_preset).put(put_preset).delete(delete_preset),
         )
         .route("/recipe/from-toml", post(recipe_from_toml))
+        .route("/recipes", get(list_recipes))
+        .route("/recipe", get(read_recipe))
         .route("/recipe/to-toml", post(recipe_to_toml))
         .route("/browse", get(browse_dir))
         .route("/thumb", get(thumb))
@@ -242,7 +245,70 @@ fn doc_dto(st: &AppState, doc: &Doc) -> DocDto {
         (Some(r), Some(s)) if s.starts_with(&r) => Some(browse::relative(&r, s)),
         _ => None,
     };
-    DocDto::new(&doc.id, &doc.name, path, doc.file_len, &doc.image)
+    let mut dto = DocDto::new(&doc.id, &doc.name, path, doc.file_len, &doc.image);
+    dto.recipes = recipes::scan(&recipe_roots(st))
+        .into_iter()
+        .filter(|f| recipes::matches(f, &doc.name))
+        .collect();
+    dto
+}
+
+/// The folders recipes are looked for in: the library (or `--root`) and
+/// the export folder, when they are set.
+fn recipe_roots(st: &AppState) -> Vec<(recipes::Place, PathBuf)> {
+    let mut roots = Vec::new();
+    if let Some(r) = st.current_root() {
+        roots.push((recipes::Place::Library, r));
+    }
+    if let Some(e) = st
+        .settings
+        .as_ref()
+        .and_then(|s| s.get().export)
+        .and_then(|p| p.canonicalize().ok())
+    {
+        roots.push((recipes::Place::Export, e));
+    }
+    roots
+}
+
+/// The recipes saved in the library and export folders, newest first.
+async fn list_recipes(State(st): State<Shared>) -> ApiResult<Json<Vec<recipes::Found>>> {
+    let roots = recipe_roots(&st);
+    blocking(move || Ok(Json(recipes::scan(&roots)))).await
+}
+
+#[derive(Deserialize)]
+struct RecipeQuery {
+    place: recipes::Place,
+    path: String,
+}
+
+/// One saved recipe, read for the GUI. Only `.recipe.toml` files inside
+/// the library or export folder.
+async fn read_recipe(
+    State(st): State<Shared>,
+    Query(q): Query<RecipeQuery>,
+) -> ApiResult<Json<RecipeDto>> {
+    let root = recipe_roots(&st)
+        .into_iter()
+        .find(|(p, _)| *p == q.place)
+        .map(|(_, r)| r)
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "that folder is not set"))?;
+    blocking(move || {
+        let not_found = || ApiError::new(StatusCode::NOT_FOUND, "no such recipe");
+        let path = browse::resolve(&root, &q.path).map_err(|_| not_found())?;
+        let ok = path
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().ends_with(recipes::SUFFIX));
+        let meta = std::fs::metadata(&path).map_err(|_| not_found())?;
+        if !ok || !meta.is_file() || meta.len() > recipes::MAX_BYTES {
+            return Err(not_found());
+        }
+        let text = std::fs::read_to_string(&path).map_err(|_| not_found())?;
+        let r = Recipe::from_toml(&text)?;
+        Ok(Json(RecipeDto::from_recipe(&r)))
+    })
+    .await
 }
 
 // ---------------------------------------------------------------------------

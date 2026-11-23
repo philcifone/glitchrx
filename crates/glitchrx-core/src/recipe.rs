@@ -14,6 +14,8 @@
 //! work_size = 2048    # optional: steps run on a copy this long (see below)
 //! scale_back = true   # optional: and the result is enlarged to full size
 //!
+//! source = "IMG_1234.jpg"   # optional: the photo it was made on (a name only)
+//!
 //! [crop]              # optional: the part of the photo kept (see below)
 //! x = 0.1             # left edge, share of the width
 //! y = 0.0
@@ -320,6 +322,11 @@ pub struct Recipe {
     /// Enlarge the result back to the full size (nearest neighbour).
     #[serde(default, skip_serializing_if = "is_false")]
     pub scale_back: bool,
+    /// The file name (no folders) of the photo the recipe was made on, so
+    /// the GUI can offer to continue from it when that photo is opened
+    /// again. Information only: it changes nothing in the output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     /// The part of the photo kept, before anything else. See the module
     /// documentation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -384,6 +391,7 @@ impl Default for Recipe {
             channels: 1,
             work_size: None,
             scale_back: false,
+            source: None,
             crop: None,
             steps: Vec::new(),
         }

@@ -327,7 +327,12 @@ fn process(cli: &Cli, recipe: &Recipe, master_seed: Option<u64>, job: &Job) -> R
         let path = save
             .clone()
             .unwrap_or_else(|| output.with_extension("recipe.toml"));
-        write_output(input, &path, recipe.to_toml().as_bytes(), cli.force)?;
+        // Note the photo's name, so the GUI can offer to continue from it.
+        let named = glitchrx_core::Recipe {
+            source: input.file_name().map(|n| n.to_string_lossy().into_owned()),
+            ..recipe.clone()
+        };
+        write_output(input, &path, named.to_toml().as_bytes(), cli.force)?;
         extra.push(format!("recipe {}", path.display()));
     }
 

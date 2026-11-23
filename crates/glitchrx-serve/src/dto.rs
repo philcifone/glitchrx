@@ -28,6 +28,9 @@ pub struct RecipeDto {
     pub work_size: Option<u32>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub scale_back: bool,
+    /// The photo's file name, recorded in saved recipes (`Recipe::source`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     /// The part of the photo kept, as shares of it (see `Recipe::crop`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
@@ -39,6 +42,16 @@ fn one() -> usize {
     1
 }
 
+/// The last part of a path-like name (either slash), at most 255 bytes.
+fn source_name(s: &str) -> String {
+    let name = s.rsplit(['/', '\\']).next().unwrap_or("").trim();
+    let mut end = name.len().min(255);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    name[..end].to_string()
+}
+
 impl Default for RecipeDto {
     fn default() -> Self {
         RecipeDto {
@@ -46,6 +59,7 @@ impl Default for RecipeDto {
             channels: 1,
             work_size: None,
             scale_back: false,
+            source: None,
             crop: None,
             steps: Vec::new(),
         }
@@ -119,6 +133,12 @@ impl RecipeDto {
             channels: self.channels,
             work_size: self.work_size,
             scale_back: self.scale_back,
+            // A name only: anything with a folder in it is cut to its last part.
+            source: self
+                .source
+                .as_deref()
+                .map(source_name)
+                .filter(|s| !s.is_empty()),
             crop: self.crop,
             steps,
             ..Recipe::default()
@@ -133,6 +153,7 @@ impl RecipeDto {
             channels: r.channels,
             work_size: r.work_size,
             scale_back: r.scale_back,
+            source: r.source.clone(),
             crop: r.crop,
             steps: r
                 .steps
@@ -273,6 +294,9 @@ pub struct DocDto {
     pub file_len: usize,
     /// Raw RGB bytes the effects work on.
     pub raw_len: usize,
+    /// Recipes on the server made on this photo, newest first (to offer
+    /// "continue from"; see `recipes`).
+    pub recipes: Vec<crate::recipes::Found>,
 }
 
 impl DocDto {
@@ -293,6 +317,7 @@ impl DocDto {
             avif_keeps_profile: glitchrx_core::avif::keeps_profile(img.icc.as_deref()),
             file_len,
             raw_len: img.raster.bytes.len(),
+            recipes: Vec::new(),
         }
     }
 }
