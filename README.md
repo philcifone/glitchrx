@@ -43,6 +43,7 @@ glitchrx --pixelsort low=0.3 photo.jpg          # melt the bright areas into str
 glitchrx --echo opacity=0.5 photo.jpg           # blend the step at half strength
 glitchrx --levels black=20,white=230 --hsl saturation=-40 photo.jpg   # photo adjustments
 glitchrx --curves points=0:20/128:150/255:235,channel=blue photo.jpg
+glitchrx --shift --crop 0.1,0,0.8,1 photo.jpg    # crop first: X,Y,W,H as shares of the photo
 glitchrx --pixelsort --work-size 1024 photo.jpg # run on a 1024 px copy: coarser, faster
 glitchrx --shift --work-size 1024 --scale-back photo.jpg   # ...enlarged back, hard pixel edges
 glitchrx --stutter --batch *.jpg                # every file, automatic names
@@ -143,6 +144,7 @@ In the GUI:
 - **Presets** (the bookmark) are your own saved recipes, kept by the server in `~/.config/glitchrx/presets` (`--presets DIR` to move them), so your phone and desktop share them. Use one to replace the steps, or add its steps to the current recipe. Its steps stay together in the stack under the preset's name and move as a block; once you change one, the group shows Modified, with Revert (back to the preset) and Update preset (save the changes to it). They are ordinary recipe files: `glitchrx --recipe ~/.config/glitchrx/presets/NAME.toml photo.jpg`.
 - **Press and hold the photo** (or the `\` key) to see the untouched original; while masking, hold the compare button in the top bar instead.
 - **Zoom** with a pinch, ctrl + wheel or a trackpad pinch; double-tap, tap the magnifier or press Z for 100% and back. Zoomed in, drag (or use the wheel) to pan. Once the view holds still, what is on screen is cut from the full-resolution render, so it is sharp and exactly the export. While masking, one finger paints and two fingers zoom and pan; the brush keeps its size on screen, so zooming in paints finer lines.
+- **Crop** with the button beside the zoom button: a frame over the whole photo, free or at Original, 1:1, 4:5 or 16:9 (turned with the portrait/landscape switch). The crop comes before every step, so the steps, masks and work size all apply to the cropped picture. Undoable; saved in the recipe.
 - **Work size** (Full, 4K, 2K, 1K, on the photo at the bottom left) runs the steps on a smaller copy: the glitch texture gets coarser and everything gets faster. At 1K the live preview is already exact. Export writes that size, or enlarges it back to the photo's size with hard pixel edges. It is saved in the recipe.
 - **Undo and redo** with the buttons or Ctrl+Z / Ctrl+Shift+Z. History holds recipes, not images.
 - **Export** at full resolution as TIFF, PNG, JPEG (with quality), WebP (quality, or lossless) or AVIF (quality and speed; slow). Download it to this device, save it next to an original from the library using the CLI's `-glitch`, `-glitch-1` naming, or **Save As** into any folder in the server's home folder under a name you choose. Nothing is ever overwritten. The format and its settings are remembered on each device. The recipe can be downloaded, then loaded again later or replayed with `glitchrx --recipe`.
