@@ -27,13 +27,18 @@ use crate::params::{Kind, ParamSpec, Params, Units};
 use crate::rng::Rng;
 use crate::samples::Encoding;
 
+mod adjust;
 mod amplify;
 mod backwards;
+mod balance;
 mod bitcrush;
+mod curves;
 mod delay;
 mod distort;
 mod echo;
+mod hsl;
 mod invert;
+mod levels;
 mod phaser;
 mod pixelsort;
 mod reverb;
@@ -141,6 +146,8 @@ pub enum Group {
     /// Works on whole RGB pixels in two dimensions (pixel sorting); the
     /// sample encoding and channels do not apply.
     Pixel,
+    /// Photo adjustments (levels, curves, ...): whole pixels, not glitches.
+    Adjust,
 }
 
 impl Group {
@@ -149,7 +156,14 @@ impl Group {
             Group::Audio => "audio",
             Group::Data => "data",
             Group::Pixel => "pixel",
+            Group::Adjust => "adjust",
         }
+    }
+
+    /// Effects that see whole RGB pixels, for which encoding and channels
+    /// do not apply.
+    pub fn on_pixels(self) -> bool {
+        matches!(self, Group::Pixel | Group::Adjust)
     }
 }
 
@@ -225,6 +239,10 @@ pub static REGISTRY: &[&EffectInfo] = &[
     &distort::INFO,
     &speed::INFO,
     &pixelsort::INFO,
+    &levels::INFO,
+    &curves::INFO,
+    &hsl::INFO,
+    &balance::INFO,
 ];
 
 /// Find an effect by id.
@@ -290,7 +308,7 @@ pub fn markdown_reference() -> String {
             "## {}\n\n{}\n\n{}\n\n",
             e.id, e.summary, e.details
         ));
-        if e.group == Group::Pixel {
+        if e.group.on_pixels() {
             s.push_str(&format!("Version: {}.\n\n", e.version));
         } else {
             s.push_str(&format!(
@@ -302,6 +320,13 @@ pub fn markdown_reference() -> String {
             s.push_str(
                 "A pixel effect: it works on whole RGB pixels, so the encoding and channels \
                  do not apply.\n\n",
+            );
+        }
+        if e.group == Group::Adjust {
+            s.push_str(
+                "An adjustment: a photo tool rather than a glitch. It works on whole RGB \
+                 pixels, so the encoding and channels do not apply; masks, opacity and \
+                 placement do, as for any step.\n\n",
             );
         }
         if e.exact_preview {

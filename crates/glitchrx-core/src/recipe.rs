@@ -50,7 +50,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::effects::{self, Effect, EffectInfo, Group, Window};
+use crate::effects::{self, Effect, EffectInfo, Window};
 use crate::error::{Error, Result};
 use crate::mask::{self, Mask};
 use crate::params::{Params, Units, parse_list};
@@ -233,7 +233,7 @@ impl Prepared {
     /// whole pixels, so for them a frame is one pixel, and windows (which
     /// are whole frames from the start of the raster) cover whole pixels.
     pub fn frame(&self) -> usize {
-        if self.info.group == Group::Pixel {
+        if self.info.group.on_pixels() {
             3
         } else {
             self.encoding.width() * self.channels

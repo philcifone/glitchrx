@@ -24,7 +24,14 @@ pub enum Kind {
     Region,
     /// One word out of a fixed list.
     Choice(&'static [&'static str]),
+    /// A tone curve: points `IN:OUT` in 0..=255, joined by `/`, inputs
+    /// rising (`0:0/64:40/192:215/255:255`). `/` rather than `,` because
+    /// the command line separates parameters with commas.
+    Curve,
 }
+
+/// The most points a curve may have.
+pub const MAX_CURVE_POINTS: usize = 16;
 
 /// Declaration of one parameter.
 #[derive(Debug, Clone, Copy)]
@@ -237,6 +244,7 @@ enum Value {
     Size(Bound),
     Region(Bound, Bound),
     Choice(String),
+    Curve(Vec<(u8, u8)>),
 }
 
 /// Validated parameters for one effect instance, with defaults filled in.
@@ -325,6 +333,14 @@ impl Params {
             other => panic!("{name} is not a choice: {other:?}"),
         }
     }
+
+    /// A curve's points, inputs rising.
+    pub fn curve(&self, name: &str) -> &[(u8, u8)] {
+        match self.get(name) {
+            Value::Curve(v) => v,
+            other => panic!("{name} is not a curve: {other:?}"),
+        }
+    }
 }
 
 fn parse_value(spec: &ParamSpec, text: &str) -> std::result::Result<Value, String> {
@@ -379,12 +395,59 @@ fn parse_value(spec: &ParamSpec, text: &str) -> std::result::Result<Value, Strin
                 Err(format!("`{t}` is not one of: {}", options.join(", ")))
             }
         }
+        Kind::Curve => parse_curve(t).map(Value::Curve),
     }
+}
+
+/// `IN:OUT/IN:OUT/...`, each 0..=255, at least two points, inputs rising.
+fn parse_curve(t: &str) -> std::result::Result<Vec<(u8, u8)>, String> {
+    let shape = "should look like 0:0/128:150/255:255 (IN:OUT pairs, 0 to 255, inputs rising)";
+    let points = t
+        .split('/')
+        .map(|p| {
+            let (a, b) = p.split_once(':').ok_or_else(|| format!("`{t}` {shape}"))?;
+            let n = |v: &str| v.trim().parse::<u8>().map_err(|_| format!("`{t}` {shape}"));
+            Ok((n(a)?, n(b)?))
+        })
+        .collect::<std::result::Result<Vec<_>, String>>()?;
+    if points.len() < 2 || points.len() > MAX_CURVE_POINTS {
+        return Err(format!(
+            "a curve has 2 to {MAX_CURVE_POINTS} points, not {}",
+            points.len()
+        ));
+    }
+    if points.windows(2).any(|w| w[1].0 <= w[0].0) {
+        return Err(format!("`{t}` {shape}"));
+    }
+    Ok(points)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn curves() {
+        assert_eq!(
+            parse_curve("0:0/128:150/255:255").unwrap(),
+            vec![(0, 0), (128, 150), (255, 255)]
+        );
+        assert_eq!(
+            parse_curve(" 0 : 10 / 255 : 200 ").unwrap(),
+            vec![(0, 10), (255, 200)]
+        );
+        for bad in [
+            "0:0",
+            "0:0/0:5",
+            "10:0/5:5",
+            "0:0/256:1",
+            "0:0,255:255",
+            "a:b/1:1",
+            "",
+        ] {
+            assert!(parse_curve(bad).is_err(), "{bad}");
+        }
+    }
 
     #[test]
     fn bounds() {
