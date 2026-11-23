@@ -340,3 +340,65 @@ function roundTo(v: number, digits: number): number {
   const f = 10 ** digits;
   return Math.round(v * f) / f;
 }
+
+// ---------------------------------------------------------------------------
+// Masks and the crop (D-52)
+//
+// Masks are kept as shares of the whole, uncropped photo, so they stay on
+// the same part of it whatever the crop. The server moves them onto the
+// cropped canvas to render (the core's mask::Frame); the editor instead
+// draws on the rectangle where the whole photo would sit on screen, which
+// reaches past the visible crop, so every share it measures is already a
+// share of the photo.
+
+/** The crop as the core's mask::Frame sees it. */
+export interface PhotoFrame {
+  /** The crop's corner, as shares of the photo. */
+  x: number;
+  y: number;
+  /** Photo width over crop width, and the same for heights. */
+  sx: number;
+  sy: number;
+  /** The photo's longer side over the crop's. */
+  sl: number;
+}
+
+/** The frame for a crop of whole pixels out of a `pw` x `ph` photo. */
+export function photoFrame(crop: { x: number; y: number; w: number; h: number }, pw: number, ph: number): PhotoFrame {
+  return {
+    x: crop.x / pw,
+    y: crop.y / ph,
+    sx: pw / crop.w,
+    sy: ph / crop.h,
+    sl: Math.max(pw, ph) / Math.max(crop.w, crop.h),
+  };
+}
+
+/** Where the whole photo sits on screen, given where the cropped canvas sits. */
+export function photoRect(
+  canvas: { x: number; y: number; w: number; h: number },
+  f: PhotoFrame,
+): { x: number; y: number; w: number; h: number } {
+  return {
+    x: canvas.x - f.x * f.sx * canvas.w,
+    y: canvas.y - f.y * f.sy * canvas.h,
+    w: canvas.w * f.sx,
+    h: canvas.h * f.sy,
+  };
+}
+
+/** A component laid out on the canvas (a new one), moved to shares of the photo. */
+export function toPhoto(op: MaskOp, f: PhotoFrame): MaskOp {
+  const pt = (p: [number, number]): [number, number] => [roundCoord(p[0] / f.sx + f.x), roundCoord(p[1] / f.sy + f.y)];
+  switch (op.shape) {
+    case 'linear':
+      return { ...op, from: pt(op.from), to: pt(op.to) };
+    case 'radial':
+      return { ...op, from: pt(op.from), to: pt(op.to) };
+    case 'rect':
+      return { ...op, center: pt(op.center), size: [roundCoord(op.size[0] / f.sl), roundCoord(op.size[1] / f.sl)] };
+    default:
+      // Brushes and paths start empty; brightness has no place.
+      return op;
+  }
+}

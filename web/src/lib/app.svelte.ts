@@ -20,6 +20,9 @@ import {
   newComponent,
   pasteOps,
   withMode,
+  photoFrame,
+  toPhoto,
+  type PhotoFrame,
   type ToolState,
 } from './mask';
 import { usesSamples } from './palette';
@@ -632,9 +635,12 @@ export class App {
     if (!s) return;
     s.mask ??= emptyMask();
     const ops = s.mask.op ?? [];
+    // Laid out on the canvas you see, then kept as shares of the photo.
     const c = this.canvasSize;
     const aspect = c ? c.w / c.h : 1;
-    const { ops: next, index } = insertOp(ops, newComponent(shape, aspect, ops.length));
+    const made = newComponent(shape, aspect, ops.length);
+    const f = this.maskFrame;
+    const { ops: next, index } = insertOp(ops, f ? toPhoto(made, f) : made);
     s.mask.op = next;
     if (shape === 'brush') this.setTool({ tool: 'paint' });
     this.changed();
@@ -689,9 +695,9 @@ export class App {
     const op = this.activeMaskOp;
     const i = this.penPoint;
     if (op?.shape !== 'path' || i === null || !op.points[i] || !this.doc) return;
-    // Handles are laid out in the photo's own proportions.
-    const c = this.canvasSize!;
-    this.setPenPoints(toggleSmooth($state.snapshot(op.points) as number[][], i, c.w, c.h));
+    // Handles are laid out in the photo's own proportions (masks are
+    // shares of the whole photo, D-52).
+    this.setPenPoints(toggleSmooth($state.snapshot(op.points) as number[][], i, this.doc.width, this.doc.height));
   }
 
   /**
@@ -1160,6 +1166,13 @@ export class App {
     if (!d) return null;
     const c = cropRect(this.recipe.crop, d.width, d.height);
     return { w: c.w, h: c.h };
+  }
+
+  /** How masks (shares of the whole photo) sit on the cropped canvas; null without a crop. */
+  get maskFrame(): PhotoFrame | null {
+    const d = this.doc;
+    if (!d || !this.recipe.crop) return null;
+    return photoFrame(cropRect(this.recipe.crop, d.width, d.height), d.width, d.height);
   }
 
   /** The size the steps run on: the crop, shrunk to the work size. 100% zoom is this. */
