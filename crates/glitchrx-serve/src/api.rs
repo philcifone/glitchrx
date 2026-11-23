@@ -121,6 +121,7 @@ pub fn router(state: AppState) -> Router {
         .route("/docs/{id}", get(doc_info))
         .route("/docs/{id}/preview", post(preview))
         .route("/docs/{id}/mask", post(mask_view))
+        .route("/docs/{id}/histogram", post(histogram))
         .route("/docs/{id}/export", post(export))
         .route("/docs/{id}/save", post(save))
         .route("/docs/{id}/save-as", post(save_as))
@@ -807,6 +808,54 @@ async fn mask_view(
             png,
         )
             .into_response())
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct HistogramRequest {
+    recipe: RecipeDto,
+    /// The step whose input is measured, from 0.
+    step: usize,
+    max_w: u32,
+    max_h: u32,
+}
+
+#[derive(Serialize)]
+struct Histogram {
+    red: Vec<u32>,
+    green: Vec<u32>,
+    blue: Vec<u32>,
+    luma: Vec<u32>,
+}
+
+/// The picture as it reaches a step, as histograms (for the curves editor).
+async fn histogram(
+    State(st): State<Shared>,
+    Path(id): Path<String>,
+    Json(req): Json<HistogramRequest>,
+) -> ApiResult<Json<Histogram>> {
+    let doc = find(&st, &id)?;
+    let recipe = req.recipe.to_recipe()?;
+    let max_w = req.max_w.clamp(16, render::MAX_PREVIEW_SIDE) as usize;
+    let max_h = req.max_h.clamp(16, render::MAX_PREVIEW_SIDE) as usize;
+    let budget = st.preview_budget;
+    blocking(move || {
+        let t0 = Instant::now();
+        let stop = || t0.elapsed() > budget;
+        match doc.histogram(&recipe, req.step, max_w, max_h, &stop) {
+            Ok([red, green, blue, luma]) => Ok(Json(Histogram {
+                red,
+                green,
+                blue,
+                luma,
+            })),
+            Err(Error::Cancelled) => Err(ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "too heavy to measure live".to_string(),
+            )),
+            Err(e) => Err(e.into()),
+        }
     })
     .await
 }

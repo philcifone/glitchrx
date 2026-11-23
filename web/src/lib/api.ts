@@ -158,6 +158,18 @@ export async function maskView(
   return res.blob();
 }
 
+/** Counts per level (256 each) of the picture as it reaches a step. */
+export interface Histogram {
+  red: number[];
+  green: number[];
+  blue: number[];
+  luma: number[];
+}
+
+export async function histogram(docId: string, recipe: RecipeDto, step: number, maxW: number, maxH: number): Promise<Histogram> {
+  return json<Histogram>(await postJson(`/api/docs/${docId}/histogram`, { recipe, step, max_w: maxW, max_h: maxH }));
+}
+
 const presetUrl = (name: string) => `/api/presets/${encodeURIComponent(name)}`;
 
 export const listPresets = async () => json<PresetInfo[]>(await fetch('/api/presets'));

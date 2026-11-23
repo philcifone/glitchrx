@@ -9,12 +9,17 @@
   // point never scrolls the card.
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import { MAX_POINTS, curveFn, formatCurve, parseCurve, type CurvePoint } from '../lib/curve';
+  import { app } from '../lib/app.svelte';
+  import type { Histogram } from '../lib/api';
 
   let {
+    uid,
     text,
     oninput,
     onchange,
   }: {
+    /** The step, for its histogram and channel. */
+    uid: string;
     text: string;
     /** Live change while dragging. */
     oninput: (v: string) => void;
@@ -27,6 +32,7 @@
     [255, 255],
   ];
   const points = $derived(parseCurve(text) ?? IDENTITY);
+  const GRID = [1, 2, 3, 4, 5, 6, 7].map((k) => ({ at: (k * 255) / 8, major: k % 2 === 0 }));
   let selected = $state(-1);
   const sel = $derived(selected >= 0 && selected < points.length ? points[selected] : null);
 
@@ -39,6 +45,36 @@
       d += `${d ? 'L' : 'M'}${xi},${(255 - f(xi)).toFixed(2)}`;
     }
     return d;
+  });
+
+  // The histogram of the picture reaching this step, behind the curve, as
+  // in Photoshop: refreshed a moment after each new preview, since the
+  // steps before this one may have changed it.
+  let hist = $state<Histogram | null>(null);
+  let histTimer: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => {
+    void app.imageRevision;
+    void app.doc?.id;
+    clearTimeout(histTimer);
+    histTimer = setTimeout(async () => {
+      hist = await app.histogram(uid);
+    }, 250);
+    return () => clearTimeout(histTimer);
+  });
+
+  const channel = $derived(app.step(uid)?.params.channel ?? 'rgb');
+  /** The histogram as a filled shape under a 255 x 255 box. */
+  const histPath = $derived.by(() => {
+    if (!hist) return '';
+    const counts = channel === 'red' ? hist.red : channel === 'green' ? hist.green : channel === 'blue' ? hist.blue : hist.luma;
+    // Scale to the tallest level away from the ends: clipped blacks and
+    // whites pile up at 0 and 255 and would flatten everything else.
+    const top = Math.max(1, ...counts.slice(1, 255));
+    let d = 'M0,255';
+    counts.forEach((n, i) => {
+      d += `L${i},${(255 - Math.min(1, n / top) * 230).toFixed(1)}`;
+    });
+    return `${d}L255,255Z`;
   });
 
   let svg: SVGSVGElement;
@@ -136,9 +172,12 @@
     onpointercancel={up}
   >
     <rect class="bg" x="0" y="0" width="255" height="255" rx="6" />
-    {#each [64, 128, 191] as g (g)}
-      <line class="grid" x1={g} y1="0" x2={g} y2="255" />
-      <line class="grid" x1="0" y1={g} x2="255" y2={g} />
+    {#if histPath}<path class="hist {channel}" d={histPath} />{/if}
+    <!-- A grid to read the curve by, in eighths with stronger quarters.
+         Only to look at: points do not snap to it. -->
+    {#each GRID as g (g.at)}
+      <line class="grid" class:major={g.major} x1={g.at} y1="0" x2={g.at} y2="255" />
+      <line class="grid" class:major={g.major} x1="0" y1={g.at} x2="255" y2={g.at} />
     {/each}
     <line class="diag" x1="0" y1="255" x2="255" y2="0" />
     <path class="line" d={path} />
@@ -184,7 +223,31 @@
 
   .grid {
     stroke: var(--line);
-    stroke-width: 0.75;
+    stroke-width: 0.5;
+    opacity: 0.6;
+  }
+
+  .grid.major {
+    stroke-width: 1;
+    opacity: 1;
+  }
+
+  .hist {
+    fill: var(--fg-dim);
+    opacity: 0.22;
+  }
+
+  /* Muted Gruvbox for one channel. */
+  .hist.red {
+    fill: #cc241d;
+  }
+
+  .hist.green {
+    fill: #98971a;
+  }
+
+  .hist.blue {
+    fill: #458588;
   }
 
   .diag {

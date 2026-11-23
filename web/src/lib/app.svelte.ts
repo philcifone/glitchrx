@@ -199,6 +199,24 @@ export class App {
   /** The step whose mask is being edited on the preview, by uid. */
   masking = $state<string | null>(null);
 
+  /**
+   * Histograms of the picture as it reaches a step, for the curves editor
+   * (6b). Measured on the preview, so it is quick; null if it cannot be had.
+   */
+  async histogram(uid: string): Promise<api.Histogram | null> {
+    const doc = this.doc;
+    const at = this.recipe.steps.findIndex((s) => s.uid === uid);
+    if (!doc || at < 0) return null;
+    // The request holds the enabled steps only; count those before it.
+    const index = this.recipe.steps.slice(0, at).filter((s) => s.enabled).length;
+    const { w, h } = this.target('fast');
+    try {
+      return await api.histogram(doc.id, this.dto(), index, w, h);
+    } catch {
+      return null; // too heavy, or the photo went away: no histogram
+    }
+  }
+
   /** Step cards folded shut, by step uid (view state: not in history). */
   collapsed = $state<Record<string, boolean>>({});
 
@@ -477,7 +495,7 @@ export class App {
     return stepNumber(step, this.recipe.steps);
   }
 
-  private step(uid: string): StepState | undefined {
+  step(uid: string): StepState | undefined {
     return this.recipe.steps.find((s) => s.uid === uid);
   }
 
