@@ -195,6 +195,14 @@ export class App {
 
   /** The step whose mask is being edited on the preview, by uid. */
   masking = $state<string | null>(null);
+
+  /** Step cards folded shut, by step uid (view state: not in history). */
+  collapsed = $state<Record<string, boolean>>({});
+
+  toggleCollapsed(uid: string): void {
+    if (this.collapsed[uid]) delete this.collapsed[uid];
+    else this.collapsed[uid] = true;
+  }
   /**
    * The mask component being edited (its index in the mask), or null.
    * Its handles show on the photo, and the photo's gestures act on it.

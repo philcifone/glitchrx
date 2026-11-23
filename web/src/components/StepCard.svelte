@@ -30,8 +30,9 @@
   const stepEncoding = $derived(step.params[ENCODING_KEY] ?? '');
   const stepChannels = $derived(step.params[CHANNELS_KEY] ?? '');
   const opacity = $derived(app.opacity(step));
-  // Open when first added; collapsing is per card and not part of history.
-  let open = $state(true);
+  // Open when first added. Collapsing is per card and not part of history;
+  // the app keeps it, so it survives the cards being rebuilt (Edit mode).
+  const open = $derived(!app.collapsed[step.uid]);
 
   // Seed field edits are applied on change; typing is not live.
   let seedText = $state('');
@@ -43,7 +44,7 @@
 <article class:off={!step.enabled}>
   <header>
     <span class="n">{index + 1}</span>
-    <button class="name" onclick={() => (open = !open)} aria-expanded={open} title={info?.summary}>
+    <button class="name" onclick={() => app.toggleCollapsed(step.uid)} aria-expanded={open} title={info?.summary}>
       <span class="glyph"><Icon size={18} strokeWidth={1.75} /></span>
       <!-- The number in the system font: Young Serif's old-style 1 reads as "i". -->
       <span class="label serif">{step.effect}{#if app.stepNumber(step)}<span class="num">-{app.stepNumber(step)}</span>{/if}</span>
