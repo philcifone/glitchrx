@@ -57,6 +57,8 @@ pub enum Format {
     /// `jpeg-baked` is the 2a name, still accepted from old clients.
     #[serde(alias = "jpeg-baked")]
     Jpeg,
+    Webp,
+    Avif,
 }
 
 impl From<Format> for codec::Format {
@@ -65,6 +67,8 @@ impl From<Format> for codec::Format {
             Format::Tiff => codec::Format::Tiff,
             Format::Png => codec::Format::Png,
             Format::Jpeg => codec::Format::Jpeg,
+            Format::Webp => codec::Format::Webp,
+            Format::Avif => codec::Format::Avif,
         }
     }
 }

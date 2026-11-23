@@ -853,3 +853,238 @@ async fn presets_save_list_replace_delete() {
 fn app_without_presets() -> Router {
     app(None, None)
 }
+
+/// A server with settings kept in a temporary home, never the real one.
+fn app_with_settings(home: &Path, root: Option<PathBuf>) -> Router {
+    let store = glitchrx_serve::settings::SettingsStore::open(
+        home.join(".config/glitchrx/config.toml"),
+        home,
+    )
+    .unwrap();
+    router(AppState::new(root, None).with_settings(store))
+}
+
+fn get(uri: &str) -> Request<Body> {
+    Request::get(uri).body(Body::empty()).unwrap()
+}
+
+#[tokio::test]
+async fn settings_choose_the_library_and_export_folders() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join("Pictures/trips")).unwrap();
+    fs::create_dir_all(home.join("Pictures/glitched")).unwrap();
+    fs::create_dir_all(home.join(".hidden")).unwrap();
+    fs::create_dir_all(tmp.path().join("outside")).unwrap();
+    fs::write(
+        home.join("Pictures/trips/a.jpg"),
+        fixture("baseline-444.jpg"),
+    )
+    .unwrap();
+    let app = app_with_settings(&home, None);
+
+    // Nothing chosen yet: no browsing.
+    let (_, _, b) = send(&app, get("/api/config")).await;
+    assert_eq!(json_of(&b)["browse"], false);
+    assert_eq!(json_of(&b)["settings"], true);
+    let (_, _, b) = send(&app, get("/api/settings")).await;
+    assert_eq!(
+        json_of(&b),
+        json!({"library": null, "export": null, "fixed_root": null})
+    );
+
+    // The folder picker lists folders under home, no hidden ones, and
+    // never leaves home.
+    let (s, _, b) = send(&app, get("/api/folders?path=")).await;
+    assert_eq!(s, StatusCode::OK);
+    let names: Vec<_> = json_of(&b)["dirs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["name"].clone())
+        .collect();
+    assert_eq!(names, vec![json!("Pictures")]);
+    let (_, _, b) = send(&app, get("/api/folders?path=Pictures")).await;
+    assert_eq!(json_of(&b)["dirs"].as_array().unwrap().len(), 2);
+    let (s, _, _) = send(&app, get("/api/folders?path=../outside")).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // Choose the folders: Open now browses the library.
+    let (s, _, b) = send(
+        &app,
+        put_json(
+            "/api/settings",
+            json!({"library": "Pictures", "export": "Pictures/glitched"}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(json_of(&b)["library"], "Pictures");
+    let (_, _, b) = send(&app, get("/api/browse?path=trips")).await;
+    assert_eq!(json_of(&b)["files"][0]["path"], "trips/a.jpg");
+    let file = fs::read_to_string(home.join(".config/glitchrx/config.toml")).unwrap();
+    assert!(file.contains("glitched"), "{file}");
+
+    // Outside home, or not a folder: refused, nothing changed.
+    for bad in ["../outside", "Pictures/trips/a.jpg", "missing"] {
+        let (s, _, _) = send(
+            &app,
+            put_json("/api/settings", json!({"library": bad, "export": null})),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{bad}");
+    }
+    let (_, _, b) = send(&app, get("/api/settings")).await;
+    assert_eq!(json_of(&b)["export"], "Pictures/glitched");
+
+    // --root wins over the library.
+    let fixed = tmp.path().join("fixed");
+    fs::create_dir_all(&fixed).unwrap();
+    let app = app_with_settings(&home, Some(fixed.canonicalize().unwrap()));
+    let (_, _, b) = send(&app, get("/api/settings")).await;
+    assert!(
+        json_of(&b)["fixed_root"]
+            .as_str()
+            .unwrap()
+            .ends_with("fixed")
+    );
+    send(
+        &app,
+        put_json(
+            "/api/settings",
+            json!({"library": "Pictures", "export": null}),
+        ),
+    )
+    .await;
+    let (_, _, b) = send(&app, get("/api/browse?path=")).await;
+    assert_eq!(
+        json_of(&b)["dirs"].as_array().unwrap().len(),
+        0,
+        "still the fixed root"
+    );
+}
+
+#[tokio::test]
+async fn save_as_into_a_folder_never_overwrites() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join("out")).unwrap();
+    let app = app_with_settings(&home, None);
+    let original = fixture("baseline-444.jpg");
+    let doc = upload(&app, "photo.jpg", original.clone()).await;
+    let id = doc["id"].as_str().unwrap();
+
+    let (_, _, b) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/suggest"),
+            json!({"folder": "out", "format": "webp"}),
+        ),
+    )
+    .await;
+    assert_eq!(json_of(&b)["name"], "photo-glitch");
+
+    let req = |name: &str| {
+        json!({"recipe": sample_recipe(), "format": "webp", "lossless": true,
+               "folder": "out", "name": name, "with_recipe": true})
+    };
+    let (s, _, b) = send(
+        &app,
+        post_json(&format!("/api/docs/{id}/save-to"), req("mine")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(
+        json_of(&b)["saved"],
+        json!(["~/out/mine.webp", "~/out/mine.recipe.toml"])
+    );
+    let written = fs::read(home.join("out/mine.webp")).unwrap();
+    assert_eq!(&written[8..12], b"WEBP");
+    // Lossless: exactly the CLI's result, decoded.
+    let mut expect = codec::decode(&original).unwrap();
+    core_recipe().apply(&mut expect.raster).unwrap();
+    let settings = codec::EncodeSettings {
+        lossless: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        written,
+        codec::encode_with(
+            &expect.raster,
+            Format::Webp,
+            expect.icc.as_deref(),
+            &settings
+        )
+        .unwrap()
+    );
+
+    // The same name again: refused, file unchanged; the suggestion moves on.
+    let (s, _, b) = send(
+        &app,
+        post_json(&format!("/api/docs/{id}/save-to"), req("mine.webp")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(fs::read(home.join("out/mine.webp")).unwrap(), written);
+
+    // Names cannot reach other folders or hide.
+    for bad in ["../escape", "sub/x", ".hidden", ""] {
+        let (s, _, _) = send(
+            &app,
+            post_json(&format!("/api/docs/{id}/save-to"), req(bad)),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{bad:?}");
+    }
+    let (s, _, _) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/save-to"),
+            json!({"recipe": sample_recipe(), "format": "png", "folder": "..", "name": "x"}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(!tmp.path().join("x.png").exists());
+}
+
+#[tokio::test]
+async fn webp_and_avif_exports_take_their_settings() {
+    let app = app(None, None);
+    let doc = upload(&app, "photo.jpg", fixture("baseline-444.jpg")).await;
+    let id = doc["id"].as_str().unwrap();
+    assert_eq!(doc["avif_keeps_profile"], true);
+    let export = |v: Value| post_json(&format!("/api/docs/{id}/export"), v);
+    let size = |q: u8| export(json!({"recipe": sample_recipe(), "format": "webp", "quality": q}));
+    let (s, h, small) = send(&app, size(10)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(h[header::CONTENT_TYPE], "image/webp");
+    let (_, _, big) = send(&app, size(95)).await;
+    assert!(small.len() < big.len());
+    let (s, h, avif) = send(
+        &app,
+        export(json!({"recipe": sample_recipe(), "format": "avif", "quality": 60, "speed": 10})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(h[header::CONTENT_TYPE], "image/avif");
+    assert!(
+        h[header::CONTENT_DISPOSITION]
+            .to_str()
+            .unwrap()
+            .contains("photo-glitch.avif")
+    );
+    assert_eq!(&avif[4..12], b"ftypavif");
+    let (s, _, _) = send(
+        &app,
+        export(json!({"recipe": sample_recipe(), "format": "avif", "speed": 11})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _, _) = send(
+        &app,
+        export(json!({"recipe": sample_recipe(), "format": "jpeg", "quality": 0})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}
