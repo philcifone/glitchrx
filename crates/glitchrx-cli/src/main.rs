@@ -203,6 +203,12 @@ fn build_recipe(cli: &Cli, effects: &[EffectArg]) -> Result<(Recipe, Option<u64>
     if let Some(c) = cli.channels {
         recipe.channels = c as usize;
     }
+    if let Some(n) = cli.work_size {
+        recipe.work_size = Some(n);
+    }
+    if cli.scale_back {
+        recipe.scale_back = true;
+    }
     recipe.validate()?;
     Ok((recipe, master))
 }
@@ -288,7 +294,8 @@ fn process(cli: &Cli, recipe: &Recipe, master_seed: Option<u64>, job: &Job) -> R
     let format = output_format(cli, job.output.as_deref())?;
     let bytes = fs::read(input).map_err(|e| Fail::Runtime(format!("{}: {e}", input.display())))?;
     let mut image = codec::decode(&bytes)?;
-    recipe.apply(&mut image.raster)?;
+    // Canvas (work size), steps, then scale back if asked.
+    image.raster = recipe.render(&image.raster)?;
     let settings = codec::EncodeSettings {
         quality: cli.quality,
         lossless: cli.lossless,

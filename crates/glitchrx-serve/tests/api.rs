@@ -730,7 +730,7 @@ async fn masks_travel_and_show() {
     assert_eq!(s, StatusCode::OK);
     let toml = String::from_utf8(toml).unwrap();
     assert!(
-        toml.contains("[[step.mask.op]]") && toml.contains("version = 3"),
+        toml.contains("[[step.mask.op]]") && toml.contains("version = 4"),
         "{toml}"
     );
     let req = Request::post("/api/recipe/from-toml")
@@ -1087,4 +1087,61 @@ async fn webp_and_avif_exports_take_their_settings() {
     )
     .await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn work_size_runs_the_steps_on_a_smaller_canvas() {
+    let app = app(None, None);
+    let original = fixture("baseline-444.jpg");
+    let doc = upload(&app, "photo.jpg", original.clone()).await;
+    let id = doc["id"].as_str().unwrap();
+    let mut recipe = sample_recipe();
+    recipe["work_size"] = json!(200);
+    let export = |r: Value| {
+        post_json(
+            &format!("/api/docs/{id}/export"),
+            json!({"recipe": r, "format": "png"}),
+        )
+    };
+
+    // Exactly the CLI's run: shrink, bend, write at the work size.
+    let (s, _, b) = send(&app, export(recipe.clone())).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let img = codec::decode(&original).unwrap();
+    let core = Recipe {
+        work_size: Some(200),
+        ..core_recipe()
+    };
+    let want = core.render(&img.raster).unwrap();
+    let got = codec::decode(&b).unwrap().raster;
+    assert_eq!((got.width, got.height), (want.width, want.height));
+    assert_eq!(got.bytes, want.bytes);
+    assert_eq!(want.width.max(want.height), 200);
+
+    // Scaled back: the full size again, in blocks.
+    recipe["scale_back"] = json!(true);
+    let (_, _, b) = send(&app, export(recipe.clone())).await;
+    let big = codec::decode(&b).unwrap().raster;
+    assert_eq!(
+        (big.width, big.height),
+        (img.raster.width, img.raster.height)
+    );
+
+    // The original view shows the canvas too, so before and after match.
+    let (s, h, _) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/preview"),
+            json!({"original": true, "recipe": recipe, "max_w": 4000, "max_h": 4000}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(h["x-width"].to_str().unwrap(), want.width.to_string());
+
+    // Too small is refused with a message.
+    recipe["work_size"] = json!(8);
+    let (s, _, b) = send(&app, export(recipe)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(String::from_utf8_lossy(&b).contains("work_size"));
 }

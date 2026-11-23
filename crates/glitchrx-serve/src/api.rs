@@ -588,15 +588,18 @@ async fn preview(
     Json(req): Json<PreviewRequest>,
 ) -> ApiResult<Response> {
     let doc = find(&st, &id)?;
-    let recipe = if req.original {
-        None
-    } else {
-        Some(req.recipe.to_recipe()?)
+    // The recipe comes with an original request too: its work size decides
+    // the canvas, so before and after show the same pixels.
+    let framing = req.recipe.to_recipe()?;
+    let (cw, ch) = {
+        let c = doc.canvas(&framing);
+        (c.width, c.height)
     };
     let crop = match req.crop {
-        Some(c) => Some(c.pixels(doc.image.raster.width, doc.image.raster.height)?),
+        Some(c) => Some(c.pixels(cw, ch)?),
         None => None,
     };
+    let recipe = (!req.original).then(|| framing.clone());
     // Only bend renders compete; an original (before/after) request must
     // not cancel the render it is being compared with. Crops compete only
     // with crops.
@@ -655,8 +658,7 @@ async fn preview(
                     Err(e) => return Err(e.into()),
                 }
             }
-            _ if crop.is_some() => shown(&doc.image.raster),
-            _ => doc.original(max_w, max_h),
+            _ => shown(&doc.canvas(&framing)),
         };
         let jpeg = render::preview_jpeg(&raster, 88).map_err(ApiError::internal)?;
         let ms = t0.elapsed().as_millis();
@@ -794,7 +796,9 @@ fn export_bytes(
     format: Format,
     settings: &codec::EncodeSettings,
 ) -> ApiResult<Vec<u8>> {
-    let raster = doc.render_full(recipe, NEVER)?;
+    let bent = doc.render_full(recipe, NEVER)?;
+    let full = (doc.image.raster.width, doc.image.raster.height);
+    let raster = recipe.finish(bent.as_ref().clone(), full);
     Ok(codec::encode_with(
         &raster,
         format.into(),

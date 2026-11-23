@@ -8,9 +8,11 @@
 //!
 //! ```toml
 //! format = "glitcharaxia-recipe"
-//! version = 3
+//! version = 4
 //! encoding = "u8"     # how steps read bytes as samples; a step may override
 //! channels = 1
+//! work_size = 2048    # optional: steps run on a copy this long (see below)
+//! scale_back = true   # optional: and the result is enlarged to full size
 //!
 //! [[step]]
 //! effect = "echo"
@@ -31,8 +33,18 @@
 //! feather = 0.01
 //! ```
 //!
-//! Version 3 added `opacity` and `mask`; version 2 recipes load unchanged
-//! (they have neither) and are written back as version 3.
+//! Version 3 added `opacity` and `mask`; version 4 added the canvas the
+//! steps run on (`work_size`, `scale_back`). Older recipes load unchanged
+//! (they have none of it) and are written back as version 4. A build that
+//! only knows version 3 refuses version 4, rather than ignore the work
+//! size and quietly give a different picture.
+//!
+//! **The canvas.** Before the steps run, the picture can be shrunk so its
+//! longer side is `work_size` pixels (never enlarged). Steps then run on
+//! that copy: faster, and coarser glitch texture, since a pixel-level
+//! effect covers more of the picture. The file is written at that size,
+//! or with `scale_back`, enlarged to the original size with hard pixel
+//! edges (nearest neighbour), so the coarse texture stays crisp.
 
 use std::collections::BTreeMap;
 
@@ -50,7 +62,7 @@ use crate::samples::Encoding;
 /// Magic string identifying a recipe file.
 pub const FORMAT: &str = "glitcharaxia-recipe";
 /// Recipe file format version.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
 /// Step keys that are not effect parameters: per-step overrides of the
 /// recipe's sample format, and how strongly the result is blended in.
@@ -289,9 +301,23 @@ pub struct Recipe {
     /// 1 (mono) or 2 (stereo), unless a step overrides it.
     #[serde(default = "default_channels")]
     pub channels: usize,
+    /// The longest side of the canvas the steps run on, in pixels; none
+    /// for the full size. See the module documentation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_size: Option<u32>,
+    /// Enlarge the result back to the full size (nearest neighbour).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub scale_back: bool,
     #[serde(rename = "step", default)]
     pub steps: Vec<Step>,
 }
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// The smallest work size accepted: below it there is too little picture.
+pub const MIN_WORK_SIZE: u32 = 64;
 
 impl Default for Recipe {
     fn default() -> Self {
@@ -300,6 +326,8 @@ impl Default for Recipe {
             version: VERSION,
             encoding: Encoding::default(),
             channels: 1,
+            work_size: None,
+            scale_back: false,
             steps: Vec::new(),
         }
     }
@@ -329,7 +357,7 @@ impl Recipe {
             )));
         }
         match raw.get("version").and_then(|v| v.as_integer()) {
-            Some(2 | 3) => {}
+            Some(2..=4) => {}
             Some(1) => {
                 return Err(Error::Recipe(
                     "version 1 recipes are for the JPEG byte engine, which was retired; \
@@ -341,7 +369,7 @@ impl Recipe {
             None => return Err(Error::Recipe("missing `version`".into())),
         }
         let mut r: Recipe = toml::from_str(text).map_err(|e| Error::Recipe(e.to_string()))?;
-        // Version 2 is a subset of 3; from here on it is a version 3 recipe.
+        // Older versions are subsets of this one; from here on it is current.
         r.version = VERSION;
         r.validate()?;
         Ok(r)
@@ -351,9 +379,49 @@ impl Recipe {
         toml::to_string(self).expect("recipe serialization cannot fail")
     }
 
-    /// Check every step (and the recipe-wide channel count).
+    /// Check every step (and the recipe-wide settings).
     pub fn validate(&self) -> Result<()> {
+        if let Some(w) = self.work_size
+            && w < MIN_WORK_SIZE
+        {
+            return Err(Error::Recipe(format!(
+                "work_size must be at least {MIN_WORK_SIZE} pixels, not {w}"
+            )));
+        }
         self.prepare_all().map(|_| ())
+    }
+
+    /// The canvas size for a picture of `w` x `h`: shrunk to the work
+    /// size, if there is one and the picture is larger.
+    pub fn canvas_size(&self, w: usize, h: usize) -> (usize, usize) {
+        match self.work_size {
+            Some(n) => crate::raster::fit_size(w, h, n as usize, n as usize),
+            None => (w, h),
+        }
+    }
+
+    /// The raster the steps run on (see the module documentation).
+    pub fn canvas(&self, original: &Raster) -> Raster {
+        let (w, h) = self.canvas_size(original.width, original.height);
+        original.resize(w, h)
+    }
+
+    /// What the bent canvas becomes in the file: itself, or with
+    /// `scale_back`, enlarged to `full` (the size before the work size).
+    pub fn finish(&self, bent: Raster, full: (usize, usize)) -> Raster {
+        if self.scale_back && (bent.width, bent.height) != full {
+            bent.enlarge(full.0, full.1)
+        } else {
+            bent
+        }
+    }
+
+    /// The whole run, as the CLI and the exports do it: canvas, steps,
+    /// finish.
+    pub fn render(&self, original: &Raster) -> Result<Raster> {
+        let mut canvas = self.canvas(original);
+        self.apply(&mut canvas)?;
+        Ok(self.finish(canvas, (original.width, original.height)))
     }
 
     /// Validate and build every step.
@@ -453,7 +521,7 @@ mod tests {
         r.steps
             .push(Step::new("backwards", "channels=1", 5).unwrap());
         let text = r.to_toml();
-        assert!(text.contains("version = 3"), "{text}");
+        assert!(text.contains("version = 4"), "{text}");
         assert!(text.contains("encoding = \"s16le\""), "{text}");
         assert!(text.contains("encoding = \"ulaw\""), "{text}");
         assert!(text.contains("decay = 0.7"), "{text}");
@@ -579,7 +647,48 @@ mod tests {
         let r = Recipe::from_toml(v2).unwrap();
         assert_eq!(r.version, VERSION);
         assert_eq!(r.steps[0].mask, None);
-        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 4")).is_err());
+        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 5")).is_err());
+    }
+
+    /// A 6 x 4 picture whose every pixel differs, so resizing shows.
+    fn ramp(w: usize, h: usize) -> Raster {
+        Raster::new(w, h, (0..w * h * 3).map(|i| (i * 7 % 251) as u8).collect())
+    }
+
+    #[test]
+    fn the_canvas_shrinks_to_the_work_size_and_can_scale_back() {
+        let original = ramp(600, 400);
+        let mut r = Recipe {
+            work_size: Some(150),
+            steps: vec![Step::new("invert", "hits=0", 1).unwrap()],
+            ..Recipe::default()
+        };
+        assert_eq!(r.canvas_size(600, 400), (150, 100));
+        // Never enlarged.
+        assert_eq!(r.canvas_size(100, 60), (100, 60));
+
+        // The run: shrink, bend, write at the work size...
+        let out = r.render(&original).unwrap();
+        let mut want = original.resize(150, 100);
+        r.apply(&mut want).unwrap();
+        assert_eq!(out, want);
+        // ...or enlarged back with hard edges: each canvas pixel becomes a
+        // 4 x 4 block.
+        r.scale_back = true;
+        let big = r.render(&original).unwrap();
+        assert_eq!((big.width, big.height), (600, 400));
+        assert_eq!(big, want.enlarge(600, 400));
+        assert_eq!(&big.bytes[..3], &big.bytes[9..12]);
+
+        // Written to the file, read back the same; too small is refused.
+        let back = Recipe::from_toml(&r.to_toml()).unwrap();
+        assert_eq!(back, r);
+        assert!(r.to_toml().contains("work_size = 150"), "{}", r.to_toml());
+        r.work_size = Some(10);
+        assert!(r.validate().unwrap_err().to_string().contains("work_size"));
+        // Without one, nothing about it is written.
+        assert!(!Recipe::default().to_toml().contains("work_size"));
+        assert!(!Recipe::default().to_toml().contains("scale_back"));
     }
 
     #[test]

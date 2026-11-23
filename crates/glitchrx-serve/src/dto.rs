@@ -22,6 +22,11 @@ pub struct RecipeDto {
     pub encoding: Encoding,
     #[serde(default = "one")]
     pub channels: usize,
+    /// The canvas the steps run on (see `Recipe::work_size`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_size: Option<u32>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scale_back: bool,
     #[serde(default)]
     pub steps: Vec<StepDto>,
 }
@@ -35,6 +40,8 @@ impl Default for RecipeDto {
         RecipeDto {
             encoding: Encoding::default(),
             channels: 1,
+            work_size: None,
+            scale_back: false,
             steps: Vec::new(),
         }
     }
@@ -105,6 +112,8 @@ impl RecipeDto {
         let r = Recipe {
             encoding: self.encoding,
             channels: self.channels,
+            work_size: self.work_size,
+            scale_back: self.scale_back,
             steps,
             ..Recipe::default()
         };
@@ -116,6 +125,8 @@ impl RecipeDto {
         RecipeDto {
             encoding: r.encoding,
             channels: r.channels,
+            work_size: r.work_size,
+            scale_back: r.scale_back,
             steps: r
                 .steps
                 .iter()
