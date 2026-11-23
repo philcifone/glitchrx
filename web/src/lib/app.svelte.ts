@@ -27,6 +27,7 @@ import { usesSeed } from './seed';
 import { shakeParams } from './shake';
 import { storageGet, storageSet } from './storage';
 import * as groups from './groups';
+import { numberSteps, stepName, stepNumber } from './stepnames';
 import { CHANNELS_KEY, ENCODING_KEY } from './groups';
 import { toggleSmooth } from './shapes';
 import { FIT, clampView, geometry, isZoomed, toggle, visible, type Geometry, type Point, type Rect, type View } from './view';
@@ -389,6 +390,8 @@ export class App {
   /** Call after every recipe mutation. */
   changed(commit = true): void {
     this.tidyGroups();
+    const numbered = numberSteps(this.recipe.steps);
+    if (numbered !== this.recipe.steps) this.recipe.steps = numbered;
     this.revision++;
     this.render('fast');
     if (commit) this.commit();
@@ -434,6 +437,16 @@ export class App {
     this.render('fast');
   }
 
+  /** The step's label: its effect, numbered when there are several (echo0, echo1). */
+  stepName(step: StepState): string {
+    return stepName(step, this.recipe.steps);
+  }
+
+  /** Just the number part of the label ('' when the effect is there once). */
+  stepNumber(step: StepState): string {
+    return stepNumber(step, this.recipe.steps);
+  }
+
   private step(uid: string): StepState | undefined {
     return this.recipe.steps.find((s) => s.uid === uid);
   }
@@ -464,7 +477,8 @@ export class App {
   duplicateStep(uid: string): void {
     const i = this.recipe.steps.findIndex((s) => s.uid === uid);
     if (i < 0) return;
-    const copy = { ...$state.snapshot(this.recipe.steps[i]), uid: newUid(), seed: randomSeed() };
+    const { n: _n, ...orig } = $state.snapshot(this.recipe.steps[i]);
+    const copy = { ...orig, uid: newUid(), seed: randomSeed() };
     this.recipe.steps.splice(i + 1, 0, copy);
     this.changed();
   }

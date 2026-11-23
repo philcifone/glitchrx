@@ -45,7 +45,8 @@
     <span class="n">{index + 1}</span>
     <button class="name" onclick={() => (open = !open)} aria-expanded={open} title={info?.summary}>
       <span class="glyph"><Icon size={18} strokeWidth={1.75} /></span>
-      <span class="label serif">{step.effect}</span>
+      <!-- The number in the system font: Young Serif's old-style 1 reads as "i". -->
+      <span class="label serif">{step.effect}<span class="num">{app.stepNumber(step)}</span></span>
       {#if stepEncoding}<span class="enc">{stepEncoding}</span>{/if}
       {#if step.mask}
         <span class="enc tag-icon" class:live={app.masking === step.uid} title="Masked" aria-label="Masked">
@@ -58,15 +59,19 @@
       <input class="switch" type="checkbox" checked={step.enabled} onchange={() => app.toggleStep(step.uid)} />
       <span class="visually-hidden">Enabled</span>
     </label>
-    <button class="icon" onclick={() => app.shake(step.uid)} disabled={!info} title="Shake: random settings for this step (placement stays)" aria-label="Shake settings">
-      <Shuffle size={18} strokeWidth={1.75} />
-    </button>
   </header>
 
   {#if open}
     <div class="body">
       {#if info}
         <section class="group">
+          <!-- Inside the card, not on its header, where it was easy to bump. -->
+          {#if own.length}<div class="shake-row">
+            <h3 class="section-label">Settings</h3>
+            <button class="plain" onclick={() => app.shake(step.uid)} title="Random settings for this step (placement stays)" aria-label="Shake settings">
+              <Shuffle size={16} strokeWidth={1.75} /> Shake
+            </button>
+          </div>{/if}
           {#each own as spec (spec.name)}
             <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
           {/each}
@@ -156,6 +161,25 @@
 </article>
 
 <style>
+  .num {
+    font-family: var(--font);
+    font-variant-numeric: lining-nums tabular-nums;
+    font-size: 0.9em;
+  }
+
+  .shake-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: -4px 0 2px;
+  }
+
+  .shake-row .plain {
+    gap: 6px;
+    font-size: 0.9rem;
+    min-height: 34px;
+  }
+
   /* A grouped card, as in iOS Settings. */
   article {
     background: var(--card);
@@ -200,10 +224,6 @@
   .glyph {
     display: inline-flex;
     color: var(--accent);
-  }
-
-  .label {
-    text-transform: capitalize;
   }
 
   /* An encoding override, as a small tag. */

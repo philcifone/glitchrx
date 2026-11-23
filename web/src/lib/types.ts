@@ -155,6 +155,8 @@ export interface StepState extends StepDto {
   enabled: boolean;
   /** The preset group this step came in with (see groups.ts). */
   group?: string;
+  /** Its number among steps of the same effect (echo0, echo1; see stepnames.ts). */
+  n?: number;
 }
 
 /**
