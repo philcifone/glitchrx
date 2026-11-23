@@ -22,6 +22,7 @@
   import ZoomIn from '@lucide/svelte/icons/zoom-in';
   import ZoomOut from '@lucide/svelte/icons/zoom-out';
   import { app } from '../lib/app.svelte';
+  import { WORK_SIZES } from '../lib/canvas';
   import { pan, percent, pinch, placement, spread, wheelZoom, type Point, type Spread, type View } from '../lib/view';
   import MaskPainter from './MaskPainter.svelte';
 
@@ -306,6 +307,21 @@
   {/if}
 
   {#if app.doc && app.imageUrl && g}
+    <!-- Work size (5b): the size the steps run on. Smaller is faster and
+         exact at once, with coarser glitch texture. -->
+    <div class="work glass" role="radiogroup" aria-label="Work size" title="The size the steps run on: smaller is faster, with coarser texture">
+      {#each WORK_SIZES as ws (ws.label)}
+        <button
+          role="radio"
+          aria-checked={(app.recipe.work_size ?? null) === ws.size}
+          class:on={(app.recipe.work_size ?? null) === ws.size}
+          onclick={() => app.setWorkSize(ws.size)}
+          disabled={ws.size !== null && Math.max(app.doc.width, app.doc.height) <= ws.size}
+        >
+          {ws.label}
+        </button>
+      {/each}
+    </div>
     <button
       class="zoom"
       class:on={app.zoomed}
@@ -474,5 +490,36 @@
 
   .zoom:hover:not(:disabled) {
     background: var(--glass);
+  }
+
+  .work {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    display: flex;
+    padding: 3px;
+    gap: 2px;
+    border-radius: 999px;
+    background: var(--glass);
+    backdrop-filter: saturate(180%) blur(16px);
+    -webkit-backdrop-filter: saturate(180%) blur(16px);
+    box-shadow: var(--shadow);
+  }
+
+  .work button {
+    min-height: 34px;
+    min-width: 40px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: none;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .work button.on,
+  .work button.on:hover:not(:disabled) {
+    background: var(--card);
+    font-weight: 600;
+    color: var(--accent);
   }
 </style>

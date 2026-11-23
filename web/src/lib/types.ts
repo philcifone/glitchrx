@@ -144,6 +144,10 @@ export interface RecipeDto {
   /** Recipe-wide encoding and channels; a step may override them in its params. */
   encoding: string;
   channels: Channels;
+  /** The longest side of the canvas the steps run on (none: full size). */
+  work_size?: number;
+  /** Enlarge the result back to full size, with hard pixel edges. */
+  scale_back?: boolean;
   steps: StepDto[];
 }
 
@@ -174,6 +178,9 @@ export interface PresetGroup {
 export interface RecipeState {
   encoding: string;
   channels: Channels;
+  /** See RecipeDto. */
+  work_size?: number;
+  scale_back?: boolean;
   steps: StepState[];
   /** Preset groups; UI only, never sent to the server or saved in recipes. */
   groups?: PresetGroup[];

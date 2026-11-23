@@ -77,7 +77,10 @@
   ];
 
   const doc = $derived(app.doc);
-  const tooBigForWebp = $derived(!!doc && Math.max(doc.width, doc.height) > WEBP_MAX_SIDE);
+  const out = $derived(app.outputSize);
+  const tooBigForWebp = $derived(!!out && Math.max(out.w, out.h) > WEBP_MAX_SIDE);
+  const canvas = $derived(app.canvasSize);
+  const shrunk = $derived(!!doc && !!canvas && canvas.w !== doc.width);
   const blocked = $derived(prefs.format === 'webp' && tooBigForWebp);
 
   async function run(action: () => Promise<void>) {
@@ -140,7 +143,7 @@
           {@render slider('Quality', prefs.webpQuality, 1, 100, (v) => set({ webpQuality: v }))}
         {/if}
         {#if tooBigForWebp}
-          <p class="warn small">WebP holds at most {WEBP_MAX_SIDE} pixels a side; this photo is {doc?.width}x{doc?.height}.</p>
+          <p class="warn small">WebP holds at most {WEBP_MAX_SIDE} pixels a side; this export is {out?.w}x{out?.h}.</p>
         {/if}
       {:else if prefs.format === 'avif'}
         <div class="two">
@@ -152,6 +155,19 @@
             AVIF cannot carry this photo's colour profile{doc.profile ? ` (${doc.profile})` : ''}, so colours may shift. TIFF, PNG, JPEG and WebP keep it.
           </p>
         {/if}
+      {/if}
+      {#if shrunk && doc && canvas}
+        <div class="segmented" role="radiogroup" aria-label="Export size">
+          <button role="radio" aria-checked={!app.recipe.scale_back} class:on={!app.recipe.scale_back} onclick={() => app.setScaleBack(false)}>
+            {canvas.w}x{canvas.h}
+          </button>
+          <button role="radio" aria-checked={!!app.recipe.scale_back} class:on={!!app.recipe.scale_back} onclick={() => app.setScaleBack(true)}>
+            {doc.width}x{doc.height}
+          </button>
+        </div>
+        <p class="dim small">
+          The steps run at the work size. Export it at that size, or enlarged back to the photo's with hard pixel edges, so the coarse texture stays crisp. Saved in the recipe.
+        </p>
       {/if}
       {#if isLossy(prefs)}
         <p class="dim small">Lossy: fine glitch texture (single-pixel noise, hard stripes) is smoothed a little. TIFF, PNG and lossless WebP keep every pixel.</p>
