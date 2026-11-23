@@ -80,7 +80,9 @@
   const out = $derived(app.outputSize);
   const tooBigForWebp = $derived(!!out && Math.max(out.w, out.h) > WEBP_MAX_SIDE);
   const canvas = $derived(app.canvasSize);
-  const shrunk = $derived(!!doc && !!canvas && canvas.w !== doc.width);
+  const cropped = $derived(app.croppedSize);
+  // Shrunk to a work size: the crop (or photo) and the canvas differ.
+  const shrunk = $derived(!!cropped && !!canvas && canvas.w !== cropped.w);
   const blocked = $derived(prefs.format === 'webp' && tooBigForWebp);
 
   async function run(action: () => Promise<void>) {
@@ -156,13 +158,13 @@
           </p>
         {/if}
       {/if}
-      {#if shrunk && doc && canvas}
+      {#if shrunk && cropped && canvas}
         <div class="segmented" role="radiogroup" aria-label="Export size">
           <button role="radio" aria-checked={!app.recipe.scale_back} class:on={!app.recipe.scale_back} onclick={() => app.setScaleBack(false)}>
             {canvas.w}x{canvas.h}
           </button>
           <button role="radio" aria-checked={!!app.recipe.scale_back} class:on={!!app.recipe.scale_back} onclick={() => app.setScaleBack(true)}>
-            {doc.width}x{doc.height}
+            {cropped.w}x{cropped.h}
           </button>
         </div>
         <p class="dim small">
