@@ -57,6 +57,10 @@ Background, mostly from the archived JPEG byte engine (`archive/jpeg-bytes`). JP
 - **Chain.** Several effects applied in order. On the CLI, the order of the effect flags is the chain order.
 - **Contact sheet.** A grid image showing one effect at a range of parameter values, side by side. Used to tune defaults.
 - **Effect.** One operation, such as echo or shuffle. Most follow one of Audacity's and work on the raster's raw bytes as samples. **Pixel effects** (pixelsort) work on whole pixels as colours, in rows and columns, instead.
+- **Adjustment.** A photo tool rather than a glitch (levels, curves, hsl, balance), in the effect group `adjust`. Adjustments are ordinary steps, so masks, opacity and placement apply.
+- **Levels.** Black point (input values at or below it become black), white point, and **gamma**, which bends the midtones lighter (above 1) or darker.
+- **Curve.** A tone curve: points `IN:OUT` mapping input values to output values, joined by a **monotone cubic**, a smooth curve that never overshoots between its points (Fritsch-Carlson).
+- **Colour balance.** Tinting one tone range (shadows, midtones or highlights) towards red or cyan, green or magenta, blue or yellow; with luminosity kept, only the colour changes.
 - **Pixel sorting.** Reordering pixels along a column or row by a key (brightness, hue, saturation). The classic version (Kim Asendorf's ASDF sort) only sorts **runs**: stretches of pixels whose brightness lies inside a band (`low` to `high`). Pixels outside the band stay put and break the runs, which is why shadows keep the picture recognisable while bright areas melt into streaks.
 - **Luma (Rec. 709).** Perceived brightness from R, G and B: 0.2126 R + 0.7152 G + 0.0722 B. Pixelsort uses it scaled to integers, so its comparisons are exact everywhere.
 - **Golden test.** A test that checks the output's hash matches a stored value. It proves that the same input, recipe and seed always give the same bytes.
