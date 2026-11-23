@@ -179,6 +179,11 @@ impl Doc {
         }
     }
 
+    /// The photo's upright size, which masks are measured against.
+    fn photo_size(&self) -> (usize, usize) {
+        (self.image.raster.width, self.image.raster.height)
+    }
+
     /// Units for a raster of `w` x `h` standing in for `canvas`.
     fn units(canvas: &Raster, w: usize, h: usize) -> Units {
         Units {
@@ -205,7 +210,7 @@ impl Doc {
         cancel: Cancel<'_>,
     ) -> Result<Raster> {
         // Validate every step before touching the cache.
-        let prepared = recipe.prepare_all()?;
+        let prepared = recipe.prepare_for(self.photo_size())?;
         let canvas = self.canvas(recipe);
         let size = canvas.fit(max_w, max_h);
 
@@ -270,9 +275,12 @@ impl Doc {
         };
         let input = self.preview(&before, max_w, max_h, cancel)?;
         let (w, h) = (input.width, input.height);
-        let coverage = match &step.mask {
-            Some(m) => m.render(w, h, &input.bytes, cancel)?,
-            None => vec![1.0; w * h],
+        // Drawn on the whole photo; moved onto the cropped canvas.
+        let frame = recipe.mask_frame(self.photo_size());
+        let coverage = match (&step.mask, frame) {
+            (Some(m), Some(f)) => m.reframed(&f).render(w, h, &input.bytes, cancel)?,
+            (Some(m), None) => m.render(w, h, &input.bytes, cancel)?,
+            (None, _) => vec![1.0; w * h],
         };
         Ok((w, h, coverage))
     }
@@ -282,7 +290,7 @@ impl Doc {
     /// a cached intermediate gives the same bytes as running them all,
     /// since each step only sees the bytes the one before it left.
     pub fn render_full(&self, recipe: &Recipe, cancel: Cancel<'_>) -> Result<Arc<Raster>> {
-        let prepared = recipe.prepare_all()?;
+        let prepared = recipe.prepare_for(self.photo_size())?;
         let canvas = self.canvas(recipe);
         let keys = step_keys(recipe, &prepared);
         let (start, mut bytes, edit) = {

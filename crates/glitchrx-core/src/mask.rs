@@ -213,6 +213,46 @@ pub struct Mask {
     pub ops: Vec<MaskOp>,
 }
 
+/// How a mask drawn on the whole photo lands on a cropped canvas (D-52).
+///
+/// Masks are kept as shares of the uncropped photo, so they stay on the
+/// same part of it whatever the crop. Before rendering, positions move by
+/// the crop's corner and scale by the crop's size, and lengths (shares of
+/// the longer side) scale by how much longer the photo's longer side is
+/// than the crop's. In the photo's own pixels that is just a shift, so
+/// circles stay round and nothing is stretched.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Frame {
+    /// The crop's corner, as shares of the photo.
+    pub x: f64,
+    pub y: f64,
+    /// Photo width over crop width, and the same for heights.
+    pub sx: f64,
+    pub sy: f64,
+    /// The photo's longer side over the crop's longer side.
+    pub sl: f64,
+}
+
+impl Frame {
+    /// The frame for a crop of `(x, y, w, h)` pixels out of a `pw` x `ph`
+    /// photo.
+    pub fn new(crop: (usize, usize, usize, usize), pw: usize, ph: usize) -> Frame {
+        let (x, y, w, h) = crop;
+        let (pw, ph) = (pw.max(1) as f64, ph.max(1) as f64);
+        Frame {
+            x: x as f64 / pw,
+            y: y as f64 / ph,
+            sx: pw / w.max(1) as f64,
+            sy: ph / h.max(1) as f64,
+            sl: pw.max(ph) / w.max(h).max(1) as f64,
+        }
+    }
+
+    fn at(&self, x: f64, y: f64) -> (f64, f64) {
+        ((x - self.x) * self.sx, (y - self.y) * self.sy)
+    }
+}
+
 /// Limits that keep a hostile or broken recipe from eating the machine.
 const MAX_OPS: usize = 2000;
 const MAX_POINTS: usize = 400_000;
@@ -317,6 +357,82 @@ impl Mask {
             return bad(format!("{points} stroke points (at most {MAX_POINTS})"));
         }
         Ok(())
+    }
+
+    /// This mask moved onto a cropped canvas (see [`Frame`]). The result is
+    /// only for rendering: its values may lie beyond the limits `validate`
+    /// checks, which apply to the mask as stored.
+    pub fn reframed(&self, f: &Frame) -> Mask {
+        let pt = |p: &[f64; 2]| {
+            let (x, y) = f.at(p[0], p[1]);
+            [x, y]
+        };
+        let ops = self
+            .ops
+            .iter()
+            .map(|op| {
+                let shape = match &op.shape {
+                    Shape::Brush { strokes } => Shape::Brush {
+                        strokes: strokes
+                            .iter()
+                            .map(|s| Stroke {
+                                size: s.size * f.sl,
+                                points: s
+                                    .points
+                                    .chunks_exact(2)
+                                    .flat_map(|q| {
+                                        let (x, y) = f.at(q[0], q[1]);
+                                        [x, y]
+                                    })
+                                    .collect(),
+                                ..s.clone()
+                            })
+                            .collect(),
+                    },
+                    Shape::Linear { from, to } => Shape::Linear {
+                        from: pt(from),
+                        to: pt(to),
+                    },
+                    Shape::Radial { from, to, hardness } => Shape::Radial {
+                        from: pt(from),
+                        to: pt(to),
+                        hardness: *hardness,
+                    },
+                    Shape::Rect {
+                        center,
+                        size,
+                        angle,
+                    } => Shape::Rect {
+                        center: pt(center),
+                        size: [size[0] * f.sl, size[1] * f.sl],
+                        angle: *angle,
+                    },
+                    Shape::Path { points } => Shape::Path {
+                        points: points
+                            .iter()
+                            .map(|q| {
+                                q.chunks_exact(2)
+                                    .flat_map(|p| {
+                                        let (x, y) = f.at(p[0], p[1]);
+                                        [x, y]
+                                    })
+                                    .collect()
+                            })
+                            .collect(),
+                    },
+                    Shape::Brightness { .. } => op.shape.clone(),
+                };
+                MaskOp {
+                    shape,
+                    feather: op.feather * f.sl,
+                    ..op.clone()
+                }
+            })
+            .collect();
+        Mask {
+            invert: self.invert,
+            ops,
+        }
     }
 
     /// The mask for a `w` x `h` raster whose bytes (R, G, B per pixel) are
