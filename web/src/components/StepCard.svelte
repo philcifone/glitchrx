@@ -12,7 +12,7 @@
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import { app, CHANNELS_KEY, ENCODING_KEY } from '../lib/app.svelte';
   import { iconFor } from '../lib/icons';
-  import { usesSamples } from '../lib/palette';
+  import { shakes, usesSamples } from '../lib/palette';
   import { CHANNEL_CHOICES, channelName } from '../lib/channels';
   import type { Channels, StepState } from '../lib/types';
   import ParamField from './ParamField.svelte';
@@ -68,9 +68,11 @@
           <!-- Inside the card, not on its header, where it was easy to bump. -->
           {#if own.length}<div class="shake-row">
             <h3 class="section-label">Settings</h3>
-            <button class="plain" onclick={() => app.shake(step.uid)} title="Random settings for this step (placement stays)" aria-label="Shake settings">
-              <Shuffle size={16} strokeWidth={1.75} /> Shake
-            </button>
+            {#if shakes(info)}
+              <button class="plain" onclick={() => app.shake(step.uid)} title="Random settings for this step (placement stays)" aria-label="Shake settings">
+                <Shuffle size={16} strokeWidth={1.75} /> Shake
+              </button>
+            {/if}
           </div>{/if}
           {#each own as spec (spec.name)}
             <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />

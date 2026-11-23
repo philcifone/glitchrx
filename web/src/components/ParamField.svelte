@@ -5,12 +5,14 @@
   //   size         text (rows, px, % or bytes) + log slider for rows and %
   //   region       one two-handle slider while both ends are percents, + text;
   //                dragging draws the band on the preview
+  //   curve        a curve editor (CurveField) + text
   // Sliders update the preview live and record one history entry on release.
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
   import { app } from '../lib/app.svelte';
   import { SLIDER_STEPS, percentScale, rowsScale, sliderScale } from '../lib/slider';
   import type { ParamInfo } from '../lib/types';
   import DualRange from './DualRange.svelte';
+  import CurveField from './CurveField.svelte';
 
   let { uid, spec, value }: { uid: string; spec: ParamInfo; value: string | undefined } = $props();
 
@@ -144,6 +146,18 @@
         autocomplete="off"
       />
     </div>
+  {:else if spec.kind === 'curve'}
+    <CurveField {text} oninput={live} onchange={(v) => set(v)} />
+    <input
+      {id}
+      class="num wide"
+      type="text"
+      value={text}
+      onchange={(e) => commitField(e.currentTarget)}
+      spellcheck="false"
+      autocomplete="off"
+      aria-label="{spec.name} as text"
+    />
   {:else if spec.kind === 'region'}
     <div class="ctl">
       {#if region}
@@ -216,6 +230,13 @@
     width: 8ch;
     flex: none;
     text-align: right;
+  }
+
+  /* A curve's text form, for exact or pasted values. */
+  .num.wide[type='text'] {
+    width: 100%;
+    text-align: left;
+    font-size: 0.8rem;
   }
 
   .num[type='text'] {

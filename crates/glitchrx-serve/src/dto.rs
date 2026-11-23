@@ -147,7 +147,7 @@ impl RecipeDto {
 pub struct EffectDto {
     pub id: &'static str,
     pub version: u32,
-    /// Picker section: "audio", "data" or "pixel". Pixel effects ignore
+    /// Picker section: "audio", "data", "pixel" or "adjust". Pixel and adjust effects ignore
     /// the encoding and channels.
     pub group: &'static str,
     /// The Audacity effect this one follows.
@@ -206,6 +206,7 @@ pub fn effects() -> Vec<EffectDto> {
                             Kind::Size => ("size", None, None, None),
                             Kind::Region => ("region", None, None, None),
                             Kind::Choice(c) => ("choice", None, None, Some(c)),
+                            Kind::Curve => ("curve", None, None, None),
                         };
                         ParamDto {
                             name: p.name,

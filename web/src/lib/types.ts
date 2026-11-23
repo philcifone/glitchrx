@@ -1,6 +1,6 @@
 // Shapes shared with the server (see crates/glitchrx-serve/src/dto.rs).
 
-export type ParamKind = 'int' | 'float' | 'size' | 'region' | 'choice';
+export type ParamKind = 'int' | 'float' | 'size' | 'region' | 'choice' | 'curve';
 
 export interface ParamInfo {
   name: string;
@@ -15,7 +15,7 @@ export interface ParamInfo {
 }
 
 /** Picker section. Pixel effects work on whole pixels: no encoding or channels. */
-export type EffectGroup = 'audio' | 'data' | 'pixel';
+export type EffectGroup = 'audio' | 'data' | 'pixel' | 'adjust';
 
 export interface EffectInfo {
   id: string;

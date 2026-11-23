@@ -99,8 +99,23 @@ async fn effects_and_config() {
     assert_eq!(s, StatusCode::OK);
     assert!(h.contains_key(header::CONTENT_SECURITY_POLICY));
     let effects = json_of(&b);
-    assert_eq!(effects.as_array().unwrap().len(), 15);
+    assert_eq!(effects.as_array().unwrap().len(), 19);
     assert_eq!(effects[0]["id"], "echo");
+    // The curve kind reaches the GUI, which draws an editor for it.
+    let curves = effects
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "curves")
+        .unwrap();
+    assert_eq!(curves["group"], "adjust");
+    assert!(
+        curves["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["kind"] == "curve")
+    );
 
     let (_, _, b) = send(
         &app,

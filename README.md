@@ -41,6 +41,8 @@ glitchrx --echo --encoding ulaw photo.jpg       # read the pixels as mu-law audi
 glitchrx --shift by=0.5rows,phase=2,hits=12 photo.jpg
 glitchrx --pixelsort low=0.3 photo.jpg          # melt the bright areas into streaks
 glitchrx --echo opacity=0.5 photo.jpg           # blend the step at half strength
+glitchrx --levels black=20,white=230 --hsl saturation=-40 photo.jpg   # photo adjustments
+glitchrx --curves points=0:20/128:150/255:235,channel=blue photo.jpg
 glitchrx --pixelsort --work-size 1024 photo.jpg # run on a 1024 px copy: coarser, faster
 glitchrx --shift --work-size 1024 --scale-back photo.jpg   # ...enlarged back, hard pixel edges
 glitchrx --stutter --batch *.jpg                # every file, automatic names
@@ -97,8 +99,12 @@ A distance of whole pixels keeps colours. `phase=1` or `phase=2` adds one or two
 | `distort` | Distortion | Hard clip, soft saturation, or folding highlights into bands |
 | `speed` | Change Speed | Squeezes or stretches parts of the picture: shears |
 | `pixelsort` | (pixel effect) | Sorts runs of pixels by brightness, hue or saturation: streaks down or across the picture |
+| `levels` | (adjustment) | Black point, white point and midtone gamma |
+| `curves` | (adjustment) | A tone curve through up to 16 points, `points=0:0/64:52/192:204/255:255` |
+| `hsl` | (adjustment) | Hue turn, saturation and lightness for the whole picture |
+| `balance` | (adjustment) | Tints the shadows, midtones or highlights, keeping brightness |
 
-`pixelsort` is not audio: it works on whole pixels, so the encoding and channels do not apply. Every step also takes `opacity` (0 to 1), which blends its result over the picture it received.
+`pixelsort` and the adjustments are not audio: they work on whole pixels, so the encoding and channels do not apply. Adjustments are ordinary steps, so masks and opacity limit them like any other. Every step also takes `opacity` (0 to 1), which blends its result over the picture it received.
 
 All parameters are documented in `docs/effects.md`, which is generated from the code. Where an effect lands is set by `region`, `hits` and `len`, shared by every effect.
 
@@ -129,7 +135,7 @@ glitchrx serve --host 0.0.0.0 --token --root ~/Pictures   # from a phone over LA
 In the GUI:
 - **Open** a photo from your device (it is sent to your own server, nowhere else) or from the server's library folder (chosen in Settings, or `--root`). If steps are already in the stack, you are asked whether to keep them or start fresh (undoable; "Don't ask again" is changeable in Settings).
 - **Pick the encoding** for the whole recipe (and mono, stereo or RGB) at the top. Any step can override both.
-- **Add steps** by tapping an effect in the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter), data effects (invert, bitcrush, backwards, shift, shuffle) and pixel effects (pixelsort). On a phone the palette sits behind the floating + button. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
+- **Add steps** by tapping an effect in the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter), data effects (invert, bitcrush, backwards, shift, shuffle) pixel effects (pixelsort) and adjustments (levels, curves, hsl, balance; curves has a curve editor). On a phone the palette sits behind the floating + button. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
 - **Placement** (`region`, `hits`, `len`) is always shown on each step. Dragging the region's two handles shades the preview outside the band it covers.
 - **Edit** (beside Clear) shows every step on one line: tap the circles to select several and duplicate or remove them, or drag the grip on the right to reorder. A preset group drags as a block.
 - **Shake** (the shuffle arrows at the top of a step's settings) rolls a step's own settings at random, within the useful range; placement and encoding stay. **Re-roll** (the dice, beside the seed at the end of Placement) picks a new seed, which moves where hits land; it is greyed out when a step has nothing random (`hits=0`, except for `shuffle`).
