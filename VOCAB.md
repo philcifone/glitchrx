@@ -68,6 +68,9 @@ Background, mostly from the archived JPEG byte engine (`archive/jpeg-bytes`). JP
 - **Mask clipboard.** Copy or Cut takes mask components; Paste adds copies to any step's mask (positions are fractions of the picture, so they land in the same place). Cut then Paste moves them between steps.
 - **New photo choice.** What opening another photo does with the steps already in the stack: ask, keep them, or start fresh (undoable). Set per device, in Presets.
 - **Pen path, corner, smooth point.** A mask component drawn with the pen tool: points joined into a closed outline. A corner is just a position; a smooth point also has a handle that bends the side after it, and the mirror of that handle bends the side before, so the outline runs through it without a kink. While drawing (placing), taps add points and tapping the first closes it.
+- **Library folder, export folder.** Folders on the server, chosen in the GUI's Settings sheet and kept in `~/.config/glitchrx/config.toml`. The library is what Open browses (`--root` overrides it); the export folder is where Save As starts. Both must lie inside the server user's home folder.
+- **Save As.** Exporting into a chosen folder under a chosen name. In the browser it writes on the server and never overwrites; the desktop app uses the system's Save dialog.
+- **Lossy, lossless.** A lossless file decodes to exactly the pixels written (TIFF, PNG, lossless WebP). A lossy one (JPEG, WebP, AVIF) throws away detail the eye is said not to miss, which for glitch art includes single-pixel noise and hard stripes. **Quality** (1-100) sets how much is kept.
 - **Exact area coverage.** How rectangles and pen paths are filled: each pixel gets the share of its area inside the outline, computed by adding up signed areas along each row (as font rasterizers do), so edges are anti-aliased with no extra samples.
 - **Handle, pin.** A handle is a dot on the active shape (radial, linear, rectangle, pen point) that moves, resizes or turns it when dragged. A pin is the white dot that marks a shape that is not active; tapping it makes that one active. Both borrowed from Lightroom.
 - **Paint in / paint out.** The mask's `invert` switch in the GUI. Paint in: the glitch shows only where you paint. Paint out: everywhere except where you paint.
@@ -137,6 +140,9 @@ Terms from Phase 1 and 2a, when effects edited the compressed data inside a JPEG
 - **insta.** A snapshot-testing library. It stores expected outputs (here, hashes) in files next to the tests.
 - **just.** A small command runner, like `make` but simpler. The recipes live in `justfile`.
 - **libjpeg-turbo / TurboJPEG.** The JPEG library used by browsers and most viewers. TurboJPEG is its simple API. It is our JPEG decoder and encoder.
+- **WebP, libwebp.** Google's image format, lossy or lossless, and its reference library, built into glitchrx from source.
+- **AVIF, rav1e, ravif.** An image format built on the AV1 video codec; rav1e is a pure-Rust AV1 encoder and ravif wraps it for still images. Slow, and its **speed** setting (1-10) trades encoding time for file size. It stores colour as codes (primaries, transfer), not as an ICC profile.
+- **Display P3.** The wider colour space of Apple devices and most recent phones. Photos from them carry a Display P3 profile.
 - **png / tiff crates.** Pure-Rust PNG and TIFF readers and writers.
 - **proptest.** Property-based testing: it throws hundreds of random inputs at a rule (such as "an effect writes only inside its windows") and shrinks any failure to the smallest example.
 - **Svelte.** The frontend framework for the web GUI (Phase 2). It compiles to small plain JavaScript.

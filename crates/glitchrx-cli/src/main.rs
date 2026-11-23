@@ -270,7 +270,7 @@ fn output_format(cli: &Cli, output: Option<&Path>) -> Result<Format, Fail> {
         .unwrap_or_default();
     let named = Format::parse(&ext).ok_or_else(|| {
         Fail::Usage(format!(
-            "{}: unknown output extension (use .tif, .png or .jpg)",
+            "{}: unknown output extension (use .tif, .png, .jpg, .webp or .avif)",
             out.display()
         ))
     })?;
@@ -289,7 +289,21 @@ fn process(cli: &Cli, recipe: &Recipe, master_seed: Option<u64>, job: &Job) -> R
     let bytes = fs::read(input).map_err(|e| Fail::Runtime(format!("{}: {e}", input.display())))?;
     let mut image = codec::decode(&bytes)?;
     recipe.apply(&mut image.raster)?;
-    let out_bytes = codec::encode(&image.raster, format, image.icc.as_deref())?;
+    let settings = codec::EncodeSettings {
+        quality: cli.quality,
+        lossless: cli.lossless,
+        speed: cli.avif_speed,
+    };
+    let out_bytes = codec::encode_with(&image.raster, format, image.icc.as_deref(), &settings)?;
+    if format == Format::Avif
+        && !glitchrx_core::avif::keeps_profile(image.icc.as_deref())
+        && !cli.quiet
+    {
+        eprintln!(
+            "glitchrx: {}: AVIF cannot carry this photo's colour profile; colours may shift (TIFF, PNG, JPEG and WebP keep it)",
+            input.display()
+        );
+    }
 
     let output = match &job.output {
         Some(o) => o.clone(),

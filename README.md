@@ -34,6 +34,8 @@ glitchrx --echo photo.jpg                       # writes photo-glitch.tif
 glitchrx --echo photo.jpg                       # again: photo-glitch-1.tif
 glitchrx --echo photo.jpg out.png               # explicit output; its extension sets the format
 glitchrx --echo --format jpeg photo.jpg         # photo-glitch.jpg
+glitchrx --echo --format webp --quality 85 photo.jpg   # smaller files; --lossless keeps every pixel
+glitchrx --echo --format avif --avif-speed 8 photo.jpg # smallest; slow to encode
 glitchrx --echo delay=0.33rows,decay=0.6 --reverb photo.jpg
 glitchrx --echo --encoding ulaw photo.jpg       # read the pixels as mu-law audio
 glitchrx --shift by=0.5rows,phase=2,hits=12 photo.jpg
@@ -52,7 +54,7 @@ photo-glitch.tif  (6240 x 4160, tiff, seed 81723)
 
 Re-run with `--seed` to reproduce a result you liked. Use `--save-recipe` to keep the whole chain in a small TOML file, and replay it later with `--recipe`.
 
-The output is TIFF by default: uncompressed 8-bit RGB, ready for masking in Photoshop. The colour profile of the original is written into every output, so colours match the original.
+The output is TIFF by default: uncompressed 8-bit RGB, ready for masking in Photoshop. PNG, JPEG, WebP and AVIF are also written (not read). The colour profile of the original is written into every output, so colours match the original. AVIF is the exception: it can only mark sRGB and Display P3 (most phone photos are one of the two), and warns when it drops another profile. Lossy formats (JPEG, WebP without `--lossless`, AVIF) smooth fine glitch texture a little. The same input, recipe, seed and settings give the same file every time, in every format.
 
 ### Encodings
 
@@ -114,7 +116,7 @@ All parameters are documented in `docs/effects.md`, which is generated from the 
 
 ```
 glitchrx serve                                   # http://127.0.0.1:7878, this machine only
-glitchrx serve --root ~/Pictures                 # also browse, open and save photos there
+glitchrx serve --root ~/Pictures                 # browse this folder, whatever Settings says
 glitchrx serve --host 0.0.0.0 --token --root ~/Pictures   # from a phone over LAN or WireGuard
 ```
 
@@ -123,7 +125,7 @@ glitchrx serve --host 0.0.0.0 --token --root ~/Pictures   # from a phone over LA
 **On a phone, add it to the home screen** (Safari: Share, then Add to Home Screen). It then opens full screen with its own icon, like an app. The home-screen app may keep its own cookies, so it can ask for the token once. Exports open the share sheet (Save Image, Save to Files, AirDrop) through a Save button in the status bar.
 
 In the GUI:
-- **Open** a photo from your device (it is sent to your own server, nowhere else) or, with `--root`, from the server's folders. If steps are already in the stack, you are asked whether to keep them or start fresh (undoable; "Don't ask again" is changeable in Presets).
+- **Open** a photo from your device (it is sent to your own server, nowhere else) or from the server's library folder (chosen in Settings, or `--root`). If steps are already in the stack, you are asked whether to keep them or start fresh (undoable; "Don't ask again" is changeable in Settings).
 - **Pick the encoding** for the whole recipe (and mono, stereo or RGB) at the top. Any step can override both.
 - **Add steps** by tapping an effect in the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter), data effects (invert, bitcrush, backwards, shift, shuffle) and pixel effects (pixelsort). On a phone the palette sits behind the floating + button. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
 - **Placement** (`region`, `hits`, `len`) is always shown on each step. Dragging the region's two handles shades the preview outside the band it covers.
@@ -133,7 +135,8 @@ In the GUI:
 - **Press and hold the photo** (or the `\` key) to see the untouched original; while masking, hold the compare button in the top bar instead.
 - **Zoom** with a pinch, ctrl + wheel or a trackpad pinch; double-tap, tap the magnifier or press Z for 100% and back. Zoomed in, drag (or use the wheel) to pan. Once the view holds still, what is on screen is cut from the full-resolution render, so it is sharp and exactly the export. While masking, one finger paints and two fingers zoom and pan; the brush keeps its size on screen, so zooming in paints finer lines.
 - **Undo and redo** with the buttons or Ctrl+Z / Ctrl+Shift+Z. History holds recipes, not images.
-- **Export** at full resolution as TIFF, PNG or JPEG. With `--root`, results can be saved next to the original using the CLI's `-glitch`, `-glitch-1` naming. Nothing is overwritten. The recipe can be downloaded, then loaded again later or replayed with `glitchrx --recipe`.
+- **Export** at full resolution as TIFF, PNG, JPEG (with quality), WebP (quality, or lossless) or AVIF (quality and speed; slow). Download it to this device, save it next to an original from the library using the CLI's `-glitch`, `-glitch-1` naming, or **Save As** into any folder in the server's home folder under a name you choose. Nothing is ever overwritten. The format and its settings are remembered on each device. The recipe can be downloaded, then loaded again later or replayed with `glitchrx --recipe`.
+- **Settings** (the gear): light, dark or system appearance; the library folder (what Open browses) and the export folder (where Save As starts), picked from the server's home folder and kept in `~/.config/glitchrx/config.toml` for every device; and what opening another photo does with the steps.
 
 While you change things, the preview runs the recipe on a copy of the photo shrunk to your screen, with every size scaled to match, so even a 26 MP photo answers quickly. That copy is close to the export but not identical, because pixel-level texture cannot shrink with the picture. So once you stop for a moment the preview settles to an exact render: the recipe at full resolution, shrunk to fit, which is exactly what export gives (0.3 to 1.6 s on a 26 MP photo). The status bar says whether the view is approximate or exact. A newer change cancels a render that is still running, and a live preview that runs over 3 s stops with a "too heavy to preview live" notice (export still works).
 

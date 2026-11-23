@@ -77,8 +77,12 @@ pub enum FormatArg {
     Tiff,
     /// Lossless PNG.
     Png,
-    /// JPEG, quality 95, full chroma.
+    /// JPEG, full chroma (quality 95 unless --quality).
     Jpeg,
+    /// WebP: lossy (quality 90 unless --quality) or --lossless.
+    Webp,
+    /// AVIF (quality 80, speed 6 unless --quality, --avif-speed).
+    Avif,
 }
 
 impl From<FormatArg> for Format {
@@ -87,6 +91,8 @@ impl From<FormatArg> for Format {
             FormatArg::Tiff => Format::Tiff,
             FormatArg::Png => Format::Png,
             FormatArg::Jpeg => Format::Jpeg,
+            FormatArg::Webp => Format::Webp,
+            FormatArg::Avif => Format::Avif,
         }
     }
 }
@@ -130,6 +136,20 @@ pub struct Cli {
     /// A named output's extension decides its format.
     #[arg(long, value_enum, value_name = "FORMAT")]
     pub format: Option<FormatArg>,
+
+    /// Quality for JPEG, lossy WebP and AVIF, 1 to 100. Lossy formats
+    /// smooth fine glitch texture; TIFF, PNG and lossless WebP keep it.
+    #[arg(long, value_name = "1-100", value_parser = clap::value_parser!(u8).range(1..=100))]
+    pub quality: Option<u8>,
+
+    /// WebP: lossless instead of lossy.
+    #[arg(long)]
+    pub lossless: bool,
+
+    /// AVIF: 1 (slowest, smallest file) to 10 (fastest) [default: 6].
+    /// (Not `--speed`, which is the Change Speed effect.)
+    #[arg(long, value_name = "1-10", value_parser = clap::value_parser!(u8).range(1..=10))]
+    pub avif_speed: Option<u8>,
 
     /// How steps read the pixels as audio samples [default: u8]. A step can
     /// override it with encoding=... in its parameters.

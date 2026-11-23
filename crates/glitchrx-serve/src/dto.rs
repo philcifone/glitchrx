@@ -247,6 +247,10 @@ pub struct DocDto {
     /// The EXIF orientation that was applied (1 = none).
     pub orientation: u8,
     pub has_icc: bool,
+    /// The colour profile's name, when it has one.
+    pub profile: Option<String>,
+    /// AVIF export keeps these colours (no profile, sRGB or Display P3).
+    pub avif_keeps_profile: bool,
     pub file_len: usize,
     /// Raw RGB bytes the effects work on.
     pub raw_len: usize,
@@ -263,6 +267,11 @@ impl DocDto {
             format: img.format.name(),
             orientation: img.orientation,
             has_icc: img.icc.is_some(),
+            profile: img
+                .icc
+                .as_deref()
+                .and_then(glitchrx_core::avif::profile_name),
+            avif_keeps_profile: glitchrx_core::avif::keeps_profile(img.icc.as_deref()),
             file_len,
             raw_len: img.raster.bytes.len(),
         }

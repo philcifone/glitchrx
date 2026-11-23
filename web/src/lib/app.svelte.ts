@@ -25,13 +25,15 @@ import {
 import { usesSamples } from './palette';
 import { usesSeed } from './seed';
 import { shakeParams } from './shake';
+import { storageGet, storageSet } from './storage';
 import { toggleSmooth } from './shapes';
 import { FIT, clampView, geometry, isZoomed, toggle, visible, type Geometry, type Point, type Rect, type View } from './view';
 import type {
   Channels,
   DocInfo,
   EffectInfo,
-  ExportFormat,
+  ExportOptions,
+  FolderSettings,
   Mask,
   MaskMode,
   MaskOp,
@@ -106,22 +108,6 @@ function normalize(r: Partial<RecipeState>, known: (effect: string) => boolean):
       .filter((s) => known(s.effect))
       .map((s) => (s.mask ? { ...s, mask: migrateMask(s.mask) } : s)),
   };
-}
-
-/** localStorage can throw (private mode, blocked storage); never let it break the app. */
-function storageGet(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-function storageSet(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // Persistence is a convenience only.
-  }
 }
 
 interface Box {
@@ -1222,12 +1208,17 @@ export class App {
     return `${name.replace(/\.[^.]*$/, '')}-glitch`;
   }
 
-  async download(format: ExportFormat): Promise<void> {
+  /** What the status bar says while an export renders and encodes. */
+  private exporting(opts: ExportOptions): string {
+    return opts.format === 'avif' ? 'Rendering and encoding AVIF (slow)' : 'Rendering full resolution';
+  }
+
+  async download(opts: ExportOptions): Promise<void> {
     const doc = this.doc;
     if (!doc) return;
-    this.working = 'Rendering full resolution';
+    this.working = this.exporting(opts);
     try {
-      const { blob, name } = await api.exportFile(doc.id, this.dto(), format);
+      const { blob, name } = await api.exportFile(doc.id, this.dto(), opts);
       this.deliver(blob, name);
     } catch (e) {
       this.fail(e);
@@ -1237,12 +1228,12 @@ export class App {
   }
 
   /** Desktop app: the system's Save dialog, then a full-resolution render. */
-  async saveAs(format: ExportFormat, withRecipe: boolean): Promise<void> {
+  async saveAs(opts: ExportOptions, withRecipe: boolean): Promise<void> {
     const doc = this.doc;
     if (!doc) return;
-    this.working = 'Rendering full resolution';
+    this.working = this.exporting(opts);
     try {
-      const r = await api.saveAs(doc.id, this.dto(), format, withRecipe);
+      const r = await api.saveAs(doc.id, this.dto(), opts, withRecipe);
       if (r) {
         const names = r.saved.map((p) => p.split('/').pop());
         this.flash(`Saved ${names.join(', ')}${r.skipped.length ? `; ${r.skipped.join('; ')}` : ''}`);
@@ -1254,17 +1245,58 @@ export class App {
     }
   }
 
-  async saveOnServer(format: ExportFormat, withRecipe: boolean): Promise<void> {
+  async saveOnServer(opts: ExportOptions, withRecipe: boolean): Promise<void> {
     const doc = this.doc;
     if (!doc) return;
-    this.working = 'Saving on the server';
+    this.working = this.exporting(opts);
     try {
-      const saved = await api.saveOnServer(doc.id, this.dto(), format, withRecipe);
+      const saved = await api.saveOnServer(doc.id, this.dto(), opts, withRecipe);
       this.flash(`Saved ${saved.join(', ')}`);
     } catch (e) {
       this.fail(e);
     } finally {
       this.working = null;
+    }
+  }
+
+  /** Save As into a folder under the server's home folder (never overwrites). */
+  async saveTo(opts: ExportOptions, folder: string, name: string, withRecipe: boolean): Promise<void> {
+    const doc = this.doc;
+    if (!doc) return;
+    this.working = this.exporting(opts);
+    try {
+      const saved = await api.saveTo(doc.id, this.dto(), opts, folder, name, withRecipe);
+      this.flash(`Saved ${saved.join(', ')}`);
+    } catch (e) {
+      this.fail(e);
+    } finally {
+      this.working = null;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Settings: the library and export folders (on the server, for every
+  // device), loaded when the sheet opens.
+
+  folderSettings = $state<FolderSettings | null>(null);
+
+  async loadSettings(): Promise<void> {
+    if (!this.config?.settings) return;
+    try {
+      this.folderSettings = await api.getSettings();
+    } catch (e) {
+      this.fail(e);
+    }
+  }
+
+  /** Choose a folder. A new library is what Open browses from now on. */
+  async setFolder(which: 'library' | 'export', path: string | null): Promise<void> {
+    const cur = this.folderSettings ?? { library: null, export: null };
+    try {
+      this.folderSettings = await api.putSettings({ ...cur, [which]: path });
+      if (which === 'library') this.config = await api.getConfig();
+    } catch (e) {
+      this.fail(e);
     }
   }
 

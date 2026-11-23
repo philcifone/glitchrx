@@ -1,7 +1,8 @@
-// Dark/light toggle. With no choice saved, the system setting applies (CSS
-// prefers-color-scheme); a choice is stored per browser and set on <html>.
+// Light, dark, or the system's (CSS prefers-color-scheme). A choice is
+// stored per browser and set on <html>; System clears it.
 
 export type Theme = 'dark' | 'light';
+export type ThemeChoice = Theme | 'system';
 const KEY = 'glitchrx.theme';
 
 /** Bar colour per theme (--card), for the browser and iOS status bar. */
@@ -33,14 +34,31 @@ export function applySavedTheme(): void {
   }
 }
 
-export function toggleTheme(): Theme {
-  const next: Theme = currentTheme() === 'dark' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = next;
-  syncThemeColor(next);
+
+/** The saved choice, or system. */
+export function themeChoice(): ThemeChoice {
+  const set = document.documentElement.dataset.theme;
+  return set === 'dark' || set === 'light' ? set : 'system';
+}
+
+/** Light, dark, or back to following the system. */
+export function setTheme(choice: ThemeChoice): void {
+  const root = document.documentElement;
   try {
-    localStorage.setItem(KEY, next);
+    if (choice === 'system') localStorage.removeItem(KEY);
+    else localStorage.setItem(KEY, choice);
   } catch {
     // Not persisted; fine.
   }
-  return next;
+  if (choice === 'system') {
+    delete root.dataset.theme;
+    // Each scheme's own bar colour again.
+    document.querySelectorAll('meta[name="theme-color"]').forEach((m) => {
+      const media = m.getAttribute('media') ?? '';
+      m.setAttribute('content', BAR[media.includes('dark') ? 'dark' : 'light']);
+    });
+  } else {
+    root.dataset.theme = choice;
+    syncThemeColor(choice);
+  }
 }

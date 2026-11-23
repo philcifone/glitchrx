@@ -98,7 +98,28 @@ fn output_extension_decides_the_format() {
         )),
         2
     );
-    assert_eq!(code(&run(d.path(), &["--echo", "photo.jpg", "x.webp"])), 2);
+    assert_eq!(code(&run(d.path(), &["--echo", "photo.jpg", "x.gif"])), 2);
+
+    // WebP and AVIF are written (not read), with their settings.
+    let webp = |name: &str, extra: &[&str]| {
+        let mut args = vec!["--echo", "--seed", "7", "photo.jpg", name];
+        args.extend_from_slice(extra);
+        let o = run(d.path(), &args);
+        assert_eq!(code(&o), 0, "{name}: {}", stderr(&o));
+        fs::read(d.path().join(name)).unwrap()
+    };
+    let lossy = webp("d.webp", &["--quality", "20"]);
+    let lossless = webp("e.webp", &["--lossless"]);
+    assert_eq!(&lossy[8..12], b"WEBP");
+    assert!(lossy.len() < lossless.len());
+    assert_eq!(webp("f.webp", &["--lossless"]), lossless, "deterministic");
+    let avif = webp("g.avif", &["--avif-speed", "10"]);
+    assert_eq!(&avif[4..12], b"ftypavif");
+    // Out of range settings are usage errors.
+    for bad in [["--quality", "0"], ["--avif-speed", "11"]] {
+        let o = run(d.path(), &["--echo", "photo.jpg", "h.avif", bad[0], bad[1]]);
+        assert_eq!(code(&o), 2, "{bad:?}");
+    }
 }
 
 #[test]

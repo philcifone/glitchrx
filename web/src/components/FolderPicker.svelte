@@ -1,0 +1,165 @@
+<script lang="ts">
+  // Pick a folder on the server, inside its home folder (SPEC 4c): for the
+  // library, the export folder and Save As. Folders only. `pick` resolves
+  // with the chosen folder (relative to home, "" for home itself), or null
+  // if cancelled.
+  import Folder from '@lucide/svelte/icons/folder';
+  import ChevronLeft from '@lucide/svelte/icons/chevron-left';
+  import * as api from '../lib/api';
+  import type { FolderListing } from '../lib/types';
+
+  let dialog: HTMLDialogElement;
+  let title = $state('Choose a folder');
+  let listing = $state<FolderListing | null>(null);
+  let error = $state<string | null>(null);
+  let resolve: ((path: string | null) => void) | null = null;
+
+  /** Show the picker at `start` (or home). */
+  export function pick(heading: string, start: string | null): Promise<string | null> {
+    title = heading;
+    listing = null;
+    dialog.showModal();
+    void go(start ?? '', true);
+    return new Promise((r) => (resolve = r));
+  }
+
+  async function go(path: string, fallBack = false) {
+    try {
+      listing = await api.folders(path);
+      error = null;
+    } catch (e) {
+      // A remembered folder that has gone: start from home instead.
+      if (fallBack && path) return go('');
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  function finish(path: string | null) {
+    resolve?.(path);
+    resolve = null;
+    dialog.close();
+  }
+
+  const crumbs = $derived.by(() => {
+    if (!listing) return [];
+    const parts = listing.path ? listing.path.split('/') : [];
+    return parts.map((name, i) => ({ name, path: parts.slice(0, i + 1).join('/') }));
+  });
+</script>
+
+<dialog bind:this={dialog} aria-labelledby="folder-title" onclose={() => finish(null)}>
+  <div class="head">
+    <button class="plain" onclick={() => finish(null)}>Cancel</button>
+    <h2 id="folder-title">{title}</h2>
+    <button class="plain strong" onclick={() => finish(listing?.path ?? null)} disabled={!listing}>Choose</button>
+  </div>
+  <div class="body">
+    <nav class="crumbs" aria-label="Folder">
+      <button class="link" onclick={() => go('')}>Home</button>
+      {#each crumbs as c (c.path)}
+        <span class="dim">/</span>
+        <button class="link" onclick={() => go(c.path)}>{c.name}</button>
+      {/each}
+    </nav>
+    {#if error}
+      <p class="err">{error}</p>
+    {:else if listing}
+      <ul class="list">
+        {#if listing.parent !== null}
+          <li>
+            <button onclick={() => go(listing!.parent ?? '')}><ChevronLeft size={16} strokeWidth={1.75} /> Up</button>
+          </li>
+        {/if}
+        {#each listing.dirs as d (d.path)}
+          <li><button onclick={() => go(d.path)}><Folder size={16} strokeWidth={1.75} /> {d.name}</button></li>
+        {/each}
+      </ul>
+      {#if !listing.dirs.length}<p class="dim small">No folders inside this one.</p>{/if}
+      <p class="dim small">Choose takes the folder you are in: ~/{listing.path}</p>
+    {/if}
+  </div>
+</dialog>
+
+<style>
+  .head {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    border-bottom: var(--hairline);
+  }
+
+  .head h2 {
+    font-size: 1.1rem;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .strong {
+    font-weight: 600;
+  }
+
+  .body {
+    padding: var(--pad);
+    overflow-y: auto;
+    max-height: calc(100dvh - 120px);
+  }
+
+  .crumbs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    margin-bottom: 10px;
+    font-size: 0.9rem;
+  }
+
+  .link {
+    background: none;
+    padding: 2px 6px;
+    min-height: 30px;
+    color: var(--accent);
+  }
+
+  .list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--card);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .list li + li {
+    border-top: var(--hairline);
+  }
+
+  .list button {
+    width: 100%;
+    justify-content: flex-start;
+    gap: 10px;
+    border-radius: 0;
+    background: none;
+    font-weight: 400;
+    min-height: 44px;
+  }
+
+  .list :global(svg) {
+    color: var(--accent);
+    flex: none;
+  }
+
+  .small {
+    font-size: 0.85rem;
+    margin: 10px 0 0;
+  }
+
+  .err {
+    color: var(--danger);
+  }
+</style>

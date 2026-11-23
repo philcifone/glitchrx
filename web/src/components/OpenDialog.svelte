@@ -1,5 +1,6 @@
 <script lang="ts">
-  // Open a photo: upload from this device, or browse the server's --root.
+  // Open a photo: upload from this device, or browse the server's library
+  // (the folder chosen in Settings, or --root).
   import Upload from '@lucide/svelte/icons/upload';
   import Folder from '@lucide/svelte/icons/folder';
   import { app } from '../lib/app.svelte';
@@ -11,9 +12,16 @@
   let listing = $state<Listing | null>(null);
   let browseError = $state<string | null>(null);
 
+  /** The library the listing came from; a new one (Settings) starts over. */
+  let listedRoot: string | null = null;
+
   export function show(): void {
     dialog.showModal();
-    if (app.config?.browse && !listing) void go('');
+    const root = app.config?.root_name ?? null;
+    if (app.config?.browse && (!listing || listedRoot !== root)) {
+      listedRoot = root;
+      void go('');
+    }
   }
 
   async function go(path: string) {
@@ -103,7 +111,9 @@
         {/if}
       </section>
     {:else}
-      <p class="dim small">Start the server with <code>--root DIR</code> to open and save photos on the server.</p>
+      <p class="dim small">
+        To open photos stored on the server, choose a library folder in Settings{app.config?.settings ? '' : ' (or start it with --root DIR)'}.
+      </p>
     {/if}
   </div>
 </dialog>

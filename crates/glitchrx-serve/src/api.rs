@@ -5,7 +5,7 @@
 //! blocking pool and never stalls the async workers.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use axum::body::{Body, Bytes};
@@ -27,6 +27,7 @@ use crate::docs::{Doc, Store, random_hex};
 use crate::dto::{self, DocDto, RecipeDto};
 use crate::presets::{PresetError, PresetInfo, Presets};
 use crate::render::{self, Format};
+use crate::settings::{Settings, SettingsStore};
 
 /// Largest upload accepted. Full-frame camera JPEGs are 10-40 MB, and
 /// uncompressed TIFFs of the same photos 70-150 MB.
@@ -39,8 +40,16 @@ const TOKEN_COOKIE: &str = "glitchrx_token";
 /// Shared server state.
 pub struct AppState {
     pub store: Store,
-    /// Canonical `--root`, if browsing server files is enabled.
-    pub root: Option<PathBuf>,
+    /// The canonical folder Open browses and Save next to original writes
+    /// in: `--root`, else the library folder from Settings. None turns
+    /// server browsing off.
+    root: RwLock<Option<PathBuf>>,
+    /// The root came from `--root` (or the desktop app), so Settings does
+    /// not change it.
+    root_fixed: bool,
+    /// The library and export folders; off unless a settings file is given
+    /// (tests never touch the user's real one).
+    pub settings: Option<SettingsStore>,
     /// Shared access token, if one is required.
     pub token: Option<String>,
     /// Time limit for a live preview; an exact preview gets ten times this.
@@ -56,7 +65,9 @@ impl AppState {
     pub fn new(root: Option<PathBuf>, token: Option<String>) -> AppState {
         AppState {
             store: Store::new(MAX_DOCS),
-            root,
+            root_fixed: root.is_some(),
+            root: RwLock::new(root),
+            settings: None,
             token,
             preview_budget: PREVIEW_BUDGET,
             dialogs: None,
@@ -68,6 +79,25 @@ impl AppState {
     pub fn with_presets(mut self, dir: PathBuf) -> AppState {
         self.presets = Some(Presets::new(dir));
         self
+    }
+
+    /// Keep the library and export folders in `store`. Without a fixed
+    /// root, its library becomes the root.
+    pub fn with_settings(mut self, store: SettingsStore) -> AppState {
+        if !self.root_fixed {
+            self.set_root(store.get().library);
+        }
+        self.settings = Some(store);
+        self
+    }
+
+    /// The folder Open browses, if any.
+    pub fn current_root(&self) -> Option<PathBuf> {
+        self.root.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    fn set_root(&self, root: Option<PathBuf>) {
+        *self.root.write().unwrap_or_else(|e| e.into_inner()) = root;
     }
 
     /// Enable the native Open and Save dialogs (the desktop app).
@@ -93,6 +123,10 @@ pub fn router(state: AppState) -> Router {
         .route("/docs/{id}/export", post(export))
         .route("/docs/{id}/save", post(save))
         .route("/docs/{id}/save-as", post(save_as))
+        .route("/docs/{id}/save-to", post(save_to))
+        .route("/docs/{id}/suggest", post(suggest_name))
+        .route("/settings", get(get_settings).put(put_settings))
+        .route("/folders", get(folders))
         .route("/desktop/open", post(desktop_open))
         .route("/presets", get(list_presets))
         .route(
@@ -193,18 +227,19 @@ fn find(st: &AppState, id: &str) -> ApiResult<Arc<Doc>> {
     })
 }
 
-fn root(st: &AppState) -> ApiResult<&std::path::Path> {
-    st.root.as_deref().ok_or_else(|| {
+fn root(st: &AppState) -> ApiResult<PathBuf> {
+    st.current_root().ok_or_else(|| {
         ApiError::new(
             StatusCode::NOT_FOUND,
-            "server browsing is off (start with --root DIR)",
+            "server browsing is off (choose a library folder in Settings, or start with --root DIR)",
         )
     })
 }
 
 fn doc_dto(st: &AppState, doc: &Doc) -> DocDto {
-    let path = match (&st.root, &doc.source) {
-        (Some(r), Some(s)) => Some(browse::relative(r, s)),
+    // Only a photo inside the current root can be saved next to.
+    let path = match (st.current_root(), &doc.source) {
+        (Some(r), Some(s)) if s.starts_with(&r) => Some(browse::relative(&r, s)),
         _ => None,
     };
     DocDto::new(&doc.id, &doc.name, path, doc.file_len, &doc.image)
@@ -392,13 +427,16 @@ struct ConfigDto {
     desktop: bool,
     /// Saved presets are available.
     presets: bool,
+    /// The Settings sheet can choose library and export folders.
+    settings: bool,
 }
 
 async fn config(State(st): State<Shared>) -> Json<ConfigDto> {
+    let root = st.current_root();
     Json(ConfigDto {
         version: env!("CARGO_PKG_VERSION"),
-        browse: st.root.is_some(),
-        root_name: st.root.as_ref().map(|r| {
+        browse: root.is_some(),
+        root_name: root.as_ref().map(|r| {
             r.file_name().map_or_else(
                 || r.display().to_string(),
                 |n| n.to_string_lossy().into_owned(),
@@ -408,6 +446,7 @@ async fn config(State(st): State<Shared>) -> Json<ConfigDto> {
         encodings: dto::encodings(),
         desktop: st.dialogs.is_some(),
         presets: st.presets.is_some(),
+        settings: st.settings.is_some(),
     })
 }
 
@@ -458,7 +497,7 @@ struct OpenRequest {
 
 /// Open a photo from `--root`.
 async fn open(State(st): State<Shared>, Json(req): Json<OpenRequest>) -> ApiResult<Json<DocDto>> {
-    let path = browse::resolve(root(&st)?, &req.path)?;
+    let path = browse::resolve(&root(&st)?, &req.path)?;
     if !path.is_file() || !browse::is_photo(&path) {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "not a photo"));
     }
@@ -708,9 +747,34 @@ async fn mask_view(
 struct ExportRequest {
     recipe: RecipeDto,
     format: Format,
-    /// Save mode only: also write the recipe as TOML next to the output.
+    /// JPEG, lossy WebP and AVIF quality, 1..=100 (default per format).
+    #[serde(default)]
+    quality: Option<u8>,
+    /// WebP: lossless.
+    #[serde(default)]
+    lossless: bool,
+    /// AVIF: 1 (slowest, smallest) to 10 (fastest).
+    #[serde(default)]
+    speed: Option<u8>,
+    /// Save modes only: also write the recipe as TOML next to the output.
     #[serde(default)]
     with_recipe: bool,
+}
+
+impl ExportRequest {
+    fn settings(&self) -> ApiResult<codec::EncodeSettings> {
+        if self.quality.is_some_and(|q| !(1..=100).contains(&q)) {
+            return Err(ApiError::bad("quality must be 1 to 100"));
+        }
+        if self.speed.is_some_and(|q| !(1..=10).contains(&q)) {
+            return Err(ApiError::bad("speed must be 1 to 10"));
+        }
+        Ok(codec::EncodeSettings {
+            quality: self.quality,
+            lossless: self.lossless,
+            speed: self.speed,
+        })
+    }
 }
 
 /// File name for a download: `photo.jpg` -> `photo-glitch.tif`.
@@ -724,12 +788,18 @@ fn export_name(doc_name: &str, format: Format) -> String {
 }
 
 /// Bend the full image and encode it, keeping the colour profile.
-fn export_bytes(doc: &Doc, recipe: &Recipe, format: Format) -> ApiResult<Vec<u8>> {
+fn export_bytes(
+    doc: &Doc,
+    recipe: &Recipe,
+    format: Format,
+    settings: &codec::EncodeSettings,
+) -> ApiResult<Vec<u8>> {
     let raster = doc.render_full(recipe, NEVER)?;
-    Ok(codec::encode(
+    Ok(codec::encode_with(
         &raster,
         format.into(),
         doc.image.icc.as_deref(),
+        settings,
     )?)
 }
 
@@ -742,8 +812,9 @@ async fn export(
 ) -> ApiResult<Response> {
     let doc = find(&st, &id)?;
     let recipe = req.recipe.to_recipe()?;
+    let settings = req.settings()?;
     blocking(move || {
-        let bytes = export_bytes(&doc, &recipe, req.format)?;
+        let bytes = export_bytes(&doc, &recipe, req.format, &settings)?;
         let name = export_name(&doc.name, req.format);
         // RFC 6266: an ASCII fallback plus the exact UTF-8 name.
         let ascii: String = name
@@ -802,7 +873,7 @@ async fn save(
     Path(id): Path<String>,
     Json(req): Json<ExportRequest>,
 ) -> ApiResult<Json<Saved>> {
-    let root = root(&st)?.to_path_buf();
+    let root = root(&st)?;
     let doc = find(&st, &id)?;
     let Some(source) = doc.source.clone() else {
         return Err(ApiError::bad(
@@ -810,8 +881,9 @@ async fn save(
         ));
     };
     let recipe = req.recipe.to_recipe()?;
+    let settings = req.settings()?;
     blocking(move || {
-        let bytes = export_bytes(&doc, &recipe, req.format)?;
+        let bytes = export_bytes(&doc, &recipe, req.format, &settings)?;
         let ext = codec::Format::from(req.format).extension();
         let out = auto_output(&source, ext).map_err(|e| ApiError::internal(e.to_string()))?;
         let write = |path: &std::path::Path, data: &[u8]| {
@@ -895,6 +967,7 @@ async fn save_as(
     let dialogs = dialogs(&st)?;
     let doc = find(&st, &id)?;
     let recipe = req.recipe.to_recipe()?;
+    let settings = req.settings()?;
     blocking(move || {
         let ext = codec::Format::from(req.format).extension();
         let (dir, name) = match &doc.source {
@@ -913,7 +986,7 @@ async fn save_as(
         // An uploaded photo has no file on disk; an empty path matches
         // nothing, so only the "never the input" check is skipped.
         let source = doc.source.clone().unwrap_or_default();
-        let bytes = export_bytes(&doc, &recipe, req.format)?;
+        let bytes = export_bytes(&doc, &recipe, req.format, &settings)?;
         write_output(&source, &out, &bytes, true)
             .map_err(|e| ApiError::new(StatusCode::CONFLICT, e.to_string()))?;
         let mut saved = vec![out.display().to_string()];
@@ -928,6 +1001,203 @@ async fn save_as(
         Ok(Json(SavedAs { saved, skipped }).into_response())
     })
     .await
+}
+
+// ---------------------------------------------------------------------------
+// Settings (SPEC 4c): the library and export folders, and Save As into a
+// folder. Folders travel as paths relative to the home directory.
+
+fn settings(st: &AppState) -> ApiResult<&SettingsStore> {
+    st.settings
+        .as_ref()
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "settings are off on this server"))
+}
+
+#[derive(Serialize, Deserialize)]
+struct SettingsDto {
+    /// Relative to home ("" is home itself); null when not chosen.
+    library: Option<String>,
+    export: Option<String>,
+    /// When `--root` decides what Open browses: its name, for display.
+    #[serde(default, skip_deserializing)]
+    fixed_root: Option<String>,
+}
+
+fn settings_dto(st: &AppState, store: &SettingsStore) -> SettingsDto {
+    let v = store.get();
+    SettingsDto {
+        library: v.library.as_deref().map(|p| store.relative(p)),
+        export: v.export.as_deref().map(|p| store.relative(p)),
+        fixed_root: st
+            .root_fixed
+            .then(|| st.current_root().map(|r| r.display().to_string()))
+            .flatten(),
+    }
+}
+
+async fn get_settings(State(st): State<Shared>) -> ApiResult<Json<SettingsDto>> {
+    Ok(Json(settings_dto(&st, settings(&st)?)))
+}
+
+/// Choose the folders. Each must exist inside home; the file is written
+/// and, unless `--root` is fixed, Open browses the new library at once.
+async fn put_settings(
+    State(st): State<Shared>,
+    Json(req): Json<SettingsDto>,
+) -> ApiResult<Json<SettingsDto>> {
+    let store = settings(&st)?;
+    let pick = |rel: &Option<String>| -> ApiResult<Option<PathBuf>> {
+        rel.as_deref()
+            .map(|r| {
+                store
+                    .folder(r)
+                    .map_err(|_| ApiError::bad(format!("{r}: not a folder in your home folder")))
+            })
+            .transpose()
+    };
+    let values = Settings {
+        library: pick(&req.library)?,
+        export: pick(&req.export)?,
+    };
+    store
+        .set(values.clone())
+        .map_err(|e| ApiError::internal(format!("could not save the settings: {e}")))?;
+    if !st.root_fixed {
+        st.set_root(values.library);
+    }
+    Ok(Json(settings_dto(&st, store)))
+}
+
+#[derive(Serialize)]
+struct Folders {
+    /// This folder, relative to home.
+    path: String,
+    parent: Option<String>,
+    dirs: Vec<browse::Entry>,
+}
+
+/// The folders inside a folder under home, for picking the library and
+/// export folders. Folders only; hidden ones are left out.
+async fn folders(State(st): State<Shared>, Query(q): Query<PathQuery>) -> ApiResult<Json<Folders>> {
+    let home = settings(&st)?.home().to_path_buf();
+    blocking(move || {
+        let l = browse::list(&home, &q.path)?;
+        Ok(Json(Folders {
+            path: l.path,
+            parent: l.parent,
+            dirs: l.dirs,
+        }))
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct SaveToRequest {
+    #[serde(flatten)]
+    export: ExportRequest,
+    /// Relative to home.
+    folder: String,
+    /// The file name; the format's extension is added unless it is there.
+    name: String,
+}
+
+/// A file name typed in the browser, made safe: one path component, no
+/// hidden files, with the format's extension.
+fn file_name(name: &str, ext: &str) -> ApiResult<String> {
+    let clean = sanitize_name(name);
+    if clean.is_empty() || clean.starts_with('.') || clean != name.trim() || clean.len() > 200 {
+        return Err(ApiError::bad(
+            "a file name, without folders, not starting with a dot",
+        ));
+    }
+    let has_ext = std::path::Path::new(&clean)
+        .extension()
+        .is_some_and(|e| codec::Format::parse(&e.to_string_lossy()) == codec::Format::parse(ext));
+    Ok(if has_ext {
+        clean
+    } else {
+        format!("{clean}.{ext}")
+    })
+}
+
+/// Save As into a folder under home, with a name chosen in the browser.
+/// Never overwrites (409, so the dialog can ask for another name) and
+/// never writes the original.
+async fn save_to(
+    State(st): State<Shared>,
+    Path(id): Path<String>,
+    Json(req): Json<SaveToRequest>,
+) -> ApiResult<Json<Saved>> {
+    let store = settings(&st)?;
+    let doc = find(&st, &id)?;
+    let folder = store
+        .folder(&req.folder)
+        .map_err(|_| ApiError::bad(format!("{}: not a folder in your home folder", req.folder)))?;
+    let ext = codec::Format::from(req.export.format).extension();
+    let out = folder.join(file_name(&req.name, ext)?);
+    let recipe = req.export.recipe.to_recipe()?;
+    let encode = req.export.settings()?;
+    let (format, with_recipe) = (req.export.format, req.export.with_recipe);
+    let source = doc.source.clone().unwrap_or_default();
+    let shown = |p: &std::path::Path| format!("~/{}", store.relative(p));
+    let (out_shown, rpath) = (shown(&out), out.with_extension("recipe.toml"));
+    let recipe_shown = shown(&rpath);
+    // Refuse before the long render when the name is taken.
+    if std::fs::symlink_metadata(&out).is_ok() {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            format!("{out_shown} already exists; choose another name"),
+        ));
+    }
+    blocking(move || {
+        let bytes = export_bytes(&doc, &recipe, format, &encode)?;
+        let write = |path: &std::path::Path, data: &[u8]| {
+            write_output(&source, path, data, false)
+                .map_err(|e| ApiError::new(StatusCode::CONFLICT, e.to_string()))
+        };
+        write(&out, &bytes)?;
+        let mut saved = vec![out_shown];
+        if with_recipe {
+            write(&rpath, recipe.to_toml().as_bytes())?;
+            saved.push(recipe_shown);
+        }
+        Ok(Json(Saved { saved }))
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct SuggestRequest {
+    folder: String,
+    format: Format,
+}
+
+#[derive(Serialize)]
+struct Suggested {
+    /// The next free `-glitch` name in the folder, without the extension.
+    name: String,
+}
+
+/// The name Save As suggests: the photo's next free `-glitch` name in the
+/// chosen folder, as the CLI would pick it there.
+async fn suggest_name(
+    State(st): State<Shared>,
+    Path(id): Path<String>,
+    Json(req): Json<SuggestRequest>,
+) -> ApiResult<Json<Suggested>> {
+    let store = settings(&st)?;
+    let doc = find(&st, &id)?;
+    let folder = store
+        .folder(&req.folder)
+        .map_err(|_| ApiError::bad(format!("{}: not a folder in your home folder", req.folder)))?;
+    let ext = codec::Format::from(req.format).extension();
+    let out =
+        auto_output(&folder.join(&doc.name), ext).map_err(|e| ApiError::internal(e.to_string()))?;
+    let name = out
+        .file_stem()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    Ok(Json(Suggested { name }))
 }
 
 // ---------------------------------------------------------------------------
@@ -1007,13 +1277,13 @@ async fn browse_dir(
     State(st): State<Shared>,
     Query(q): Query<PathQuery>,
 ) -> ApiResult<Json<browse::Listing>> {
-    let root = root(&st)?.to_path_buf();
+    let root = root(&st)?;
     blocking(move || Ok(Json(browse::list(&root, &q.path)?))).await
 }
 
 /// A small JPEG thumbnail of a photo under `--root`.
 async fn thumb(State(st): State<Shared>, Query(q): Query<PathQuery>) -> ApiResult<Response> {
-    let path = browse::resolve(root(&st)?, &q.path)?;
+    let path = browse::resolve(&root(&st)?, &q.path)?;
     if !browse::is_photo(&path) {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "not a photo"));
     }

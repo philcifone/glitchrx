@@ -5,6 +5,9 @@ import type {
   DocInfo,
   EffectInfo,
   ExportFormat,
+  ExportOptions,
+  FolderListing,
+  FolderSettings,
   Listing,
   PresetInfo,
   RecipeDto,
@@ -176,9 +179,9 @@ export async function deletePreset(name: string): Promise<void> {
 export async function exportFile(
   docId: string,
   recipe: RecipeDto,
-  format: ExportFormat,
+  opts: ExportOptions,
 ): Promise<{ blob: Blob; name: string }> {
-  const res = await postJson(`/api/docs/${docId}/export`, { recipe, format });
+  const res = await postJson(`/api/docs/${docId}/export`, { recipe, ...opts });
   if (!res.ok) await fail(res);
   return { blob: await res.blob(), name: filenameOf(res) ?? 'glitch' };
 }
@@ -187,16 +190,49 @@ export async function exportFile(
 export async function saveOnServer(
   docId: string,
   recipe: RecipeDto,
-  format: ExportFormat,
+  opts: ExportOptions,
   withRecipe: boolean,
 ): Promise<string[]> {
   const res = await postJson(`/api/docs/${docId}/save`, {
     recipe,
-    format,
+    ...opts,
     with_recipe: withRecipe,
   });
   return (await json<{ saved: string[] }>(res)).saved;
 }
+
+/** Save As into a folder under the server's home folder; refuses to overwrite (409). */
+export async function saveTo(
+  docId: string,
+  recipe: RecipeDto,
+  opts: ExportOptions,
+  folder: string,
+  name: string,
+  withRecipe: boolean,
+): Promise<string[]> {
+  const res = await postJson(`/api/docs/${docId}/save-to`, { recipe, ...opts, folder, name, with_recipe: withRecipe });
+  return (await json<{ saved: string[] }>(res)).saved;
+}
+
+/** The next free -glitch name for this photo in a folder (no extension). */
+export async function suggestName(docId: string, folder: string, format: ExportFormat): Promise<string> {
+  const res = await postJson(`/api/docs/${docId}/suggest`, { folder, format });
+  return (await json<{ name: string }>(res)).name;
+}
+
+export const getSettings = async () => json<FolderSettings>(await fetch('/api/settings'));
+
+export async function putSettings(s: FolderSettings): Promise<FolderSettings> {
+  const res = await fetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ library: s.library, export: s.export }),
+  });
+  return json<FolderSettings>(res);
+}
+
+export const folders = async (path: string) =>
+  json<FolderListing>(await fetch(`/api/folders?path=${encodeURIComponent(path)}`));
 
 /** Desktop app: what Save as wrote, or skipped (an existing recipe file). */
 export interface SavedAs {
@@ -215,10 +251,10 @@ export async function desktopOpen(): Promise<DocInfo | null> {
 export async function saveAs(
   docId: string,
   recipe: RecipeDto,
-  format: ExportFormat,
+  opts: ExportOptions,
   withRecipe: boolean,
 ): Promise<SavedAs | null> {
-  const res = await postJson(`/api/docs/${docId}/save-as`, { recipe, format, with_recipe: withRecipe });
+  const res = await postJson(`/api/docs/${docId}/save-as`, { recipe, ...opts, with_recipe: withRecipe });
   if (res.status === 204) return null;
   return json<SavedAs>(res);
 }

@@ -13,6 +13,7 @@
 //! - [`browse`]: listing photos under `--root`, confined to it
 //! - [`dto`]: the JSON shapes the frontend uses
 //! - [`dialogs`]: native file dialogs, supplied by the desktop app
+//! - [`settings`]: the library and export folders, in `config.toml`
 
 pub mod api;
 mod assets;
@@ -22,6 +23,7 @@ pub mod docs;
 pub mod dto;
 pub mod presets;
 pub mod render;
+pub mod settings;
 
 use std::io;
 use std::net::{IpAddr, SocketAddr};
@@ -43,6 +45,9 @@ pub struct Config {
     pub token: Option<String>,
     /// Where saved presets live; none turns presets off.
     pub presets: Option<PathBuf>,
+    /// The settings file (library and export folders); none turns the
+    /// Settings sheet's folders off.
+    pub settings: Option<PathBuf>,
 }
 
 /// True when the frontend was built into this binary (not the placeholder).
@@ -78,9 +83,20 @@ pub fn serve(config: Config) -> io::Result<()> {
             .map_err(|e| io::Error::new(e.kind(), format!("cannot listen on {addr}: {e}")))?;
         let port = listener.local_addr()?.port();
         announce(&config, root.as_deref(), port);
-        let mut state = AppState::new(root, config.token.clone());
+        let mut state = AppState::new(root.clone(), config.token.clone());
         if let Some(dir) = &config.presets {
             state = state.with_presets(dir.clone());
+        }
+        if let (Some(file), Some(home)) = (&config.settings, settings::home_dir()) {
+            state = state.with_settings(settings::SettingsStore::open(file.clone(), &home)?);
+        }
+        if root.is_none()
+            && let Some(lib) = state.current_root()
+        {
+            eprintln!(
+                "  browsing and saving in {} (the library folder from Settings)",
+                lib.display()
+            );
         }
         let app = router(state);
         axum::serve(listener, app)
@@ -120,7 +136,9 @@ fn announce(config: &Config, root: Option<&std::path::Path>, port: u16) {
     }
     match root {
         Some(r) => eprintln!("  browsing and saving in {}", r.display()),
-        None => eprintln!("  server browsing off (add --root DIR to open and save files there)"),
+        None => {
+            eprintln!("  no --root: Open browses the library folder chosen in Settings, if any")
+        }
     }
     if !config.host.is_loopback() && config.token.is_none() {
         eprintln!(

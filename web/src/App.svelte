@@ -13,6 +13,7 @@
   import ExportDialog from './components/ExportDialog.svelte';
   import PresetsDialog from './components/PresetsDialog.svelte';
   import NewPhotoDialog from './components/NewPhotoDialog.svelte';
+  import SettingsDialog from './components/SettingsDialog.svelte';
 
   let openDialog: OpenDialog;
 
@@ -23,6 +24,7 @@
   }
   let exportDialog: ExportDialog;
   let presetsDialog: PresetsDialog;
+  let settingsDialog: SettingsDialog;
   let sheetExpanded = $state(false);
 
   onMount(() => {
@@ -109,7 +111,7 @@
   }}
   ondrop={onDrop}
 >
-  <TopBar onopen={open} onexport={() => exportDialog.show()} onpresets={() => presetsDialog.show()} />
+  <TopBar onopen={open} onexport={() => exportDialog.show()} onpresets={() => presetsDialog.show()} onsettings={() => settingsDialog.show()} />
   <main class="stage">
     <Preview onopen={open} />
   </main>
@@ -131,6 +133,7 @@
 <ExportDialog bind:this={exportDialog} />
 <PresetsDialog bind:this={presetsDialog} />
 <NewPhotoDialog />
+<SettingsDialog bind:this={settingsDialog} />
 
 <style>
   .app {
