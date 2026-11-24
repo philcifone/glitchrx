@@ -1615,3 +1615,143 @@ async fn pictures_from_a_project_take_its_name() {
             .contains("IMG_1-glitch-2.png")
     );
 }
+
+/// Download links: the export waits behind `/api/downloads/{id}/{name}`,
+/// named as typed, and the link needs no cookie (Firefox on iOS fetches
+/// it outside the page). Everything else still needs the token.
+#[tokio::test]
+async fn download_links_carry_the_name_and_their_own_secret() {
+    let app = app(None, Some("s3cret"));
+    let cookie = "glitchrx_token=s3cret";
+    let with_cookie = |mut r: Request<Body>| {
+        r.headers_mut()
+            .insert(header::COOKIE, cookie.parse().unwrap());
+        r
+    };
+    let (s, _, b) = send(
+        &app,
+        with_cookie(
+            Request::post("/api/docs?name=photo.jpg")
+                .body(Body::from(fixture("baseline-444.jpg")))
+                .unwrap(),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let id = json_of(&b)["id"].as_str().unwrap().to_string();
+    let export = |body: Value| {
+        let app = app.clone();
+        let req = with_cookie(post_json(&format!("/api/docs/{id}/export"), body));
+        async move { send(&app, req).await }
+    };
+
+    // The typed name, with the format's extension added.
+    let (s, _, b) = export(json!({"recipe": sample_recipe(), "format": "png",
+        "file_name": "my shot", "link": true}))
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let link = json_of(&b);
+    assert_eq!(link["name"], "my shot.png");
+    let url = link["url"].as_str().unwrap().to_string();
+    assert!(url.starts_with("/api/downloads/") && url.ends_with("/my%20shot.png"));
+
+    // Fetched without the cookie, twice.
+    for _ in 0..2 {
+        let (s, h, body) = send(&app, get(&url)).await;
+        assert_eq!(s, StatusCode::OK);
+        let cd = h[header::CONTENT_DISPOSITION].to_str().unwrap();
+        assert!(cd.contains("filename*=UTF-8''my%20shot.png"), "{cd}");
+        assert_eq!(h[header::CONTENT_TYPE], "image/png");
+        assert!(body.starts_with(b"\x89PNG"));
+    }
+    // A made-up id is not found; the bare prefix gives nothing away.
+    let (s, _, _) = send(
+        &app,
+        get("/api/downloads/0123456789abcdef0123456789abcdef/x.png"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    // Making a link needs the token.
+    let (s, _, _) = send(
+        &app,
+        Request::post("/api/downloads?name=r.recipe.toml")
+            .body(Body::from("x"))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+
+    // No name typed: the automatic one. A name with folders: refused.
+    let (_, _, b) =
+        export(json!({"recipe": sample_recipe(), "format": "jpeg", "link": true})).await;
+    assert_eq!(json_of(&b)["name"], "photo-glitch.jpg");
+    let (s, _, _) = export(json!({"recipe": sample_recipe(), "format": "png",
+        "file_name": "../up", "link": true}))
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    // Suggested for a download (no folder): the same automatic name.
+    let (s, _, b) = send(
+        &app,
+        with_cookie(post_json(
+            &format!("/api/docs/{id}/suggest"),
+            json!({"format": "png"}),
+        )),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(json_of(&b)["name"], "photo-glitch");
+
+    // A file made in the page (the recipe) gets a link of its own.
+    let (s, _, b) = send(
+        &app,
+        with_cookie(
+            Request::post("/api/downloads?name=photo-glitch.recipe.toml")
+                .header(header::CONTENT_TYPE, "application/toml")
+                .body(Body::from("version = 5\n"))
+                .unwrap(),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let url = json_of(&b)["url"].as_str().unwrap().to_string();
+    let (s, h, body) = send(&app, get(&url)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(h[header::CONTENT_TYPE], "application/toml");
+    assert_eq!(body, b"version = 5\n");
+}
+
+/// Save next to original with a typed name: that name, then -1, -2, ...;
+/// a recipe beside it must be free too. Nothing is overwritten.
+#[tokio::test]
+async fn save_next_to_original_takes_a_typed_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("pics");
+    fs::create_dir_all(root.join("trip")).unwrap();
+    fs::write(root.join("trip/photo.jpg"), fixture("baseline-444.jpg")).unwrap();
+    // Taken by a recipe alone: the picture name is free but its recipe is not.
+    fs::write(root.join("trip/mine-1.recipe.toml"), "x").unwrap();
+    let app = app(Some(root.canonicalize().unwrap()), None);
+    let (_, _, b) = send(
+        &app,
+        post_json("/api/docs/open", json!({"path": "trip/photo.jpg"})),
+    )
+    .await;
+    let id = json_of(&b)["id"].as_str().unwrap().to_string();
+    let save = json!({"recipe": sample_recipe(), "format": "png",
+        "with_recipe": true, "file_name": "mine"});
+    let mut saved = vec![];
+    for _ in 0..2 {
+        let (s, _, b) = send(
+            &app,
+            post_json(&format!("/api/docs/{id}/save"), save.clone()),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+        saved.push(json_of(&b)["saved"][0].as_str().unwrap().to_string());
+    }
+    assert_eq!(saved, ["trip/mine.png", "trip/mine-2.png"]);
+    assert_eq!(
+        fs::read_to_string(root.join("trip/mine-1.recipe.toml")).unwrap(),
+        "x"
+    );
+}

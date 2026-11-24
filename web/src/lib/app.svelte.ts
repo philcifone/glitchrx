@@ -415,11 +415,6 @@ export class App {
     return this.recipe.steps.some((s) => s.enabled);
   }
 
-  /** Whether "re-roll all" would change anything. */
-  get anySeeded(): boolean {
-    return this.recipe.steps.some((s) => s.enabled && this.seeded(s));
-  }
-
   // -------------------------------------------------------------------------
   // Opening photos
 
@@ -671,11 +666,26 @@ export class App {
     this.changed();
   }
 
-  rerollAll(): void {
-    // Only steps where the seed matters, so the others keep their seeds
-    // (and the recipe does not change for nothing).
-    for (const s of this.recipe.steps) if (this.seeded(s)) s.seed = randomSeed();
+  /**
+   * New seeds for these steps (all of them by default), and say how many
+   * changed: the dice in Edit mode has no label to explain it. Only steps
+   * where the seed matters, so the others keep their seeds (and the recipe
+   * does not change for nothing).
+   */
+  rerollSteps(uids?: string[]): void {
+    const steps = this.recipe.steps.filter((s) => (!uids || uids.includes(s.uid)) && this.seeded(s));
+    if (!steps.length) {
+      this.flash('Nothing random to re-roll in these steps');
+      return;
+    }
+    for (const s of steps) s.seed = randomSeed();
     this.changed();
+    this.flash(`New seeds for ${steps.length === 1 ? '1 step' : `${steps.length} steps`}: the same settings, landing elsewhere`);
+  }
+
+  /** Whether any of these steps (all by default) has something random. */
+  anySeededIn(uids?: string[]): boolean {
+    return this.recipe.steps.some((s) => (!uids || uids.includes(s.uid)) && this.seeded(s));
   }
 
   setSeed(uid: string, seed: string): void {
@@ -1066,6 +1076,24 @@ export class App {
     this.pulling = null;
   }
 
+  // -------------------------------------------------------------------------
+  // Edit mode for the step stack (SPEC 9.5): one line per step, to select
+  // several, re-roll, duplicate, remove and drag into order. Holding a step
+  // turns it on and off.
+
+  editingSteps = $state(false);
+
+  startEditingSteps(): void {
+    if (!this.recipe.steps.length) return;
+    this.stopMasking();
+    this.stopPulling();
+    this.editingSteps = true;
+  }
+
+  stopEditingSteps(): void {
+    this.editingSteps = false;
+  }
+
   /** Strokes committed so far, kept aside while one is drawn. */
   private pullBefore: PullStroke[] | null = null;
 
@@ -1118,11 +1146,6 @@ export class App {
   hideRegion(): void {
     clearTimeout(this.regionTimer);
     this.regionTimer = setTimeout(() => (this.regionHint = null), REGION_LINGER_MS);
-  }
-
-  clearSteps(): void {
-    this.recipe.steps = [];
-    this.changed();
   }
 
   /**
@@ -1751,8 +1774,15 @@ export class App {
     if (!doc) return;
     this.working = this.exporting(opts);
     try {
-      const { blob, name } = await api.exportFile(doc.id, this.saved(), opts);
-      this.deliver(blob, name);
+      const link = await api.exportLink(doc.id, this.saved(), opts);
+      // A phone that can share it gets the share sheet; anything else
+      // downloads the link, named by the server.
+      if (api.shareFiles(new File([], link.name, { type: api.mimeOf(opts) }))) {
+        this.ready = await api.fetchLink(link);
+      } else {
+        api.follow(link);
+        this.flash(`Downloaded ${link.name}`);
+      }
     } catch (e) {
       this.fail(e);
     } finally {
@@ -1836,7 +1866,7 @@ export class App {
   async downloadRecipe(): Promise<void> {
     try {
       const text = await api.recipeToToml(this.saved());
-      this.deliver(new Blob([text], { type: 'application/toml' }), `${this.stem()}.recipe.toml`);
+      await this.deliver(new Blob([text], { type: 'application/toml' }), `${this.stem()}.recipe.toml`);
     } catch (e) {
       this.fail(e);
     }
@@ -1892,12 +1922,12 @@ export class App {
   }
 
   /** Download a file, or offer it to the share sheet on a phone. */
-  private deliver(blob: Blob, name: string): void {
+  private async deliver(blob: Blob, name: string): Promise<void> {
     const file = new File([blob], name, { type: blob.type });
     if (api.shareFiles(file)) {
       this.ready = file;
     } else {
-      api.saveBlob(blob, name);
+      api.follow(await api.linkFor(blob, name));
       this.flash(`Downloaded ${name}`);
     }
   }

@@ -191,15 +191,43 @@ export async function deletePreset(name: string): Promise<void> {
   if (!res.ok) await fail(res);
 }
 
-/** Full-resolution export; returns the file and its suggested name. */
-export async function exportFile(
-  docId: string,
-  recipe: RecipeDto,
-  opts: ExportOptions,
-): Promise<{ blob: Blob; name: string }> {
-  const res = await postJson(`/api/docs/${docId}/export`, { recipe, ...opts });
+/**
+ * A finished file waiting on the server for a few minutes. Downloads go
+ * through these rather than `blob:` URLs: Firefox on iOS names a blob
+ * download after its random id and ignores the name asked for.
+ */
+export interface DownloadLink {
+  url: string;
+  name: string;
+}
+
+/** Full-resolution export, held behind a download link. */
+export async function exportLink(docId: string, recipe: RecipeDto, opts: ExportOptions): Promise<DownloadLink> {
+  return json<DownloadLink>(await postJson(`/api/docs/${docId}/export`, { recipe, ...opts, link: true }));
+}
+
+/** A small file made here (a recipe), held behind a download link. */
+export async function linkFor(blob: Blob, name: string): Promise<DownloadLink> {
+  const res = await fetch(`/api/downloads?name=${encodeURIComponent(name)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': blob.type || 'application/octet-stream' },
+    body: blob,
+  });
+  return json<DownloadLink>(res);
+}
+
+/** The file behind a link, for the share sheet. */
+export async function fetchLink(link: DownloadLink): Promise<File> {
+  const res = await fetch(link.url);
   if (!res.ok) await fail(res);
-  return { blob: await res.blob(), name: filenameOf(res) ?? 'glitch' };
+  const blob = await res.blob();
+  return new File([blob], link.name, { type: blob.type });
+}
+
+/** What an export is, as a MIME type (to ask the share sheet before fetching). */
+export function mimeOf(opts: ExportOptions): string {
+  if (opts.project) return 'application/vnd.glitcharaxia.project';
+  return `image/${opts.format}`;
 }
 
 /** Save next to the original on the server; returns the paths written. */
@@ -230,9 +258,12 @@ export async function saveTo(
   return (await json<{ saved: string[] }>(res)).saved;
 }
 
-/** The next free -glitch name for this photo in a folder (no extension). */
-export async function suggestName(docId: string, folder: string, format: ExportFormat, project = false): Promise<string> {
-  const res = await postJson(`/api/docs/${docId}/suggest`, { folder, format, project });
+/**
+ * The name to suggest (no extension): the next free -glitch name for this
+ * photo in a folder, or with no folder, the name a download gets.
+ */
+export async function suggestName(docId: string, folder: string | null, format: ExportFormat, project = false): Promise<string> {
+  const res = await postJson(`/api/docs/${docId}/suggest`, { ...(folder === null ? {} : { folder }), format, project });
   return (await json<{ name: string }>(res)).name;
 }
 
@@ -331,15 +362,12 @@ export function shareFiles(file: File): boolean {
   );
 }
 
-/** Hand a blob to the browser as a download. */
-export function saveBlob(blob: Blob, name: string): void {
-  const url = URL.createObjectURL(blob);
+/** Start downloading a link: a plain GET the browser saves under the server's name. */
+export function follow(link: DownloadLink): void {
   const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
+  a.href = link.url;
+  a.download = link.name;
   document.body.appendChild(a);
   a.click();
   a.remove();
-  // Give the browser time to start the download before revoking.
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }

@@ -3,7 +3,6 @@
   // Data choices), the effect palette, and the steps in order. On phones
   // the palette moves into a sheet behind a floating "+" button, so the
   // steps get the room.
-  import Dices from '@lucide/svelte/icons/dices';
   import Plus from '@lucide/svelte/icons/plus';
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
@@ -21,17 +20,12 @@
   const current = $derived(encodings.find((e) => e.id === app.recipe.encoding));
 
   let list = $state<HTMLOListElement>();
-  /** Edit mode: one line per step, select several, drag to reorder. */
-  let editing = $state(false);
-
-  function startEditing() {
-    app.stopMasking();
-    editing = true;
-  }
+  /** Edit mode (held on a step): one line per step, select several, drag to reorder. */
+  const editing = $derived(app.editingSteps);
 
   // Nothing left to edit: back to the cards.
   $effect(() => {
-    if (editing && app.recipe.steps.length === 0) editing = false;
+    if (editing && app.recipe.steps.length === 0) app.stopEditingSteps();
   });
   let sheet: HTMLDialogElement;
 
@@ -91,13 +85,11 @@
   <div class="head">
     <h2 class="section-label">Steps</h2>
     {#if editing}
-      <button class="plain strong" onclick={() => (editing = false)}>Done</button>
-    {:else}
-      <button class="icon" onclick={() => app.rerollAll()} disabled={!app.anySeeded} title="New seeds for every step that has something random" aria-label="Re-roll all seeds">
-        <Dices size={18} strokeWidth={1.75} />
-      </button>
-      <button class="plain" onclick={() => app.clearSteps()} disabled={app.recipe.steps.length === 0}>Clear</button>
-      <button class="plain" onclick={startEditing} disabled={app.recipe.steps.length === 0} title="Select, remove and drag steps into order">Edit</button>
+      <button class="plain strong" onclick={() => app.stopEditingSteps()} title="Back to the cards (or hold a step)">Done</button>
+    {:else if app.recipe.steps.length}
+      <!-- Edit mode has no button of its own (Phil, 2026-11-24): a step is
+           held to edit the list, so say so here. -->
+      <span class="dim hint">Hold a step to edit the list</span>
     {/if}
   </div>
 
@@ -336,11 +328,13 @@
     }
   }
 
+  /* As tall with the hint as with Done, so nothing jumps between modes. */
   .head {
     display: flex;
     align-items: center;
     gap: 2px;
     padding: 4px 0 0 4px;
+    min-height: 38px;
   }
 
   .head h2 {
@@ -349,6 +343,11 @@
 
   .strong {
     font-weight: 600;
+  }
+
+  .hint {
+    font-size: 0.8rem;
+    padding: 0 4px;
   }
 
   .steps {

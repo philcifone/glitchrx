@@ -272,6 +272,11 @@ export interface ExportOptions {
   project?: boolean;
   /** Save next to the original only: over the project the photo was opened from. */
   replace?: boolean;
+  /**
+   * Download and Save next to original: the name typed in the Export sheet,
+   * without the extension. Left out, the server picks the automatic name.
+   */
+  file_name?: string;
 }
 
 /** The Settings sheet's folders, relative to the server's home folder. */

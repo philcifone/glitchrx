@@ -9,6 +9,7 @@
 //! Module map:
 //! - [`api`]: routes, access token, error mapping
 //! - [`docs`]: open photos and the per-step render cache
+//! - [`downloads`]: download links for finished exports
 //! - [`render`]: preview decode/re-encode and full-resolution export
 //! - [`browse`]: listing photos under `--root`, confined to it
 //! - [`dto`]: the JSON shapes the frontend uses
@@ -20,6 +21,7 @@ mod assets;
 pub mod browse;
 pub mod dialogs;
 pub mod docs;
+pub mod downloads;
 pub mod dto;
 pub mod presets;
 pub mod recipes;

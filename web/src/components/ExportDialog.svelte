@@ -7,6 +7,10 @@
   // Or a project (.glrx, D-63) instead of the picture: the original, the
   // steps and a preview in one file, to open again on any device. A photo
   // opened from a project can be saved back over it.
+  //
+  // One name, at the top, for every way of saving (Phil, 2026-11-24):
+  // Download, Save next to original and Save As. The suggestion follows the
+  // folder and format until the name is typed over.
   import Download from '@lucide/svelte/icons/download';
   import Save from '@lucide/svelte/icons/save';
   import Folder from '@lucide/svelte/icons/folder';
@@ -26,9 +30,12 @@
   let picker: FolderPicker;
   let prefs = $state<ExportPrefs>(load());
   let withRecipe = $state(true);
-  /** Save As: the folder (relative to home) and the file name. */
+  /** Save As: the folder (relative to home). */
   let folder = $state<string | null>(null);
+  /** The file name, without the extension, for every way of saving. */
   let name = $state('');
+  /** Typed over: suggestions stop replacing it until the sheet opens again. */
+  let typed = false;
 
   function load(): ExportPrefs {
     try {
@@ -49,19 +56,23 @@
 
   export async function show(): Promise<void> {
     dialog.showModal();
+    typed = false;
     if (saveAsHere) {
       await app.loadSettings();
       folder ??= app.folderSettings?.export ?? app.folderSettings?.library ?? '';
-      void suggest();
     }
+    void suggest();
   }
 
-  /** The next free -glitch name in the folder. */
+  /**
+   * The next free -glitch name in the Save As folder, or without one, the
+   * name a download would get. A picture of a project takes its name.
+   */
   async function suggest() {
     const doc = app.doc;
-    if (!doc || folder === null || !saveAsHere) return;
+    if (!doc || typed || app.desktop) return;
     try {
-      name = await api.suggestName(doc.id, folder, prefs.format, project);
+      name = await api.suggestName(doc.id, saveAsHere ? folder : null, prefs.format, project);
     } catch {
       // The folder may have gone; leave the name as it was.
     }
@@ -84,7 +95,8 @@
 
   const doc = $derived(app.doc);
   const project = $derived(prefs.kind === 'project');
-  const opts = $derived(optionsOf(prefs));
+  /** The settings, and the name if there is one (else the server's automatic name). */
+  const opts = $derived({ ...optionsOf(prefs), ...(name.trim() && !app.desktop ? { file_name: name.trim() } : {}) });
   /** The extension Save As adds. */
   const ext = $derived(project ? 'glrx' : prefs.format === 'jpeg' ? 'jpg' : prefs.format === 'tiff' ? 'tif' : prefs.format);
   /** Recipe files go beside pictures; a project holds its own. */
@@ -141,6 +153,21 @@
   </div>
 
   <div class="body">
+    {#if !app.desktop}
+      <label class="group row name">
+        <span class="lbl">Name</span>
+        <input
+          type="text"
+          bind:value={name}
+          oninput={() => (typed = true)}
+          autocapitalize="off"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="File name"
+        />
+        <span class="dim ext">.{ext}</span>
+      </label>
+    {/if}
     <div class="segmented kind" role="radiogroup" aria-label="What to save">
       <button role="radio" aria-checked={!project} class:on={!project} onclick={() => set({ kind: 'picture' })}>Picture</button>
       <button role="radio" aria-checked={project} class:on={project} onclick={() => set({ kind: 'project' })}>Project</button>
@@ -244,15 +271,10 @@
           </button>
         {/if}
       </div>
-      {#if doc?.project}
-        <!-- A picture of a project takes the project's name, as an editor
-             exports poster.psd to poster.jpg. -->
-        {@const stem = doc.project.replace(/\.[^.]*$/, '')}
-        <p class="dim small">Named after the project: {stem}.{ext}, then {stem}-1, ... Nothing is overwritten.</p>
-      {:else if app.desktop}
+      {#if app.desktop}
         <p class="dim small">Suggests the next free -glitch name next to the original. The original is never written.</p>
       {:else if doc?.path}
-        <p class="dim small">Next to the original as {doc.name.replace(/\.[^.]*$/, '')}-glitch, -glitch-1, ... Nothing is overwritten.</p>
+        <p class="dim small">Saved with the name above; next to the {doc.project ? 'project' : 'original'}, -1, -2, ... is added if it is taken. Nothing is overwritten.</p>
       {/if}
     </section>
     {/if}
@@ -267,11 +289,6 @@
             <span class="path">~/{folder ?? ''}</span>
           </button>
         </div>
-        <label class="row">
-          <span class="lbl">Name</span>
-          <input type="text" bind:value={name} autocapitalize="off" autocomplete="off" spellcheck="false" aria-label="File name" />
-          <span class="dim ext">.{ext}</span>
-        </label>
         <div class="buttons">
           <button
             class="primary"
@@ -281,7 +298,7 @@
             <Save size={18} strokeWidth={2} /> Save
           </button>
         </div>
-        <p class="dim small">On the server, in its home folder. An existing file is never replaced. The default folder is the export folder in Settings.</p>
+        <p class="dim small">With the name above, on the server, in its home folder. An existing file is never replaced: choose another name. The default folder is the export folder in Settings.</p>
       </section>
     {/if}
 
@@ -344,7 +361,13 @@
 
   .kind {
     align-self: stretch;
+  }
+
+  /* The name: one row on its own card, above everything it applies to. */
+  .group.name {
+    flex-direction: row;
     margin-top: 6px;
+    padding: 10px 14px;
   }
 
   .kind button {

@@ -5,6 +5,10 @@
   // removed together. A preset group keeps its panel and has a grip of its
   // own, so it drags as a block; its steps drag only inside it.
   //
+  // Holding a row (anywhere but its grip) leaves Edit mode, as holding a
+  // card started it. The bar at the bottom is icons only; holding one shows
+  // its name. Its dice re-rolls the selected steps, or all of them.
+  //
   // Dragging reuses the arrow buttons' moves (app.moveStep / moveGroup),
   // so it obeys the same rules about groups. The row swaps with its
   // neighbour once the finger passes the neighbour's middle; measuring
@@ -13,12 +17,17 @@
   import { flip } from 'svelte/animate';
   import GripVertical from '@lucide/svelte/icons/grip-vertical';
   import Circle from '@lucide/svelte/icons/circle';
+  import Square from '@lucide/svelte/icons/square';
+  import SquareCheck from '@lucide/svelte/icons/square-check';
+  import SquareMinus from '@lucide/svelte/icons/square-minus';
+  import Dices from '@lucide/svelte/icons/dices';
   import CircleCheck from '@lucide/svelte/icons/circle-check';
   import Copy from '@lucide/svelte/icons/copy';
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import { app } from '../lib/app.svelte';
   import { blocksOf } from '../lib/groups';
   import { iconFor } from '../lib/icons';
+  import { hold, tip } from '../lib/hold';
   import type { StepState } from '../lib/types';
 
   const blocks = $derived(blocksOf(app.recipe.steps, app.recipe.groups));
@@ -46,6 +55,8 @@
   function duplicate() {
     app.duplicateSteps(live);
   }
+  /** The selected steps, or with none selected, every step. */
+  const targets = $derived(live.length ? live : undefined);
 
   // ---------------------------------------------------------------------
   // Dragging
@@ -124,7 +135,12 @@
 
 {#snippet row(step: StepState)}
   {@const Icon = iconFor(step.effect)}
-  <div class="row" class:off={!step.enabled} class:lifted={drag?.kind === 'step' && drag.id === step.uid}>
+  <div
+    class="row"
+    class:off={!step.enabled}
+    class:lifted={drag?.kind === 'step' && drag.id === step.uid}
+    {@attach hold(() => app.stopEditingSteps(), { ignore: '.grip' })}
+  >
     <button class="pick" onclick={() => toggle(step.uid)} role="checkbox" aria-checked={isSel(step.uid)} aria-label="Select {name(step)}">
       {#if isSel(step.uid)}<CircleCheck size={22} strokeWidth={1.75} />{:else}<Circle size={22} strokeWidth={1.5} />{/if}
     </button>
@@ -184,13 +200,41 @@
 </ol>
 
 <div class="bar" role="toolbar" aria-label="Selected steps">
-  <button class="plain" onclick={selectAll} disabled={!app.recipe.steps.length}>{allSelected ? 'Select none' : 'Select all'}</button>
-  <span class="grow"></span>
-  <button class="plain" onclick={duplicate} disabled={!live.length} title="Duplicate the selected steps (new seeds)">
-    <Copy size={17} strokeWidth={1.75} /> Duplicate
+  <button
+    class="icon"
+    {@attach tip}
+    onclick={selectAll}
+    disabled={!app.recipe.steps.length}
+    role="checkbox"
+    aria-checked={allSelected ? 'true' : live.length ? 'mixed' : 'false'}
+    title={allSelected ? 'Select none' : 'Select all'}
+    aria-label={allSelected ? 'Select none' : 'Select all'}
+  >
+    {#if allSelected}
+      <SquareCheck size={22} strokeWidth={1.75} />
+    {:else if live.length}
+      <SquareMinus size={22} strokeWidth={1.75} />
+    {:else}
+      <Square size={22} strokeWidth={1.75} />
+    {/if}
   </button>
-  <button class="plain danger" onclick={remove} disabled={!live.length} title="Remove the selected steps (undo brings them back)">
-    <Trash2 size={17} strokeWidth={1.75} /> Remove{live.length ? ` ${live.length}` : ''}
+  <span class="dim count">{live.length ? `${live.length} selected` : ''}</span>
+  <button
+    class="icon"
+    {@attach tip}
+    onclick={() => app.rerollSteps(targets)}
+    class:dimmed={!app.anySeededIn(targets)}
+    aria-disabled={!app.anySeededIn(targets)}
+    title={live.length ? 'New seeds for the selected steps' : 'New seeds for every step'}
+    aria-label={live.length ? 'New seeds for the selected steps' : 'New seeds for every step'}
+  >
+    <Dices size={20} strokeWidth={1.75} />
+  </button>
+  <button class="icon" {@attach tip} onclick={duplicate} disabled={!live.length} title="Duplicate the selected steps (new seeds)" aria-label="Duplicate the selected steps">
+    <Copy size={19} strokeWidth={1.75} />
+  </button>
+  <button class="icon danger" {@attach tip} onclick={remove} disabled={!live.length} title="Remove the selected steps (undo brings them back)" aria-label="Remove the selected steps">
+    <Trash2 size={19} strokeWidth={1.75} />
   </button>
 </div>
 
@@ -337,12 +381,22 @@
     z-index: 2;
   }
 
-  .bar .plain {
-    gap: 6px;
-    font-size: 0.9rem;
+  /* Looks disabled but still answers a tap or a hold, to say why
+     (nothing random in these steps): a disabled button gets no touches. */
+  .dimmed {
+    opacity: 0.35;
   }
 
-  .grow {
+  .count {
     flex: 1;
+    text-align: center;
+    font-size: 0.85rem;
+  }
+
+  /* Held rows leave Edit mode: no text selection or system menu. */
+  .row {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
   }
 </style>

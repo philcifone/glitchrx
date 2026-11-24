@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use crate::browse::{self, BrowseError};
 use crate::dialogs::Dialogs;
 use crate::docs::{Doc, Store, random_hex};
+use crate::downloads::Downloads;
 use crate::dto::{self, DocDto, RecipeDto};
 use crate::presets::{PresetError, PresetInfo, Presets};
 use crate::recipes;
@@ -38,6 +39,8 @@ use crate::settings::{Settings, SettingsStore};
 const MAX_UPLOAD: usize = 256 << 20;
 /// How many photos stay open at once (least recently used is closed).
 const MAX_DOCS: usize = 4;
+/// Largest file the page itself may put behind a download link (a recipe).
+const MAX_STASH: usize = 4 << 20;
 /// Name of the cookie that carries the access token.
 const TOKEN_COOKIE: &str = "glitchrx_token";
 
@@ -66,6 +69,8 @@ pub struct AppState {
     /// The desktop app was started to open this file (a double-clicked
     /// project or photo). The page opens it once, at startup.
     launch: std::sync::Mutex<Option<PathBuf>>,
+    /// Finished exports waiting behind a download link (see `downloads`).
+    pub downloads: Downloads,
 }
 
 impl AppState {
@@ -80,6 +85,7 @@ impl AppState {
             dialogs: None,
             presets: None,
             launch: std::sync::Mutex::new(None),
+            downloads: Downloads::default(),
         }
     }
 
@@ -141,6 +147,8 @@ pub fn router(state: AppState) -> Router {
         .route("/docs/{id}/save-as", post(save_as))
         .route("/docs/{id}/save-to", post(save_to))
         .route("/docs/{id}/suggest", post(suggest_name))
+        .route("/downloads", post(stash_download))
+        .route("/downloads/{id}/{name}", get(fetch_download))
         .route("/settings", get(get_settings).put(put_settings))
         .route("/folders", get(folders).post(new_folder))
         .route("/desktop/open", post(desktop_open))
@@ -336,7 +344,7 @@ async fn read_recipe(
 
 /// Constant-time comparison, so the token cannot be guessed byte by byte
 /// from response timings.
-fn same_secret(a: &str, b: &str) -> bool {
+pub(crate) fn same_secret(a: &str, b: &str) -> bool {
     a.len() == b.len()
         && a.bytes()
             .zip(b.bytes())
@@ -368,6 +376,9 @@ fn query_token(req: &Request) -> Option<String> {
 /// fetch a manifest without cookies, and iOS fetches the home-screen icon
 /// on its own, so these must be public. They are static and say nothing
 /// about the photos.
+/// Where download links live: `/api/downloads/{id}/{name}`.
+const DOWNLOAD_PREFIX: &str = "/api/downloads/";
+
 const PUBLIC: &[&str] = &[
     "/manifest.webmanifest",
     "/favicon.svg",
@@ -456,7 +467,11 @@ async fn guard(State(st): State<Shared>, req: Request, next: Next) -> Response {
 async fn check_token(st: &Shared, req: Request, next: Next) -> Response {
     if let Some(token) = &st.token {
         let from_cookie = cookie_token(req.headers()).is_some_and(|t| same_secret(&t, token));
-        let public = PUBLIC.contains(&req.uri().path());
+        // A download link carries its own secret (see `downloads`), so a
+        // download manager that fetches it without the cookie still can.
+        let link = req.method() == axum::http::Method::GET
+            && req.uri().path().starts_with(DOWNLOAD_PREFIX);
+        let public = link || PUBLIC.contains(&req.uri().path());
         if !from_cookie && !public {
             if query_token(&req).is_some_and(|t| same_secret(&t, token)) {
                 let cookie = format!(
@@ -912,6 +927,15 @@ struct ExportRequest {
     /// photo was opened from (the GUI asks first).
     #[serde(default)]
     replace: bool,
+    /// Download and Save next to original: the name typed in the Export
+    /// sheet, without folders (the extension is added). None keeps the
+    /// automatic name.
+    #[serde(default)]
+    file_name: Option<String>,
+    /// Download only: hold the file behind a download link and answer with
+    /// the link, instead of the bytes (see `downloads`).
+    #[serde(default)]
+    link: bool,
 }
 
 impl ExportRequest {
@@ -1010,8 +1034,44 @@ fn export_bytes(
     )?)
 }
 
+/// `Content-Disposition` for a download named `name`. RFC 6266: an ASCII
+/// fallback plus the exact UTF-8 name.
+fn attachment(name: &str) -> String {
+    let ascii: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_graphic() && c != '"' && c != '\\' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!(
+        "attachment; filename=\"{ascii}\"; filename*=UTF-8''{}",
+        percent_encode(name)
+    )
+}
+
+#[derive(Serialize)]
+struct Link {
+    /// Fetch this (a plain GET) to download the file.
+    url: String,
+    name: String,
+}
+
+/// Hold a finished file behind a download link.
+fn link_to(st: &AppState, name: String, mime: String, bytes: Vec<u8>) -> Link {
+    let id = st.downloads.put(name.clone(), mime, bytes);
+    Link {
+        url: format!("{DOWNLOAD_PREFIX}{id}/{}", percent_encode(&name)),
+        name,
+    }
+}
+
 /// Full-resolution export as a download. Runs the recipe on the full image
-/// with [`Recipe::apply`], the same call the CLI makes.
+/// with [`Recipe::apply`], the same call the CLI makes. With `link`, the
+/// answer is a download link (JSON) rather than the file.
 async fn export(
     State(st): State<Shared>,
     Path(id): Path<String>,
@@ -1020,28 +1080,20 @@ async fn export(
     let doc = find(&st, &id)?;
     let recipe = req.recipe.to_recipe()?;
     let settings = req.settings()?;
+    let name = match &req.file_name {
+        Some(n) => file_name(n, req.ext())?,
+        None => download_name(&doc, req.project, req.ext()),
+    };
     blocking(move || {
         let bytes = output_bytes(&doc, &recipe, &req, &settings)?;
-        let name = download_name(&doc, req.project, req.ext());
-        // RFC 6266: an ASCII fallback plus the exact UTF-8 name.
-        let ascii: String = name
-            .chars()
-            .map(|c| {
-                if c.is_ascii_graphic() && c != '"' && c != '\\' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        let disposition = format!(
-            "attachment; filename=\"{ascii}\"; filename*=UTF-8''{}",
-            percent_encode(&name)
-        );
+        if req.link {
+            let link = link_to(&st, name, req.mime().to_string(), bytes);
+            return Ok(Json(link).into_response());
+        }
         Ok((
             [
                 (header::CONTENT_TYPE, req.mime().to_string()),
-                (header::CONTENT_DISPOSITION, disposition),
+                (header::CONTENT_DISPOSITION, attachment(&name)),
                 (header::CACHE_CONTROL, "no-store".to_string()),
             ],
             bytes,
@@ -1049,6 +1101,58 @@ async fn export(
             .into_response())
     })
     .await
+}
+
+#[derive(Deserialize)]
+struct StashQuery {
+    name: String,
+}
+
+/// Small files made in the page (a recipe) get a download link too: the
+/// body is the file, `?name=` its name, and its type is kept.
+async fn stash_download(
+    State(st): State<Shared>,
+    Query(q): Query<StashQuery>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult<Json<Link>> {
+    if body.len() > MAX_STASH {
+        return Err(ApiError::bad("too large for a download link"));
+    }
+    let clean = sanitize_name(&q.name);
+    if clean.is_empty() || clean.starts_with('.') || clean != q.name.trim() {
+        return Err(ApiError::bad(
+            "a file name, without folders, not starting with a dot",
+        ));
+    }
+    let mime = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_string();
+    Ok(Json(link_to(&st, clean, mime, body.to_vec())))
+}
+
+/// Fetch a download link. Needs no token: the id is the secret.
+async fn fetch_download(
+    State(st): State<Shared>,
+    Path((id, _name)): Path<(String, String)>,
+) -> ApiResult<Response> {
+    let Some(file) = st.downloads.get(&id) else {
+        return Err(ApiError::new(
+            StatusCode::NOT_FOUND,
+            "this download link has expired; export again",
+        ));
+    };
+    Ok((
+        [
+            (header::CONTENT_TYPE, file.mime),
+            (header::CONTENT_DISPOSITION, attachment(&file.name)),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        file.bytes.as_ref().clone(),
+    )
+        .into_response())
 }
 
 fn percent_encode(s: &str) -> String {
@@ -1091,6 +1195,12 @@ async fn save(
             "only a project can be saved over the one it was opened from",
         ));
     }
+    // Checked before the long render.
+    let typed = req
+        .file_name
+        .as_deref()
+        .map(|n| file_name(n, req.ext()))
+        .transpose()?;
     blocking(move || {
         let bytes = output_bytes(&doc, &recipe, &req, &settings)?;
         let conflict = |e: WriteError| ApiError::new(StatusCode::CONFLICT, e.to_string());
@@ -1101,9 +1211,14 @@ async fn save(
                 saved: vec![browse::relative(&root, &source)],
             }));
         }
-        // A picture from a project is named after the project; anything
+        // A name typed in the sheet, with -1, -2, ... if taken; else a
+        // picture from a project is named after the project, and anything
         // else takes the next free -glitch name.
-        let out = if doc.project.is_some() && !req.project {
+        let with_recipe = req.with_recipe && !req.project;
+        let out = if let Some(typed) = typed {
+            let dir = source.parent().unwrap_or(std::path::Path::new("."));
+            free_name(dir, &typed, with_recipe)
+        } else if doc.project.is_some() && !req.project {
             project_output(&source, req.ext())
         } else {
             auto_output(&source, req.ext()).map_err(|e| ApiError::internal(e.to_string()))?
@@ -1113,7 +1228,7 @@ async fn save(
         };
         write(&out, &bytes)?;
         let mut saved = vec![browse::relative(&root, &out)];
-        if req.with_recipe && !req.project {
+        if with_recipe {
             let rpath = out.with_extension("recipe.toml");
             write(&rpath, recipe.to_toml().as_bytes())?;
             saved.push(browse::relative(&root, &rpath));
@@ -1422,6 +1537,26 @@ fn file_name(name: &str, ext: &str) -> ApiResult<String> {
     })
 }
 
+/// `name` in `dir`, or `stem-1.ext`, `stem-2.ext`, ... if it is taken. With
+/// a recipe beside it, its `.recipe.toml` must be free too.
+fn free_name(dir: &std::path::Path, name: &str, with_recipe: bool) -> PathBuf {
+    let path = std::path::Path::new(name);
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let ext = path.extension().unwrap_or_default().to_string_lossy();
+    let taken = |p: &std::path::Path| std::fs::symlink_metadata(p).is_ok();
+    (0..)
+        .map(|n| {
+            let s = if n == 0 {
+                stem.to_string()
+            } else {
+                format!("{stem}-{n}")
+            };
+            dir.join(format!("{s}.{ext}"))
+        })
+        .find(|p| !(taken(p) || (with_recipe && taken(&p.with_extension("recipe.toml")))))
+        .expect("an unbounded search finds a free name")
+}
+
 /// Save As into a folder under home, with a name chosen in the browser.
 /// Never overwrites (409, so the dialog can ask for another name) and
 /// never writes the original.
@@ -1471,7 +1606,9 @@ async fn save_to(
 
 #[derive(Deserialize)]
 struct SuggestRequest {
-    folder: String,
+    /// Relative to home. None: the name a download would get.
+    #[serde(default)]
+    folder: Option<String>,
     format: Format,
     /// A project file's name rather than a picture's.
     #[serde(default)]
@@ -1492,16 +1629,27 @@ async fn suggest_name(
     Path(id): Path<String>,
     Json(req): Json<SuggestRequest>,
 ) -> ApiResult<Json<Suggested>> {
-    let store = settings(&st)?;
     let doc = find(&st, &id)?;
-    let folder = store
-        .folder(&req.folder)
-        .map_err(|_| ApiError::bad(format!("{}: not a folder in your home folder", req.folder)))?;
     let ext = if req.project {
         project::EXTENSION
     } else {
         codec::Format::from(req.format).extension()
     };
+    let stem = |p: &std::path::Path| {
+        p.file_stem()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    let Some(folder) = &req.folder else {
+        let name = download_name(&doc, req.project, ext);
+        return Ok(Json(Suggested {
+            name: stem(std::path::Path::new(&name)),
+        }));
+    };
+    let store = settings(&st)?;
+    let folder = store
+        .folder(folder)
+        .map_err(|_| ApiError::bad(format!("{folder}: not a folder in your home folder")))?;
     // A picture from a project takes the project's name (D-63); otherwise
     // the photo's next free -glitch name.
     let out = match &doc.project {
@@ -1509,11 +1657,7 @@ async fn suggest_name(
         _ => auto_output(&folder.join(&doc.name), ext)
             .map_err(|e| ApiError::internal(e.to_string()))?,
     };
-    let name = out
-        .file_stem()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    Ok(Json(Suggested { name }))
+    Ok(Json(Suggested { name: stem(&out) }))
 }
 
 // ---------------------------------------------------------------------------
