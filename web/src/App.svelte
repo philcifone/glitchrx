@@ -27,6 +27,31 @@
   let settingsDialog: SettingsDialog;
   let sheetExpanded = $state(false);
 
+  /** The photo fills the screen (not while masking or cropping). */
+  const full = $derived(app.fullView && !app.masking && !app.cropping);
+
+  // The grabber: a tap expands or shrinks the panel, a swipe moves it a
+  // step: up expands it, down shrinks it, and down again hides it, leaving
+  // the photo on the whole screen (as dragging a sheet away does on iOS).
+  const SWIPE = 36;
+  let grab: { y: number } | null = null;
+
+  function grabDown(e: PointerEvent) {
+    grab = { y: e.clientY };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function grabUp(e: PointerEvent) {
+    if (!grab) return;
+    const dy = e.clientY - grab.y;
+    grab = null;
+    if (dy > SWIPE) {
+      if (sheetExpanded) sheetExpanded = false;
+      else app.fullView = true;
+    } else if (dy < -SWIPE) sheetExpanded = true;
+    else sheetExpanded = !sheetExpanded;
+  }
+
   onMount(() => {
     applySavedTheme();
     void app.init();
@@ -51,6 +76,8 @@
       app.toggleZoom(); // fit to 100% and back, as in Lightroom
     } else if (app.masking && !mod && !e.altKey) {
       maskKey(e);
+    } else if (e.key === 'Escape' && app.fullView) {
+      app.fullView = false;
     }
   }
 
@@ -100,6 +127,7 @@
 <div
   class="app"
   class:expanded={sheetExpanded}
+  class:full
   class:dragging
   role="application"
   ondragover={(e) => {
@@ -120,7 +148,13 @@
       class="handle"
       aria-label={sheetExpanded ? 'Shrink the step panel' : 'Expand the step panel'}
       aria-expanded={sheetExpanded}
-      onclick={() => (sheetExpanded = !sheetExpanded)}
+      onpointerdown={grabDown}
+      onpointerup={grabUp}
+      onpointercancel={() => (grab = null)}
+      onclick={(e) => {
+        // Pointer taps are handled on pointerup; this is the keyboard.
+        if (e.detail === 0) sheetExpanded = !sheetExpanded;
+      }}
     >
       <span></span>
     </button>
@@ -172,6 +206,17 @@
     display: none;
   }
 
+  /* Full view: only the stage, on the whole screen. */
+  .app.full {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: 'stage';
+  }
+
+  .app.full > :global(:not(.stage)) {
+    display: none;
+  }
+
   /* Phone: the stack becomes a bottom sheet under the stage. */
   @media (max-width: 760px) {
     .app {
@@ -182,6 +227,10 @@
 
     .app.expanded {
       grid-template-rows: auto minmax(0, 22fr) minmax(0, 78fr) auto;
+    }
+
+    .app.full {
+      grid-template-rows: minmax(0, 1fr);
     }
 
     /* A bottom sheet: rounded top corners over the stage, with a grabber. */
@@ -202,6 +251,8 @@
       background: none;
       width: 100%;
       flex: none;
+      /* The swipe is ours, not a scroll. */
+      touch-action: none;
     }
 
     .handle:hover:not(:disabled) {

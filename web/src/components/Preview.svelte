@@ -20,6 +20,8 @@
   // full-resolution render, asked for once the view holds still.
   import { onMount } from 'svelte';
   import ZoomIn from '@lucide/svelte/icons/zoom-in';
+  import Maximize2 from '@lucide/svelte/icons/maximize-2';
+  import Minimize2 from '@lucide/svelte/icons/minimize-2';
   import ZoomOut from '@lucide/svelte/icons/zoom-out';
   import CropIcon from '@lucide/svelte/icons/crop';
   import CropTool from './CropTool.svelte';
@@ -235,6 +237,7 @@
 
 <div
   class="box"
+  class:full={app.fullView}
   bind:this={box}
   style:cursor
   onpointerdown={down}
@@ -353,6 +356,23 @@
         </button>
       {/each}
     </div>
+    <!-- Full view: the photo on the whole screen, the panels hidden. -->
+    {#if !app.masking}
+      <button
+        class="zoom full-btn"
+        class:on={app.fullView}
+        onclick={() => (app.fullView = !app.fullView)}
+        title={app.fullView ? 'Back to the panels (Esc)' : 'Full view: the photo on the whole screen'}
+        aria-label={app.fullView ? 'Leave full view' : 'Full view'}
+        aria-pressed={app.fullView}
+      >
+        {#if app.fullView}
+          <Minimize2 size={18} strokeWidth={1.75} />
+        {:else}
+          <Maximize2 size={18} strokeWidth={1.75} />
+        {/if}
+      </button>
+    {/if}
     <div class="tools">
     <button
       class="zoom crop-btn"
@@ -576,6 +596,23 @@
 
   .zoom:hover:not(:disabled) {
     background: var(--glass);
+  }
+
+  .full-btn {
+    position: absolute;
+    right: 12px;
+    top: 12px;
+  }
+
+  /* Full view reaches the screen's edges: keep clear of the notch and the
+     home indicator. */
+  .full .full-btn {
+    top: max(12px, env(safe-area-inset-top));
+  }
+
+  .full .tools,
+  .full .work {
+    bottom: max(12px, env(safe-area-inset-bottom));
   }
 
   .work {

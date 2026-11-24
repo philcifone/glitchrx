@@ -184,6 +184,11 @@ export class App {
   originalUrl = $state<string | null>(null);
   /** Showing the original (before/after). */
   comparing = $state(false);
+  /**
+   * The photo on the whole screen: the bars and the step panel hidden.
+   * Not while masking or cropping, which need the top bar.
+   */
+  fullView = $state(false);
 
   busy = $state(false);
   /** A long-running action (upload, export) in progress, for the UI to show. */
