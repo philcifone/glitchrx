@@ -250,6 +250,10 @@ export async function putSettings(s: FolderSettings): Promise<FolderSettings> {
 export const folders = async (path: string) =>
   json<FolderListing>(await fetch(`/api/folders?path=${encodeURIComponent(path)}`));
 
+/** Make a folder inside `path` (relative to home); returns its listing. A taken name is a 409. */
+export const newFolder = async (path: string, name: string) =>
+  json<FolderListing>(await postJson('/api/folders', { path, name }));
+
 /** Desktop app: what Save as wrote, or skipped (an existing recipe file). */
 export interface SavedAs {
   saved: string[];

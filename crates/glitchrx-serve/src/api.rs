@@ -140,7 +140,7 @@ pub fn router(state: AppState) -> Router {
         .route("/docs/{id}/save-to", post(save_to))
         .route("/docs/{id}/suggest", post(suggest_name))
         .route("/settings", get(get_settings).put(put_settings))
-        .route("/folders", get(folders))
+        .route("/folders", get(folders).post(new_folder))
         .route("/desktop/open", post(desktop_open))
         .route("/desktop/launch", post(desktop_launch))
         .route("/presets", get(list_presets))
@@ -1303,6 +1303,56 @@ async fn folders(State(st): State<Shared>, Query(q): Query<PathQuery>) -> ApiRes
     let home = settings(&st)?.home().to_path_buf();
     blocking(move || {
         let l = browse::list(&home, &q.path)?;
+        Ok(Json(Folders {
+            path: l.path,
+            parent: l.parent,
+            dirs: l.dirs,
+        }))
+    })
+    .await
+}
+
+#[derive(Deserialize)]
+struct NewFolderRequest {
+    /// The folder to make it in, relative to home ("" is home itself).
+    path: String,
+    /// The new folder's name: one path component, not hidden.
+    name: String,
+}
+
+/// Make a folder inside a folder under home (D-65), and list it, so the
+/// browser can open it at once. Only ever one new, empty folder: a taken
+/// name is refused (409) rather than reused, and nothing else changes.
+async fn new_folder(
+    State(st): State<Shared>,
+    Json(req): Json<NewFolderRequest>,
+) -> ApiResult<Json<Folders>> {
+    let home = settings(&st)?.home().to_path_buf();
+    // The same rule as a Save As file name: what was typed must already be
+    // a single, plain name, so nothing is quietly changed or escaped.
+    let name = req.name.trim();
+    if sanitize_name(name) != name || name.is_empty() || name.starts_with('.') || name.len() > 200 {
+        return Err(ApiError::bad(
+            "a folder name, without slashes, not starting with a dot",
+        ));
+    }
+    let name = name.to_owned();
+    blocking(move || {
+        // `resolve` canonicalizes, so `..` and symlinks leading out of
+        // home are refused before anything is made.
+        let parent = browse::resolve(&home, &req.path)?;
+        let dir = parent.join(&name);
+        std::fs::create_dir(&dir).map_err(|e| match e.kind() {
+            std::io::ErrorKind::AlreadyExists => {
+                ApiError::new(StatusCode::CONFLICT, format!("{name} is already there"))
+            }
+            std::io::ErrorKind::PermissionDenied => ApiError::new(
+                StatusCode::FORBIDDEN,
+                format!("no permission to make a folder in ~/{}", req.path),
+            ),
+            _ => ApiError::internal(format!("cannot make {name}: {e}")),
+        })?;
+        let l = browse::list(&home, &browse::relative(&home, &dir))?;
         Ok(Json(Folders {
             path: l.path,
             parent: l.parent,

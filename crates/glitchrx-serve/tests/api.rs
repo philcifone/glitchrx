@@ -1480,3 +1480,40 @@ async fn the_launch_file_opens_once() {
     let (s, _, _) = send(&plain, post_json("/api/desktop/launch", json!({}))).await;
     assert_eq!(s, StatusCode::NO_CONTENT);
 }
+
+#[tokio::test]
+async fn new_folders_are_made_only_under_home_and_never_reused() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join("Pictures")).unwrap();
+    fs::create_dir_all(tmp.path().join("outside")).unwrap();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(tmp.path().join("outside"), home.join("out")).unwrap();
+    let home = home.canonicalize().unwrap();
+    let app = app_with_settings(&home, None);
+    let make =
+        |path: &str, name: &str| post_json("/api/folders", json!({ "path": path, "name": name }));
+
+    // Made, and listed so the browser can open it.
+    let (s, _, b) = send(&app, make("Pictures", "projects")).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(json_of(&b)["path"], "Pictures/projects");
+    assert!(home.join("Pictures/projects").is_dir());
+
+    // A taken name is refused, not reused.
+    let (s, _, _) = send(&app, make("Pictures", "projects")).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+
+    // Names that are not one plain name.
+    for bad in ["", "  ", "a/b", "../escape", ".hidden", "a\\b"] {
+        let (s, _, _) = send(&app, make("Pictures", bad)).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{bad:?}");
+    }
+    // Places outside home, directly or through a symlink.
+    for path in ["..", "../outside", "out", "missing"] {
+        let (s, _, _) = send(&app, make(path, "x")).await;
+        assert_ne!(s, StatusCode::OK, "{path:?}");
+    }
+    assert!(!tmp.path().join("outside/x").exists());
+    assert!(!tmp.path().join("x").exists());
+}

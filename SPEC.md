@@ -506,7 +506,7 @@ Section 8.2. Each part ends green and usable:
 - **8a The effect in the core.** The displacement map, both samplings, the strokes in the recipe (version 5), mapping onto a cropped or shrunk canvas, golden hashes, a test that a preview and an export agree closely, a contact sheet at a few sizes and strengths.
 - **8b Pull mode in the GUI.** The edit bar and tool bar, pulling with a live preview, undo per stroke, the step card's count and Clear, `[` and `]` on a desktop.
 - **8c Speed.** A check on the slow test photo (target: the preview keeps up with a finger on a 12 MP photo), and caching the map while only later steps change.
-- **8d New folder (D-65).** `POST /api/folders` making one folder inside a home-relative path, with the name checks and tests for escapes (`..`, slashes, symlinks out of home) and a taken name; the button in the folder browser (Save As and Settings); the new folder opens at once.
+- **8d New folder (done, D-65).** `POST /api/folders` making one folder inside a home-relative path, with the name checks and tests for escapes (`..`, slashes, symlinks out of home) and a taken name; the button in the folder browser (Save As and Settings); the new folder opens at once.
 
 Phil's answers (2026-11-24): hard `pixels` sampling by default; only the pull tool for now.
 
