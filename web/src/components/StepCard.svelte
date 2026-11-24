@@ -24,6 +24,9 @@
   const own = $derived(info?.params.filter((p) => !p.placement) ?? []);
   const placement = $derived(info?.params.filter((p) => p.placement) ?? []);
   const seeded = $derived(app.seeded(step));
+  const banded = $derived(app.banded(step));
+  // Hits and length only mean something with bands on (D-56).
+  const shownPlacement = $derived(placement.filter((p) => banded || (p.name !== 'hits' && p.name !== 'len')));
   const Icon = $derived(iconFor(step.effect));
   const encodings = $derived(app.config?.encodings ?? []);
   // Empty string = follow the recipe.
@@ -109,12 +112,20 @@
         {/if}
         <section class="group" aria-label="Placement">
           <h3 class="section-label">Placement</h3>
-          {#each placement as spec (spec.name)}
+          <!-- Off: the step covers its whole region. On: it lands in seeded
+               bands (hits), which the seed places. -->
+          <label class="bands">
+            <span>Bands</span>
+            <span class="dim note">{banded ? 'scattered in seeded bands' : 'the whole picture'}</span>
+            <input class="switch" type="checkbox" checked={banded} onchange={(e) => app.setBands(step.uid, e.currentTarget.checked)} />
+          </label>
+          {#each shownPlacement as spec (spec.name)}
             <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
           {/each}
           <!-- The seed decides where the hits land, so it lives here, with
-               the dice that re-rolls it. -->
-          <div class="seed">
+               the dice that re-rolls it. Without bands it only matters to
+               effects that draw inside their window (shuffle). -->
+          {#if seeded}<div class="seed">
             <label for="seed-{step.uid}">Seed</label>
             <input
               id="seed-{step.uid}"
@@ -136,7 +147,7 @@
             >
               <Dices size={18} strokeWidth={1.75} />
             </button>
-          </div>
+          </div>{/if}
         </section>
         <BlendSection {step} />
       {:else}
@@ -320,6 +331,21 @@
     .foot .txt {
       display: none;
     }
+  }
+
+  .bands {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+
+  .bands .note {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.75rem;
+    font-weight: 400;
   }
 
   .seed {

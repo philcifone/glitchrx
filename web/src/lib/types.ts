@@ -1,6 +1,6 @@
 // Shapes shared with the server (see crates/glitchrx-serve/src/dto.rs).
 
-export type ParamKind = 'int' | 'float' | 'size' | 'region' | 'choice' | 'curve';
+export type ParamKind = 'int' | 'float' | 'size' | 'region' | 'choice' | 'set' | 'curve';
 
 export interface ParamInfo {
   name: string;
@@ -30,6 +30,8 @@ export interface EffectInfo {
   /** A scaled preview cannot match the export; render exactly when idle. */
   exact_preview: boolean;
   params: ParamInfo[];
+  /** How steps from older versions become current (D-56), oldest first. */
+  upgrades?: { to: number; fill: Record<string, string> }[];
 }
 
 export interface DocInfo {
