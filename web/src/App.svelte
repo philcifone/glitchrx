@@ -14,6 +14,7 @@
   import PresetsDialog from './components/PresetsDialog.svelte';
   import NewPhotoDialog from './components/NewPhotoDialog.svelte';
   import SettingsDialog from './components/SettingsDialog.svelte';
+  import { stepSize } from './lib/pull';
 
   let openDialog: OpenDialog;
 
@@ -28,7 +29,7 @@
   let sheetExpanded = $state(false);
 
   /** The photo fills the screen (not while masking or cropping). */
-  const full = $derived(app.fullView && !app.masking && !app.cropping);
+  const full = $derived(app.fullView && !app.drawing && !app.cropping);
 
   // The bars' own heights, so the layout can animate them away in full
   // view: grid rows animate between lengths, not from `auto`.
@@ -140,6 +141,8 @@
     } else if (!mod && !e.altKey && e.key.toLowerCase() === 'z' && app.doc) {
       e.preventDefault();
       app.toggleZoom(); // fit to 100% and back, as in Lightroom
+    } else if (app.pullTarget && !mod && !e.altKey) {
+      pullKey(e);
     } else if (app.masking && !mod && !e.altKey) {
       maskKey(e);
     } else if (e.key === 'Escape' && app.fullView) {
@@ -170,6 +173,16 @@
     else if ((e.key === 'Escape' || e.key === 'Enter') && app.penPlacing) app.finishPen();
     else if (e.key === 'Escape' || e.key === 'Enter') app.stopMasking();
     else if ((e.key === 'Delete' || e.key === 'Backspace') && app.penPoint !== null) app.removePenPoint();
+    else return;
+    e.preventDefault();
+  }
+
+  /** Pull mode: [ and ] size the brush, Enter or Esc finish. */
+  function pullKey(e: KeyboardEvent) {
+    const pin = app.selectedPin;
+    if ((e.key === '[' || e.key === ']') && pin) app.resizePin(stepSize(pin.size, e.key === '[' ? -1 : 1), true);
+    else if (e.key === '[' || e.key === ']') app.setPullTool({ size: stepSize(app.pullTool.size, e.key === '[' ? -1 : 1) });
+    else if (e.key === 'Escape' || e.key === 'Enter') app.stopPulling();
     else return;
     e.preventDefault();
   }

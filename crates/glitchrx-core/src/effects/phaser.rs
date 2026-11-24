@@ -66,6 +66,7 @@ pub static INFO: EffectInfo = EffectInfo {
     },
     random_within: false,
     exact_preview: true,
+    strokes: false,
     example: "glitchrx --phaser stages=8,period=3rows,feedback=0.8 photo.jpg",
     build,
 };

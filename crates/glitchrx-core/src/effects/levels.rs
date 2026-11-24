@@ -66,6 +66,7 @@ pub static INFO: EffectInfo = EffectInfo {
     },
     random_within: false,
     exact_preview: false,
+    strokes: false,
     example: "glitchrx --levels black=20,white=230,gamma=1.2 photo.jpg",
     build,
 };

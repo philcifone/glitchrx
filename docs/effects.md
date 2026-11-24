@@ -404,6 +404,28 @@ Example:
 glitchrx --pixelsort low=0.3,region=25%:100% photo.jpg
 ```
 
+## pull
+
+Drag pixels around by hand: strokes drawn on the photo pull what is under the brush along with them.
+
+A step made of strokes rather than settings, like Photoshop's Liquify forward warp: each stroke drags the pixels under the brush along its path, strongest at the centre. Strokes are drawn in the GUI (or written as `[[step.pull]]` tables in a recipe: `size` as a share of the photo's longer side, `strength` 0 to 1, and `points` as x, y shares of the photo); added on the command line, the step has none and changes nothing. `sampling=pixels` keeps hard pixel edges; `smooth` blends neighbours, as Liquify does. Placement (`region`, `hits`, `len`) does not apply: the strokes are the placement. Opacity and a mask do, so a pull can be taken back from part of the picture.
+
+Version: 1.
+
+A pixel effect: it works on whole RGB pixels, so the encoding and channels do not apply.
+
+Drawn by hand: no seed, and placement (`region`, `hits`, `len`) does not apply.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `sampling` | `pixels` | pixels keeps hard pixel edges; smooth blends neighbours |
+
+Example:
+
+```
+glitchrx --recipe pulled.toml photo.jpg
+```
+
 ## levels
 
 Set the black point, white point and midtone gamma.

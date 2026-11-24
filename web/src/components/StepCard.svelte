@@ -12,12 +12,14 @@
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import { app, CHANNELS_KEY, ENCODING_KEY } from '../lib/app.svelte';
   import { iconFor } from '../lib/icons';
+  import { hold, tip } from '../lib/hold';
   import { shakes, usesSamples } from '../lib/palette';
   import { CHANNEL_CHOICES, channelName } from '../lib/channels';
   import type { Channels, StepState } from '../lib/types';
   import ParamField from './ParamField.svelte';
   import LevelsField from './LevelsField.svelte';
   import BlendSection from './BlendSection.svelte';
+  import PullSection from './PullSection.svelte';
 
   let { step, index }: { step: StepState; index: number } = $props();
 
@@ -29,6 +31,8 @@
   const levels = $derived(step.effect === 'levels' ? own.filter((p) => LEVEL_POINTS.includes(p.name)) : []);
   const fields = $derived(levels.length ? own.filter((p) => !LEVEL_POINTS.includes(p.name)) : own);
   const placement = $derived(info?.params.filter((p) => p.placement) ?? []);
+  /** Drawn by hand (pull): strokes take the place of placement and seed. */
+  const drawn = $derived(!!info?.strokes);
   const seeded = $derived(app.seeded(step));
   const banded = $derived(app.banded(step));
   // Hits and length only mean something with bands on (D-56).
@@ -51,7 +55,8 @@
 </script>
 
 <article class:off={!step.enabled}>
-  <header>
+  <!-- Held (not on the switch): Edit mode for the whole list. -->
+  <header {@attach hold(() => app.startEditingSteps(), { ignore: '.toggle' })}>
     <span class="n">{index + 1}</span>
     <button class="name" onclick={() => app.toggleCollapsed(step.uid)} aria-expanded={open} title={info?.summary}>
       <span class="glyph"><Icon size={18} strokeWidth={1.75} /></span>
@@ -78,7 +83,7 @@
           <!-- Inside the card, not on its header, where it was easy to bump. -->
           {#if own.length}<div class="shake-row">
             <h3 class="section-label">Settings</h3>
-            {#if shakes(info)}
+            {#if shakes(info) && !drawn}
               <button class="plain" onclick={() => app.shake(step.uid)} title="Random settings for this step (placement stays)" aria-label="Shake settings">
                 <Shuffle size={16} strokeWidth={1.75} /> Shake
               </button>
@@ -119,6 +124,9 @@
           </label>
         </div>
         {/if}
+        {#if drawn}
+        <PullSection {step} />
+        {:else}
         <section class="group" aria-label="Placement">
           <h3 class="section-label">Placement</h3>
           <!-- Off: the step covers its whole region. On: it lands in seeded
@@ -158,25 +166,27 @@
             </button>
           </div>{/if}
         </section>
+        {/if}
         <BlendSection {step} />
       {:else}
         <p class="err">Unknown effect `{step.effect}`.</p>
       {/if}
 
-      <!-- What to do with the step itself, apart from its settings. -->
+      <!-- What to do with the step itself, apart from its settings: icons
+           only (Phil, 2026-11-24); hold one for its name. -->
       <div class="foot" role="group" aria-label="Step">
-        <button class="plain" onclick={() => app.moveStep(step.uid, -1)} disabled={!app.canMoveStep(step.uid, -1)} title="Move up" aria-label="Move up">
-          <ChevronUp size={18} strokeWidth={1.75} /> <span class="txt">Up</span>
+        <button class="icon" {@attach tip} onclick={() => app.moveStep(step.uid, -1)} disabled={!app.canMoveStep(step.uid, -1)} title="Move up" aria-label="Move up">
+          <ChevronUp size={20} strokeWidth={1.75} />
         </button>
-        <button class="plain" onclick={() => app.moveStep(step.uid, 1)} disabled={!app.canMoveStep(step.uid, 1)} title="Move down" aria-label="Move down">
-          <ChevronDown size={18} strokeWidth={1.75} /> <span class="txt">Down</span>
+        <button class="icon" {@attach tip} onclick={() => app.moveStep(step.uid, 1)} disabled={!app.canMoveStep(step.uid, 1)} title="Move down" aria-label="Move down">
+          <ChevronDown size={20} strokeWidth={1.75} />
         </button>
-        <button class="plain" onclick={() => app.duplicateStep(step.uid)} title="Duplicate (with a new seed)" aria-label="Duplicate">
-          <Copy size={17} strokeWidth={1.75} /> <span class="txt">Duplicate</span>
+        <button class="icon" {@attach tip} onclick={() => app.duplicateStep(step.uid)} title="Duplicate (with a new seed)" aria-label="Duplicate">
+          <Copy size={18} strokeWidth={1.75} />
         </button>
         <span class="grow"></span>
-        <button class="plain danger" onclick={() => app.removeStep(step.uid)} title="Remove this step" aria-label="Remove step">
-          <Trash2 size={17} strokeWidth={1.75} /> <span class="txt">Remove</span>
+        <button class="icon danger" {@attach tip} onclick={() => app.removeStep(step.uid)} title="Remove this step" aria-label="Remove step">
+          <Trash2 size={18} strokeWidth={1.75} />
         </button>
       </div>
     </div>
@@ -208,7 +218,9 @@
     background: var(--card);
     border-radius: var(--radius-lg);
     overflow: hidden;
-    transition: opacity 0.2s;
+    transition:
+      opacity 0.2s,
+      transform 0.15s;
   }
 
   article.off {
@@ -321,25 +333,27 @@
   .foot {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 6px;
     padding: 6px 0;
-  }
-
-  .foot button {
-    gap: 4px;
-    padding: 6px 8px;
-    font-size: 0.85rem;
   }
 
   .foot .grow {
     flex: 1;
   }
 
-  /* The narrowest phones get icons only (each button keeps its name). */
-  @media (max-width: 360px) {
-    .foot .txt {
-      display: none;
-    }
+  /* Holding the header is a gesture (Edit mode): no text selection or
+     system menu, and the card sinks a little while held, as on iOS. */
+  header {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  article:has(> header:global(.pressing)) {
+    transform: scale(0.98);
+    transition:
+      opacity 0.2s,
+      transform 0.45s ease-in;
   }
 
   .bands {

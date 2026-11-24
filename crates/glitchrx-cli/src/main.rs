@@ -14,7 +14,9 @@ use std::process::ExitCode;
 
 use clap::{CommandFactory, FromArgMatches};
 use glitchrx_core::codec::{self, Format};
-use glitchrx_core::io::{WriteError, auto_output, write_output, write_project};
+use glitchrx_core::io::{
+    WriteError, auto_output, is_project_file, picture_output, write_output, write_project,
+};
 use glitchrx_core::project::{self, Project};
 use glitchrx_core::{Error, Recipe, Step};
 
@@ -373,7 +375,7 @@ fn process(cli: &Cli, base: Option<&(Recipe, Option<u64>)>, job: &Job) -> Result
 
     let output = match &job.output {
         Some(o) => o.clone(),
-        None => auto_output(input, format.extension())
+        None => picture_output(input, format.extension())
             .map_err(|e| Fail::Runtime(format!("{}: {e}", input.display())))?,
     };
     write_output(input, &output, &out_bytes, cli.force)?;
@@ -392,9 +394,16 @@ fn process(cli: &Cli, base: Option<&(Recipe, Option<u64>)>, job: &Job) -> Result
         extra.push(format!("recipe {}", path.display()));
     }
     if let Some(save) = &cli.project {
-        let path = save
-            .clone()
-            .unwrap_or_else(|| output.with_extension(project::EXTENSION));
+        // Beside the picture, with its name; but a picture made from a
+        // project carries that project's name, so a new project from one
+        // takes the next -glitch name instead (a new version, never the
+        // input itself).
+        let path = match save {
+            Some(p) => p.clone(),
+            None if is_project_file(input) => auto_output(input, project::EXTENSION)
+                .map_err(|e| Fail::Runtime(format!("{}: {e}", input.display())))?,
+            None => output.with_extension(project::EXTENSION),
+        };
         let preview = project::preview(&image.raster, image.icc.as_deref())?;
         let p = Project::new(recipe.clone(), &name, &original, Some(preview))?;
         write_project(input, &path, &p.to_bytes()?, cli.force)?;

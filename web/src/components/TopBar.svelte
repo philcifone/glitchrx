@@ -21,10 +21,11 @@
 </script>
 
 <header>
-  {#if app.maskTarget}
-    {@const t = app.maskTarget}
+  {#if app.maskTarget || app.pullTarget}
+    {@const t = (app.maskTarget ?? app.pullTarget)!}
+    {@const pull = !app.maskTarget}
     <div class="mode" role="status">
-      <h1>Mask</h1>
+      <h1>{pull ? 'Pull' : 'Mask'}</h1>
       <span class="what">Step {t.n}: {t.step.effect}{t.step.enabled ? '' : ' (off)'}</span>
     </div>
     <div class="actions">
@@ -51,7 +52,11 @@
       <button class="icon" onclick={() => app.redo()} disabled={!app.canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
         <Redo2 size={18} strokeWidth={1.75} />
       </button>
-      <button class="primary" onclick={() => app.stopMasking()} title="Finish painting (Enter)">Done</button>
+      <button
+        class="primary"
+        onclick={() => (pull ? app.stopPulling() : app.stopMasking())}
+        title={pull ? 'Finish pulling (Enter)' : 'Finish painting (Enter)'}>Done</button
+      >
     </div>
   {:else}
     <h1>glitchRx</h1>

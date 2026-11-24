@@ -75,6 +75,7 @@ pub static INFO: EffectInfo = EffectInfo {
     // against strength 40.7). Sorting is fast (about 0.4 s for 24 MP), so
     // the GUI simply renders it exactly once the user pauses.
     exact_preview: true,
+    strokes: false,
     example: "glitchrx --pixelsort low=0.3,region=25%:100% photo.jpg",
     build,
 };

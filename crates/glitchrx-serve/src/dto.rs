@@ -80,6 +80,12 @@ pub struct StepDto {
     /// Where the result shows; absent means everywhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mask: Option<Mask>,
+    /// A pull step's strokes (SPEC 8.2); absent for every other step.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pull: Vec<glitchrx_core::pull::Stroke>,
+    /// A pull step's pins (D-67); absent for every other step.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pin: Vec<glitchrx_core::pull::Pin>,
 }
 
 /// A seed that is written as a JSON string but also accepted as a number.
@@ -125,6 +131,8 @@ impl RecipeDto {
                     seed: s.seed.0,
                     params: s.params.clone(),
                     mask: s.mask.clone(),
+                    pull: s.pull.clone(),
+                    pin: s.pin.clone(),
                 };
                 step.upgrade(); // an older step keeps its picture (D-56)
                 Ok(step)
@@ -166,6 +174,8 @@ impl RecipeDto {
                     seed: SeedText(s.seed),
                     params: s.params.clone(),
                     mask: s.mask.clone(),
+                    pull: s.pull.clone(),
+                    pin: s.pin.clone(),
                 })
                 .collect(),
         }
@@ -188,6 +198,9 @@ pub struct EffectDto {
     pub random_within: bool,
     /// A scaled preview cannot match; render exactly when idle.
     pub exact_preview: bool,
+    /// Drawn by hand (`pull`): the step holds strokes, has no placement and
+    /// no seed, and the GUI edits it in its own mode (SPEC 8.2).
+    pub strokes: bool,
     pub params: Vec<ParamDto>,
     /// How steps from older versions become current (D-56), for recipes
     /// the GUI kept in the browser.
@@ -232,6 +245,7 @@ pub fn effects() -> Vec<EffectDto> {
                 details: e.details,
                 random_within: e.random_within,
                 exact_preview: e.exact_preview,
+                strokes: e.strokes,
                 upgrades: e
                     .upgrades
                     .iter()
@@ -364,6 +378,8 @@ mod tests {
                 seed: SeedText(big),
                 params: BTreeMap::new(),
                 mask: None,
+                pull: Vec::new(),
+                pin: Vec::new(),
             }],
             ..RecipeDto::default()
         };
@@ -406,7 +422,13 @@ mod tests {
                 .filter(|p| p.placement)
                 .map(|p| p.name)
                 .collect();
-            assert_eq!(names, ["region", "hits", "len"], "{}", e.id);
+            // A pull's strokes are its placement.
+            let expect: &[&str] = if e.strokes {
+                &[]
+            } else {
+                &["region", "hits", "len"]
+            };
+            assert_eq!(names, expect, "{}", e.id);
         }
     }
 }

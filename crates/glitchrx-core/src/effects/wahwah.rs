@@ -60,6 +60,7 @@ pub static INFO: EffectInfo = EffectInfo {
     },
     random_within: false,
     exact_preview: false,
+    strokes: false,
     example: "glitchrx --wahwah period=8rows,resonance=6 photo.jpg",
     build,
 };

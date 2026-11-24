@@ -8,7 +8,7 @@
 //!
 //! ```toml
 //! format = "glitcharaxia-recipe"
-//! version = 4
+//! version = 5
 //! encoding = "u8"     # how steps read bytes as samples; a step may override
 //! channels = 1
 //! work_size = 2048    # optional: steps run on a copy this long (see below)
@@ -41,11 +41,32 @@
 //! feather = 0.01
 //! ```
 //!
+//! A `pull` step also holds its strokes, drawn by hand (see `pull`):
+//!
+//! ```toml
+//! [[step]]
+//! effect = "pull"
+//! effect_version = 1
+//! seed = 0
+//!
+//! [[step.pull]]
+//! size = 0.12
+//! strength = 0.6
+//! points = [0.40, 0.52, 0.43, 0.53]
+//!
+//! [[step.pin]]
+//! size = 0.2
+//! from = [0.5, 0.5]
+//! to = [0.56, 0.47]
+//! ```
+//!
 //! Version 3 added `opacity` and `mask`; version 4 added the canvas the
-//! steps run on (`work_size`, `scale_back`). Older recipes load unchanged
-//! (they have none of it) and are written back as version 4. A build that
-//! only knows version 3 refuses version 4, rather than ignore the work
-//! size and quietly give a different picture.
+//! steps run on (`work_size`, `scale_back`); version 5 added pull strokes;
+//! version 6 added pull pins.
+//! Older recipes load unchanged (they have none of it) and are written
+//! back as the current version. A build that only knows an older version
+//! refuses a newer one, rather than ignore what it does not know and
+//! quietly give a different picture.
 //!
 //! **The canvas.** Before the steps run, the picture can be shrunk so its
 //! longer side is `work_size` pixels (never enlarged). Steps then run on
@@ -76,7 +97,7 @@ use crate::samples::Encoding;
 /// Magic string identifying a recipe file.
 pub const FORMAT: &str = "glitcharaxia-recipe";
 /// Recipe file format version.
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 6;
 
 /// Step keys that are not effect parameters: per-step overrides of the
 /// recipe's sample format, and how strongly the result is blended in.
@@ -125,6 +146,12 @@ pub struct Step {
     /// Where the result shows; none means everywhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mask: Option<Mask>,
+    /// A `pull` step's strokes, in the order drawn (`[[step.pull]]`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pull: Vec<crate::pull::Stroke>,
+    /// A `pull` step's pins (`[[step.pin]]`), run after its strokes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pin: Vec<crate::pull::Pin>,
 }
 
 impl Step {
@@ -137,6 +164,8 @@ impl Step {
             seed,
             params: parse_list(effect, params)?,
             mask: None,
+            pull: Vec::new(),
+            pin: Vec::new(),
         };
         // Validate now, not halfway through a batch.
         step.prepare(Encoding::default(), 1)?;
@@ -230,17 +259,42 @@ impl Step {
         given.remove(ENCODING_KEY);
         given.remove(CHANNELS_KEY);
         given.remove(OPACITY_KEY);
+        if info.strokes {
+            // Placement is not among its parameters, so `hits=` and the
+            // like are refused as unknown below.
+            crate::pull::validate(&self.pull).map_err(|err| self.param_error(err))?;
+            crate::pull::validate_pins(&self.pin).map_err(|err| self.param_error(err))?;
+        } else if !self.pull.is_empty() || !self.pin.is_empty() {
+            return Err(self.param_error(Error::Recipe(
+                "only a pull step has strokes and pins".into(),
+            )));
+        }
         let params = Params::new(info.id, &info.all_params(), &given)?;
         let effect = (info.build)(&params)?;
+        let pull = info
+            .strokes
+            .then(|| crate::pull::Pull::new(&params, &self.pull, &self.pin));
+        // A pull covers the whole raster; its placement is never used for
+        // windows, but every step has one.
+        let placement = if info.strokes {
+            Placement::from_params(&Params::new(
+                info.id,
+                &info.placement_params(),
+                &BTreeMap::new(),
+            )?)
+        } else {
+            Placement::from_params(&params)
+        };
         Ok(Prepared {
             info,
             effect,
-            placement: Placement::from_params(&params),
+            placement,
             seed: self.seed,
             encoding,
             channels,
             opacity,
             mask: self.mask.clone(),
+            pull,
         })
     }
 }
@@ -256,6 +310,8 @@ pub struct Prepared {
     /// Blend of the result over the step's input (1 = all of it).
     pub opacity: f64,
     pub mask: Option<Mask>,
+    /// A pull step's strokes, ready to run on the whole raster.
+    pub pull: Option<crate::pull::Pull>,
 }
 
 impl Prepared {
@@ -291,8 +347,11 @@ impl Prepared {
         Ok(())
     }
 
-    /// The effect alone, window by window.
+    /// The effect alone, window by window (a pull: the whole raster).
     fn run(&self, bytes: &mut [u8], units: &Units, cancel: Cancel<'_>) -> Result<()> {
+        if let Some(p) = &self.pull {
+            return p.apply(bytes, units, cancel);
+        }
         assert_eq!(
             bytes.len(),
             units.len(),
@@ -443,7 +502,7 @@ impl Recipe {
             )));
         }
         match raw.get("version").and_then(|v| v.as_integer()) {
-            Some(2..=4) => {}
+            Some(2..=6) => {}
             Some(1) => {
                 return Err(Error::Recipe(
                     "version 1 recipes are for the JPEG byte engine, which was retired; \
@@ -564,14 +623,17 @@ impl Recipe {
             .map(|_| crate::mask::Frame::new(self.crop_rect(photo.0, photo.1), photo.0, photo.1))
     }
 
-    /// Every step built, with its mask moved onto the canvas cut from a
-    /// photo of `photo` pixels (see `mask::Frame`).
+    /// Every step built, with its mask and pull strokes moved onto the
+    /// canvas cut from a photo of `photo` pixels (see `mask::Frame`).
     pub fn prepare_for(&self, photo: (usize, usize)) -> Result<Vec<Prepared>> {
         let mut steps = self.prepare_all()?;
         if let Some(f) = self.mask_frame(photo) {
             for s in &mut steps {
                 if let Some(m) = &mut s.mask {
                     *m = m.reframed(&f);
+                }
+                if let Some(p) = &mut s.pull {
+                    p.reframe(&f);
                 }
             }
         }
@@ -677,7 +739,7 @@ mod tests {
         r.steps
             .push(Step::new("backwards", "channels=1", 5).unwrap());
         let text = r.to_toml();
-        assert!(text.contains("version = 4"), "{text}");
+        assert!(text.contains("version = 6"), "{text}");
         assert!(text.contains("encoding = \"s16le\""), "{text}");
         assert!(text.contains("encoding = \"ulaw\""), "{text}");
         assert!(text.contains("decay = 0.7"), "{text}");
@@ -796,6 +858,137 @@ mod tests {
         assert_eq!(Recipe::from_toml(&text).unwrap(), r);
     }
 
+    /// A pull step's pins go to `[[step.pin]]` and come back the same;
+    /// other steps may not have any.
+    #[test]
+    fn pull_pins_round_trip() {
+        let mut step = Step::new("pull", "", 0).unwrap();
+        step.pin = vec![crate::pull::Pin {
+            size: 0.2,
+            from: [0.5, 0.5],
+            to: [0.56, 0.47],
+        }];
+        let r = Recipe {
+            steps: vec![step.clone()],
+            ..Recipe::default()
+        };
+        let text = r.to_toml();
+        assert!(
+            text.contains("[[step.pin]]") && text.contains("version = 6"),
+            "{text}"
+        );
+        assert_eq!(Recipe::from_toml(&text).unwrap().steps[0].pin, step.pin);
+        let mut echo = Step::new("echo", "", 1).unwrap();
+        echo.pin = step.pin.clone();
+        assert!(echo.prepare(Encoding::default(), 1).is_err());
+    }
+
+    /// A pull step's strokes go to `[[step.pull]]` and come back the same.
+    #[test]
+    fn pull_strokes_round_trip() {
+        let mut step = Step::new("pull", "sampling=smooth", 0).unwrap();
+        step.pull = vec![
+            crate::pull::Stroke {
+                size: 0.12,
+                strength: 0.6,
+                points: vec![0.4, 0.52, 0.43, 0.53, 0.47, 0.55],
+            },
+            crate::pull::Stroke {
+                size: 0.05,
+                strength: 1.0,
+                points: vec![0.1, 0.1, 0.2, 0.1],
+            },
+        ];
+        let r = Recipe {
+            steps: vec![step, Step::new("invert", "", 1).unwrap()],
+            ..Recipe::default()
+        };
+        let text = r.to_toml();
+        assert!(text.contains("[[step.pull]]"), "{text}");
+        assert!(text.contains("sampling = \"smooth\""), "{text}");
+        let back = Recipe::from_toml(&text).unwrap();
+        assert_eq!(back, r);
+        assert!(back.steps[1].pull.is_empty());
+        // Written by hand, `strength` may be left out.
+        let hand = "format = \"glitcharaxia-recipe\"\nversion = 5\n\n[[step]]\n\
+                    effect = \"pull\"\neffect_version = 1\nseed = 0\n\n\
+                    [[step.pull]]\nsize = 0.1\npoints = [0.5, 0.5, 0.6, 0.5]\n";
+        assert_eq!(
+            Recipe::from_toml(hand).unwrap().steps[0].pull[0].strength,
+            0.6
+        );
+    }
+
+    #[test]
+    fn strokes_belong_to_pull_and_placement_does_not() {
+        let stroke = crate::pull::Stroke {
+            size: 0.1,
+            strength: 0.5,
+            points: vec![0.5, 0.5, 0.6, 0.5],
+        };
+        let mut echo = Step::new("echo", "", 1).unwrap();
+        echo.pull = vec![stroke.clone()];
+        assert!(echo.prepare(Encoding::U8, 1).is_err());
+        assert!(Step::new("pull", "hits=4", 1).is_err());
+        assert!(Step::new("pull", "region=0%:50%", 1).is_err());
+        let mut bad = Step::new("pull", "", 1).unwrap();
+        bad.pull = vec![crate::pull::Stroke {
+            size: 0.0,
+            ..stroke
+        }];
+        assert!(bad.prepare(Encoding::U8, 1).is_err());
+    }
+
+    /// Strokes are drawn on the whole photo; on a crop's canvas they land
+    /// on the same pixels. Pulling on the photo then cropping gives what
+    /// cropping then pulling does, away from the crop's edges (where the
+    /// photo outside the crop can be pulled in).
+    #[test]
+    fn pull_strokes_follow_a_crop() {
+        let photo = ramp(200, 160);
+        let stroke = crate::pull::Stroke {
+            size: 0.2,
+            strength: 1.0,
+            points: vec![0.45, 0.5, 0.6, 0.55],
+        };
+        let mut step = Step::new("pull", "", 0).unwrap();
+        step.pull = vec![stroke];
+        let whole = Recipe {
+            steps: vec![step.clone()],
+            ..Recipe::default()
+        }
+        .render(&photo)
+        .unwrap();
+        let crop = Crop {
+            x: 0.25,
+            y: 0.25,
+            w: 0.5,
+            h: 0.5,
+        };
+        let cropped = Recipe {
+            crop: Some(crop),
+            steps: vec![step],
+            ..Recipe::default()
+        }
+        .render(&photo)
+        .unwrap();
+        assert_eq!((cropped.width, cropped.height), (100, 80));
+        // The stroke changed the middle; compare it pixel for pixel. Map
+        // points fall differently on the two canvases, so allow a pixel's
+        // slack in where each one reads from.
+        assert_ne!(whole.crop(50, 40, 100, 80), photo.crop(50, 40, 100, 80));
+        let expect = whole.crop(50, 40, 100, 80);
+        let (mut same, mut total) = (0, 0);
+        for y in 20..60 {
+            for x in 20..80 {
+                let i = (y * 100 + x) * 3;
+                total += 1;
+                same += (cropped.bytes[i..i + 3] == expect.bytes[i..i + 3]) as usize;
+            }
+        }
+        assert!(same * 10 >= total * 8, "{same} of {total} pixels agree");
+    }
+
     #[test]
     fn version_2_recipes_still_load() {
         let v2 = "format = \"glitcharaxia-recipe\"\nversion = 2\n\n[[step]]\n\
@@ -803,7 +996,7 @@ mod tests {
         let r = Recipe::from_toml(v2).unwrap();
         assert_eq!(r.version, VERSION);
         assert_eq!(r.steps[0].mask, None);
-        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 5")).is_err());
+        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 7")).is_err());
     }
 
     /// A 6 x 4 picture whose every pixel differs, so resizing shows.

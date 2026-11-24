@@ -28,6 +28,7 @@ pub static INFO: EffectInfo = EffectInfo {
     },
     random_within: false,
     exact_preview: false,
+    strokes: false,
     example: "glitchrx --invert encoding=s16le,hits=8 photo.jpg",
     build,
 };

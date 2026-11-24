@@ -42,6 +42,7 @@ pub static INFO: EffectInfo = EffectInfo {
     },
     random_within: true,
     exact_preview: false,
+    strokes: false,
     example: "glitchrx --shuffle block=2rows,fraction=1 photo.jpg",
     build,
 };

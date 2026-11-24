@@ -20,6 +20,7 @@ import Footprints from '@lucide/svelte/icons/footprints';
 import Shell from '@lucide/svelte/icons/shell';
 import Rabbit from '@lucide/svelte/icons/rabbit';
 import ArrowDownWideNarrow from '@lucide/svelte/icons/arrow-down-wide-narrow';
+import HandGrab from '@lucide/svelte/icons/hand-grab';
 import Sparkles from '@lucide/svelte/icons/sparkles';
 import ChartColumn from '@lucide/svelte/icons/chart-column';
 import Spline from '@lucide/svelte/icons/spline';
@@ -47,6 +48,7 @@ const ICONS: Record<string, IconComponent> = {
   speed: Rabbit,
   // Phase 3: the sort glyph, wide to narrow, as pixels settle by brightness.
   pixelsort: ArrowDownWideNarrow,
+  pull: HandGrab,
   // Phase 5c adjustments: more literal, as photo tools are: a histogram for
   // levels, a spline for curves, a palette for hue and saturation, and sun
   // and moon for tinting highlights and shadows.

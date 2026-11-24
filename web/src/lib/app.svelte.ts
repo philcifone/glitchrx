@@ -27,6 +27,7 @@ import {
   type ToolState,
 } from './mask';
 import { usesSamples } from './palette';
+import { cleanPullTool, moves, type PullTool } from './pull';
 import { usesSeed } from './seed';
 import { shakeParams } from './shake';
 import { storageGet, storageSet } from './storage';
@@ -51,6 +52,8 @@ import type {
   Stroke,
   PresetGroup,
   PresetInfo,
+  PullPin,
+  PullStroke,
   RecipeDto,
   RecipeState,
   ServerConfig,
@@ -82,6 +85,7 @@ const RECIPE_KEY = 'glitchrx.recipe';
  * often) can pick the same photo up again while the server still has it. */
 const DOC_KEY = 'glitchrx.doc';
 const TOOL_KEY = 'glitchrx.maskTool';
+const PULL_TOOL_KEY = 'glitchrx.pullTool';
 const NEW_PHOTO_KEY = 'glitchrx.newPhoto';
 
 /** What opening another photo does with the steps already there. */
@@ -90,6 +94,14 @@ export type NewPhotoChoice = 'ask' | 'keep' | 'fresh';
 function loadNewPhoto(): NewPhotoChoice {
   const v = storageGet(NEW_PHOTO_KEY);
   return v === 'keep' || v === 'fresh' ? v : 'ask';
+}
+
+function loadPullTool(): PullTool {
+  try {
+    return cleanPullTool(JSON.parse(storageGet(PULL_TOOL_KEY) ?? 'null'));
+  } catch {
+    return cleanPullTool(null);
+  }
 }
 
 function loadTool(): ToolState {
@@ -230,6 +242,10 @@ export class App {
 
   /** The step whose mask is being edited on the preview, by uid. */
   masking = $state<string | null>(null);
+  /** The pull step being drawn on the preview, by uid (SPEC 8.2). */
+  pulling = $state<string | null>(null);
+  /** The pull brush (per device, not in the recipe). */
+  pullTool = $state<PullTool>(loadPullTool());
 
   /**
    * Histograms of the picture as it reaches a step, for the curves editor
@@ -400,11 +416,6 @@ export class App {
     return this.recipe.steps.some((s) => s.enabled);
   }
 
-  /** Whether "re-roll all" would change anything. */
-  get anySeeded(): boolean {
-    return this.recipe.steps.some((s) => s.enabled && this.seeded(s));
-  }
-
   // -------------------------------------------------------------------------
   // Opening photos
 
@@ -498,12 +509,14 @@ export class App {
       ...(r.crop ? { crop: { ...r.crop } } : {}),
       steps: r.steps
         .filter((s) => s.enabled)
-        .map(({ effect, effect_version, seed, params, mask }) => ({
+        .map(({ effect, effect_version, seed, params, mask, pull, pin }) => ({
           effect,
           ...(effect_version === undefined ? {} : { effect_version }),
           seed,
           params,
           ...(mask ? { mask } : {}),
+          ...(pull?.length ? { pull } : {}),
+          ...(pin?.length ? { pin } : {}),
         })),
     };
   }
@@ -544,6 +557,8 @@ export class App {
 
   private restore(snap: string | null): void {
     if (snap === null) return;
+    // The pins may differ now; an index could point at another one.
+    this.pinSel = null;
     this.recipe = JSON.parse(snap) as RecipeState;
     this.canUndo = this.history.canUndo;
     this.canRedo = this.history.canRedo;
@@ -580,8 +595,11 @@ export class App {
   }
 
   addStep(effect: string): void {
-    this.recipe.steps.push({ uid: newUid(), effect, seed: randomSeed(), params: {}, enabled: true });
+    const uid = newUid();
+    this.recipe.steps.push({ uid, effect, seed: randomSeed(), params: {}, enabled: true });
     this.changed();
+    // A pull does nothing until drawn: straight into pull mode.
+    if (this.effect(effect)?.strokes && this.doc) this.startPulling(uid);
   }
 
   removeStep(uid: string): void {
@@ -652,11 +670,26 @@ export class App {
     this.changed();
   }
 
-  rerollAll(): void {
-    // Only steps where the seed matters, so the others keep their seeds
-    // (and the recipe does not change for nothing).
-    for (const s of this.recipe.steps) if (this.seeded(s)) s.seed = randomSeed();
+  /**
+   * New seeds for these steps (all of them by default), and say how many
+   * changed: the dice in Edit mode has no label to explain it. Only steps
+   * where the seed matters, so the others keep their seeds (and the recipe
+   * does not change for nothing).
+   */
+  rerollSteps(uids?: string[]): void {
+    const steps = this.recipe.steps.filter((s) => (!uids || uids.includes(s.uid)) && this.seeded(s));
+    if (!steps.length) {
+      this.flash('Nothing random to re-roll in these steps');
+      return;
+    }
+    for (const s of steps) s.seed = randomSeed();
     this.changed();
+    this.flash(`New seeds for ${steps.length === 1 ? '1 step' : `${steps.length} steps`}: the same settings, landing elsewhere`);
+  }
+
+  /** Whether any of these steps (all by default) has something random. */
+  anySeededIn(uids?: string[]): boolean {
+    return this.recipe.steps.some((s) => (!uids || uids.includes(s.uid)) && this.seeded(s));
   }
 
   setSeed(uid: string, seed: string): void {
@@ -943,6 +976,7 @@ export class App {
    */
   startMasking(uid: string, index?: number): void {
     const n = this.step(uid)?.mask?.op?.length ?? 0;
+    this.pulling = null;
     this.masking = uid;
     this.activeOp = index ?? (n ? n - 1 : null);
     this.selected = this.activeOp === null ? [] : [this.activeOp];
@@ -1018,6 +1052,155 @@ export class App {
     this.maskUrl = url;
   }
 
+  // -------------------------------------------------------------------------
+  // Pull (SPEC 8.2, D-64). Strokes are drawn on the preview; each one is a
+  // single history entry. While a stroke is being drawn it is already in
+  // the recipe, uncommitted, so the preview follows the finger.
+
+  /** The pull step being drawn and its number in the stack (from 1). */
+  get pullTarget(): { n: number; step: StepState } | null {
+    if (!this.pulling) return null;
+    const i = this.recipe.steps.findIndex((s) => s.uid === this.pulling);
+    return i < 0 ? null : { n: i + 1, step: this.recipe.steps[i] };
+  }
+
+  /** Something is being drawn on the photo: a mask or a pull. */
+  get drawing(): boolean {
+    return !!this.maskTarget || !!this.pullTarget;
+  }
+
+  startPulling(uid: string): void {
+    if (!this.step(uid)) return;
+    this.stopMasking();
+    this.fullView = false;
+    this.pulling = uid;
+  }
+
+  stopPulling(): void {
+    this.pulling = null;
+    this.pinSel = null;
+  }
+
+  /**
+   * The selected pin (D-67): the last one touched, by its index in the
+   * pulled step's pins. While there is one, Size resizes it alone.
+   */
+  pinSel = $state<number | null>(null);
+
+  /** The selected pin, if it is still there and pins are being placed. */
+  get selectedPin(): PullPin | null {
+    const pins = this.pullTarget?.step.pin;
+    if (this.pinSel === null || !pins || this.pullTool.mode !== 'pins') return null;
+    return pins[this.pinSel] ?? null;
+  }
+
+  /**
+   * Resize the selected pin: live while a slider moves, kept (one undo
+   * step) when `commit`.
+   */
+  resizePin(size: number, commit: boolean): void {
+    const s = this.pullTarget?.step;
+    const i = this.pinSel;
+    if (!s?.pin || i === null || !s.pin[i]) return;
+    const pins = ($state.snapshot(s.pin) as PullPin[]).map((p, k) => (k === i ? { ...p, size } : p));
+    this.livePins(pins);
+    if (commit) this.endPins(pins);
+  }
+
+  // -------------------------------------------------------------------------
+  // Edit mode for the step stack (SPEC 9.5): one line per step, to select
+  // several, re-roll, duplicate, remove and drag into order. Holding a step
+  // turns it on and off.
+
+  editingSteps = $state(false);
+
+  startEditingSteps(): void {
+    if (!this.recipe.steps.length) return;
+    this.stopMasking();
+    this.stopPulling();
+    this.editingSteps = true;
+  }
+
+  stopEditingSteps(): void {
+    this.editingSteps = false;
+  }
+
+  /** Strokes committed so far, kept aside while one is drawn. */
+  private pullBefore: PullStroke[] | null = null;
+
+  /** The stroke being drawn changed: show it, without a history entry. */
+  livePull(stroke: PullStroke): void {
+    const s = this.pullTarget?.step;
+    if (!s) return;
+    this.pullBefore ??= $state.snapshot(s.pull ?? []) as PullStroke[];
+    if (!moves(stroke)) return;
+    s.pull = [...this.pullBefore, stroke];
+    this.changed(false);
+  }
+
+  /** The stroke is finished: keep it (one undo step), or drop a tap that moved nothing. */
+  endPull(stroke: PullStroke | null): void {
+    const s = this.pullTarget?.step;
+    const before = this.pullBefore;
+    this.pullBefore = null;
+    if (!s || before === null) return;
+    if (stroke && moves(stroke)) {
+      s.pull = [...before, stroke];
+      this.changed();
+    } else if ((s.pull?.length ?? 0) !== before.length) {
+      // Cancelled after it had started to show: put the step back.
+      s.pull = before;
+      this.changed(false);
+    }
+  }
+
+  /** Pins as they were before the one being moved, kept aside meanwhile. */
+  private pinsBefore: PullPin[] | null = null;
+
+  /** A pin is being placed or moved: show the step with these pins, without a history entry. */
+  livePins(pins: PullPin[]): void {
+    const s = this.pullTarget?.step;
+    if (!s) return;
+    this.pinsBefore ??= $state.snapshot(s.pin ?? []) as PullPin[];
+    s.pin = pins;
+    this.changed(false);
+  }
+
+  /**
+   * The pin is down: keep these pins (one undo step), or with null put the
+   * step back as it was (a cancelled drag, or nothing changed).
+   */
+  endPins(pins: PullPin[] | null): void {
+    const s = this.pullTarget?.step;
+    const before = this.pinsBefore;
+    this.pinsBefore = null;
+    if (!s || before === null) return;
+    const same = (a: PullPin[]) => JSON.stringify(a) === JSON.stringify(before);
+    if (pins && !same(pins)) {
+      if (pins.length) s.pin = pins;
+      else delete s.pin;
+      this.changed();
+    } else {
+      if (before.length) s.pin = before;
+      else delete s.pin;
+      this.changed(false);
+    }
+  }
+
+  /** Remove every stroke and pin from a pull step. Undoable. */
+  clearPull(uid: string): void {
+    const s = this.step(uid);
+    if (!s?.pull?.length && !s?.pin?.length) return;
+    delete s.pull;
+    delete s.pin;
+    this.changed();
+  }
+
+  setPullTool(patch: Partial<PullTool>): void {
+    this.pullTool = cleanPullTool({ ...$state.snapshot(this.pullTool), ...patch });
+    storageSet(PULL_TOOL_KEY, JSON.stringify(this.pullTool));
+  }
+
   /** Draw a region band on the preview while it is being dragged. */
   showRegion(s: number, e: number): void {
     clearTimeout(this.regionTimer);
@@ -1028,11 +1211,6 @@ export class App {
   hideRegion(): void {
     clearTimeout(this.regionTimer);
     this.regionTimer = setTimeout(() => (this.regionHint = null), REGION_LINGER_MS);
-  }
-
-  clearSteps(): void {
-    this.recipe.steps = [];
-    this.changed();
   }
 
   /**
@@ -1303,6 +1481,7 @@ export class App {
     const doc = this.doc;
     if (!doc || this.cropping) return;
     if (this.masking) this.stopMasking();
+    this.pulling = null;
     if (this.zoomed) this.toggleZoom();
     this.cropping = { rect: { ...(this.recipe.crop ?? { x: 0, y: 0, w: 1, h: 1 }) }, url: null };
     // The whole photo, unbent: the steps run on the crop, so they cannot
@@ -1660,8 +1839,15 @@ export class App {
     if (!doc) return;
     this.working = this.exporting(opts);
     try {
-      const { blob, name } = await api.exportFile(doc.id, this.saved(), opts);
-      this.deliver(blob, name);
+      const link = await api.exportLink(doc.id, this.saved(), opts);
+      // A phone that can share it gets the share sheet; anything else
+      // downloads the link, named by the server.
+      if (api.shareFiles(new File([], link.name, { type: api.mimeOf(opts) }))) {
+        this.ready = await api.fetchLink(link);
+      } else {
+        api.follow(link);
+        this.flash(`Downloaded ${link.name}`);
+      }
     } catch (e) {
       this.fail(e);
     } finally {
@@ -1745,7 +1931,7 @@ export class App {
   async downloadRecipe(): Promise<void> {
     try {
       const text = await api.recipeToToml(this.saved());
-      this.deliver(new Blob([text], { type: 'application/toml' }), `${this.stem()}.recipe.toml`);
+      await this.deliver(new Blob([text], { type: 'application/toml' }), `${this.stem()}.recipe.toml`);
     } catch (e) {
       this.fail(e);
     }
@@ -1801,12 +1987,12 @@ export class App {
   }
 
   /** Download a file, or offer it to the share sheet on a phone. */
-  private deliver(blob: Blob, name: string): void {
+  private async deliver(blob: Blob, name: string): Promise<void> {
     const file = new File([blob], name, { type: blob.type });
     if (api.shareFiles(file)) {
       this.ready = file;
     } else {
-      api.saveBlob(blob, name);
+      api.follow(await api.linkFor(blob, name));
       this.flash(`Downloaded ${name}`);
     }
   }

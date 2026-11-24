@@ -81,6 +81,7 @@ pub static INFO: EffectInfo = EffectInfo {
     },
     random_within: false,
     exact_preview: false,
+    strokes: false,
     example: "glitchrx --hsl hue=40,saturation=-50 photo.jpg",
     build,
 };

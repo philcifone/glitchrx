@@ -29,6 +29,8 @@ export interface EffectInfo {
   random_within: boolean;
   /** A scaled preview cannot match the export; render exactly when idle. */
   exact_preview: boolean;
+  /** Drawn by hand (pull): strokes instead of placement and seed (D-64). */
+  strokes?: boolean;
   params: ParamInfo[];
   /** How steps from older versions become current (D-56), oldest first. */
   upgrades?: { to: number; fill: Record<string, string> }[];
@@ -158,6 +160,31 @@ export interface StepDto {
   /** Effect parameters, plus the step keys encoding, channels and opacity. */
   params: Record<string, string>;
   mask?: Mask;
+  /** A pull step's strokes, in the order drawn (D-64). */
+  pull?: PullStroke[];
+  /** A pull step's pins, run after its strokes (D-67). */
+  pin?: PullPin[];
+}
+
+/**
+ * One pull pin (see crates/glitchrx-core/src/pull.rs): the point at `from`
+ * picked up and put down at `to`, as shares of the whole photo.
+ */
+export interface PullPin {
+  /** Brush diameter, as a share of the photo's longer side. */
+  size: number;
+  from: [number, number];
+  to: [number, number];
+}
+
+/** One pull stroke (see crates/glitchrx-core/src/pull.rs). */
+export interface PullStroke {
+  /** Brush diameter, as a share of the photo's longer side. */
+  size: number;
+  /** 0 to 1: how far the pixels at the centre follow the finger. */
+  strength: number;
+  /** Flat x, y list, as shares of the whole photo (like masks, D-52). */
+  points: number[];
 }
 
 export interface RecipeDto {
@@ -258,6 +285,11 @@ export interface ExportOptions {
   project?: boolean;
   /** Save next to the original only: over the project the photo was opened from. */
   replace?: boolean;
+  /**
+   * Download and Save next to original: the name typed in the Export sheet,
+   * without the extension. Left out, the server picks the automatic name.
+   */
+  file_name?: string;
 }
 
 /** The Settings sheet's folders, relative to the server's home folder. */

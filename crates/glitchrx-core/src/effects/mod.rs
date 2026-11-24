@@ -207,33 +207,46 @@ pub struct EffectInfo {
     /// samples, and which colour channels they mix depends on that delay
     /// modulo 3, which no smaller raster can reproduce.
     pub exact_preview: bool,
+    /// True for a step drawn by hand (`pull`): it runs on the whole raster
+    /// through the strokes kept in the step, so placement does not apply.
+    pub strokes: bool,
     pub example: &'static str,
     pub build: fn(&Params) -> Result<Box<dyn Effect>>,
 }
 
 impl EffectInfo {
-    /// The effect's own parameters followed by the shared placement ones.
+    /// The effect's own parameters followed by the shared placement ones
+    /// (none for a step drawn by hand, whose strokes are its placement).
     pub fn all_params(&self) -> Vec<ParamSpec> {
         let mut v = self.params.to_vec();
-        v.push(ParamSpec {
-            name: "region",
-            kind: Kind::Region,
-            default: self.placement.region,
-            help: "where hits may land, START:END; percent of the image runs top to bottom",
-        });
-        v.push(ParamSpec {
-            name: "hits",
-            kind: Kind::Int { min: 0, max: 1000 },
-            default: self.placement.hits,
-            help: "number of windows at seeded places; 0 = one window over the whole region",
-        });
-        v.push(ParamSpec {
-            name: "len",
-            kind: Kind::Size,
-            default: self.placement.len,
-            help: "length of each window (%, rows, px or bytes); unused when hits=0",
-        });
+        if !self.strokes {
+            v.extend(self.placement_params());
+        }
         v
+    }
+
+    /// The shared placement parameters, with this effect's defaults.
+    pub fn placement_params(&self) -> Vec<ParamSpec> {
+        vec![
+            ParamSpec {
+                name: "region",
+                kind: Kind::Region,
+                default: self.placement.region,
+                help: "where hits may land, START:END; percent of the image runs top to bottom",
+            },
+            ParamSpec {
+                name: "hits",
+                kind: Kind::Int { min: 0, max: 1000 },
+                default: self.placement.hits,
+                help: "number of windows at seeded places; 0 = one window over the whole region",
+            },
+            ParamSpec {
+                name: "len",
+                kind: Kind::Size,
+                default: self.placement.len,
+                help: "length of each window (%, rows, px or bytes); unused when hits=0",
+            },
+        ]
     }
 }
 
@@ -254,6 +267,7 @@ pub static REGISTRY: &[&EffectInfo] = &[
     &distort::INFO,
     &speed::INFO,
     &pixelsort::INFO,
+    &crate::pull::INFO,
     &levels::INFO,
     &curves::INFO,
     &hsl::INFO,
@@ -344,17 +358,24 @@ pub fn markdown_reference() -> String {
                  placement do, as for any step.\n\n",
             );
         }
-        if e.exact_preview {
+        if e.strokes {
+            s.push_str(
+                "Drawn by hand: no seed, and placement (`region`, `hits`, `len`) does not \
+                 apply.\n\n",
+            );
+        } else if e.exact_preview {
             s.push_str(
                 "Live previews of this effect are approximate; the GUI renders it at full \
                  resolution when you pause.\n\n",
             );
         }
-        s.push_str(if e.random_within {
-            "The seed picks where hits land and what happens inside each window.\n\n"
-        } else {
-            "The seed only picks where hits land, so it has no effect with `hits=0`.\n\n"
-        });
+        if !e.strokes {
+            s.push_str(if e.random_within {
+                "The seed picks where hits land and what happens inside each window.\n\n"
+            } else {
+                "The seed only picks where hits land, so it has no effect with `hits=0`.\n\n"
+            });
+        }
         s.push_str("| Parameter | Default | Meaning |\n| --- | --- | --- |\n");
         for p in e.all_params() {
             s.push_str(&format!(

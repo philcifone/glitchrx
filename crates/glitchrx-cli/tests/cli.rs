@@ -449,6 +449,42 @@ fn a_project_replays_to_the_same_picture_and_carries_the_original() {
 }
 
 #[test]
+fn pictures_from_a_project_take_its_name() {
+    let d = workdir();
+    let o = run(
+        d.path(),
+        &["--echo", "--project=edit-glitch-2.glrx", "photo.jpg"],
+    );
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    // The picture is named after the project, not the photo inside it.
+    let o = run(d.path(), &["edit-glitch-2.glrx", "--format", "png"]);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert!(
+        d.path().join("edit-glitch-2.png").exists(),
+        "{}",
+        stdout(&o)
+    );
+    let o = run(d.path(), &["edit-glitch-2.glrx", "--format", "png"]);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert!(
+        d.path().join("edit-glitch-2-1.png").exists(),
+        "{}",
+        stdout(&o)
+    );
+    // A new project from one is a new version, never the input itself.
+    let o = run(
+        d.path(),
+        &["edit-glitch-2.glrx", "--format", "png", "--project"],
+    );
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert!(
+        d.path().join("edit-glitch-3.glrx").exists(),
+        "{}",
+        stdout(&o)
+    );
+}
+
+#[test]
 fn a_project_takes_no_other_recipe() {
     let d = workdir();
     let o = run(d.path(), &["--echo", "--project", "photo.jpg"]);
