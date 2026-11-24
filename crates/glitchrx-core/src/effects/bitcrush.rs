@@ -9,6 +9,7 @@ pub static INFO: EffectInfo = EffectInfo {
     id: "bitcrush",
     group: Group::Data,
     version: 1,
+    upgrades: &[],
     audacity: "a bitcrusher (Audacity has none built in; the usual Nyquist plug-ins)",
     summary: "Reduce every sample to `bits` bits of resolution.",
     details: "Posterizes. With `u8` it is plain colour banding; with the multi-byte encodings \

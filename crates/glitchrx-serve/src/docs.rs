@@ -518,43 +518,74 @@ mod tests {
     #[test]
     fn cached_full_render_matches_a_fresh_run() {
         let d = doc("baseline-420.jpg");
+        // Banded steps (D-56 made the whole picture the default): many
+        // windows, so the cancelled render below stops part of the way.
         let sequence = [
             recipe(
-                &[("echo", "", 1), ("shift", "", 2), ("stutter", "", 3)],
+                &[
+                    ("echo", "", 1),
+                    ("shift", "hits=6", 2),
+                    ("stutter", "hits=3", 3),
+                ],
                 Encoding::U8,
             ),
             // Edit the last step twice: the second starts from the cache.
             recipe(
-                &[("echo", "", 1), ("shift", "", 2), ("stutter", "", 4)],
+                &[
+                    ("echo", "", 1),
+                    ("shift", "hits=6", 2),
+                    ("stutter", "hits=3", 4),
+                ],
                 Encoding::U8,
             ),
             recipe(
-                &[("echo", "", 1), ("shift", "", 2), ("stutter", "", 5)],
+                &[
+                    ("echo", "", 1),
+                    ("shift", "hits=6", 2),
+                    ("stutter", "hits=3", 5),
+                ],
                 Encoding::U8,
             ),
             // Then an earlier one, then one past the cached picture.
             recipe(
-                &[("echo", "", 1), ("shift", "by=9", 2), ("stutter", "", 5)],
+                &[
+                    ("echo", "", 1),
+                    ("shift", "by=9,hits=6", 2),
+                    ("stutter", "hits=3", 5),
+                ],
                 Encoding::U8,
             ),
             recipe(
-                &[("echo", "", 1), ("shift", "by=9", 2), ("stutter", "", 6)],
+                &[
+                    ("echo", "", 1),
+                    ("shift", "by=9,hits=6", 2),
+                    ("stutter", "hits=3", 6),
+                ],
                 Encoding::U8,
             ),
             // A step added, one removed, the encoding changed, none left.
             recipe(
                 &[
                     ("echo", "", 1),
-                    ("shift", "by=9", 2),
-                    ("stutter", "", 6),
-                    ("invert", "", 7),
+                    ("shift", "by=9,hits=6", 2),
+                    ("stutter", "hits=3", 6),
+                    ("invert", "hits=4", 7),
                 ],
                 Encoding::U8,
             ),
-            recipe(&[("echo", "", 1), ("shift", "by=9", 2)], Encoding::U8),
-            recipe(&[("echo", "", 1), ("shift", "by=9", 2)], Encoding::ULaw),
+            recipe(
+                &[("echo", "", 1), ("shift", "by=9,hits=6", 2)],
+                Encoding::U8,
+            ),
+            recipe(
+                &[("echo", "", 1), ("shift", "by=9,hits=6", 2)],
+                Encoding::ULaw,
+            ),
             recipe(&[], Encoding::U8),
-            recipe(&[("echo", "", 1), ("shift", "by=9", 2)], Encoding::U8),
+            recipe(
+                &[("echo", "", 1), ("shift", "by=9,hits=6", 2)],
+                Encoding::U8,
+            ),
         ];
         for (i, r) in sequence.iter().enumerate() {
             if i == 4 {

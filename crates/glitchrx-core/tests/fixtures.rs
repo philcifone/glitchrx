@@ -441,7 +441,18 @@ fn previews_resemble_the_export() {
         height: small.height,
     };
     for e in REGISTRY {
-        let r = recipe(e.id, "", 11, Encoding::U8);
+        // Two effects cannot be previewed at scale over the whole picture,
+        // so they are measured with the bands they used to start with
+        // (D-56); their live previews settle to the exact render once the
+        // user pauses (D-40). Shuffle permutes blocks the preview has fewer
+        // of (see above). Stutter copies the first row down the picture,
+        // and a preview's first row is the average of several.
+        let params = match e.id {
+            "shuffle" => "hits=4",
+            "stutter" => "hits=3",
+            _ => "",
+        };
+        let r = recipe(e.id, params, 11, Encoding::U8);
         let mut export = full.clone();
         r.apply(&mut export).unwrap();
         let export = export.downscale(pw, ph);

@@ -20,6 +20,7 @@ pub static INFO: EffectInfo = EffectInfo {
     id: "balance",
     group: Group::Adjust,
     version: 1,
+    upgrades: &[],
     audacity: "none (an adjustment)",
     summary: "Tint the shadows, midtones or highlights.",
     details: "Pick the `tones`, then push them towards red or cyan, green or magenta, \

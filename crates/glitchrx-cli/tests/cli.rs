@@ -176,7 +176,7 @@ fn recipe_save_and_replay_is_identical() {
         &[
             "--reverb",
             "--stutter",
-            "chunk=32,encoding=s16be",
+            "chunk=32,encoding=s16be,hits=3",
             "--encoding",
             "ulaw",
             "--save-recipe",

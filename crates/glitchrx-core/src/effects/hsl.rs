@@ -6,11 +6,13 @@
 //! comes back to RGB. Greys have no hue, and scaling their saturation (0)
 //! keeps them grey.
 //!
-//! **Colour ranges** (D-54): with `range` set, only one family of colours
-//! changes, as in Photoshop's Reds, Yellows, ... Each pixel's share is its
-//! closeness on the colour wheel to the range's centre (full within 15
-//! degrees, fading out by 45, so neighbouring ranges overlap softly)
-//! times how colourful it is (full from a chroma of 1/8 of the range), so
+//! **Colour ranges** (D-54, D-57): with `range` set, only some families of
+//! colours change, as in Photoshop's Reds, Yellows, ... For each range, a
+//! pixel's share is its closeness on the colour wheel to the range's
+//! centre (full within 15 degrees, fading out by 45, so neighbouring
+//! ranges overlap softly); the shares of the chosen ranges add up (at most
+//! 1: reds and yellows together take orange fully), and are scaled by how
+//! colourful the pixel is (full from a chroma of 1/8 of the range), so
 //! greys and near-greys, whose hue means little, are left alone.
 
 use super::adjust::{per_pixel, to_byte};
@@ -23,6 +25,7 @@ pub static INFO: EffectInfo = EffectInfo {
     id: "hsl",
     group: Group::Adjust,
     version: 1,
+    upgrades: &[],
     audacity: "none (an adjustment)",
     summary: "Turn the hues, and change saturation and lightness.",
     details: "`range` limits it to one family of colours (`reds`, `yellows`, ...), \
@@ -34,11 +37,9 @@ pub static INFO: EffectInfo = EffectInfo {
     params: &[
         ParamSpec {
             name: "range",
-            kind: Kind::Choice(&[
-                "all", "reds", "yellows", "greens", "cyans", "blues", "magentas",
-            ]),
+            kind: Kind::Set(&RANGES),
             default: "all",
-            help: "which colours change: all, or one family",
+            help: "which colours change: all, or families joined by + (reds+blues)",
         },
         ParamSpec {
             name: "hue",
@@ -80,12 +81,9 @@ pub static INFO: EffectInfo = EffectInfo {
 };
 
 fn build(p: &Params) -> Result<Box<dyn Effect>> {
-    let centre = ["reds", "yellows", "greens", "cyans", "blues", "magentas"]
-        .iter()
-        .position(|&r| r == p.choice("range"))
-        .map(|i| i as f64);
     Ok(Box::new(Hsl {
-        centre,
+        // Each range's centre hue is its position in sixths of a turn.
+        centres: p.set("range").iter().map(|&i| i as f64).collect(),
         // Hue in sixths of a turn, the unit the conversion works in.
         turn: p.int("hue") as f64 / 60.0,
         sat: 1.0 + p.int("saturation") as f64 / 100.0,
@@ -94,8 +92,8 @@ fn build(p: &Params) -> Result<Box<dyn Effect>> {
 }
 
 struct Hsl {
-    /// The colour range's centre hue (0..6), or none for all colours.
-    centre: Option<f64>,
+    /// The chosen colour ranges' centre hues (0..6); empty for all colours.
+    centres: Vec<f64>,
     turn: f64,
     sat: f64,
     light: f64,
@@ -140,6 +138,9 @@ pub(crate) fn from_hsl(h: f64, s: f64, l: f64) -> (f64, f64, f64) {
 
 /// How much a pixel of hue `h` (0..6) and chroma `c` (0..1) belongs to
 /// the range centred on `centre`.
+/// The colour ranges, in order round the wheel from red.
+const RANGES: [&str; 6] = ["reds", "yellows", "greens", "cyans", "blues", "magentas"];
+
 fn share(centre: f64, h: f64, c: f64) -> f64 {
     let mut d = (h - centre).abs();
     if d > 3.0 {
@@ -156,16 +157,16 @@ impl Effect for Hsl {
             let f = |v: u8| v as f64 / 255.0;
             let (r0, g0, b0) = (f(px[0]), f(px[1]), f(px[2]));
             let (h, s, l) = to_hsl(r0, g0, b0);
-            let k = match self.centre {
-                Some(c) => {
-                    let chroma = r0.max(g0).max(b0) - r0.min(g0).min(b0);
-                    let k = share(c, h, chroma);
-                    if k == 0.0 {
-                        return;
-                    }
-                    k
+            let k = if self.centres.is_empty() {
+                1.0
+            } else {
+                let chroma = r0.max(g0).max(b0) - r0.min(g0).min(b0);
+                let near: f64 = self.centres.iter().map(|&c| share(c, h, 1.0)).sum();
+                let k = near.min(1.0) * (chroma * 8.0).min(1.0);
+                if k == 0.0 {
+                    return;
                 }
-                None => 1.0,
+                k
             };
             let mut h = h + self.turn;
             if h < 0.0 {
@@ -235,6 +236,24 @@ mod tests {
         // Magenta-ish reds across 0 count too; a nearly grey red barely.
         assert_eq!(share(0.0, 5.9, 1.0), 1.0);
         assert!(share(0.0, 0.0, 0.05) < 0.5);
+    }
+
+    #[test]
+    fn neighbouring_ranges_together_take_the_colour_between_fully() {
+        // Orange (255, 128, 0) is half red, half yellow.
+        let orange = || vec![255u8, 128, 0];
+        let grey = |range: &str| {
+            let e = make(&INFO, &format!("range={range},saturation=-100"));
+            let mut b = orange();
+            run(e.as_ref(), &mut b, 1, Encoding::U8);
+            b
+        };
+        let both = grey("yellows+reds"); // any order
+        assert!(both[0].abs_diff(both[2]) <= 1, "fully grey: {both:?}");
+        let half = grey("reds");
+        assert!(half[0] > half[2] + 60, "only half way: {half:?}");
+        // The same set in another order is the same picture.
+        assert_eq!(both, grey("reds+yellows"));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! `amplify`: Audacity's Amplify, a gain in decibels with clipping.
 
-use super::{Effect, EffectInfo, Filter, Group, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Filter, Group, PlacementDefaults, Upgrade, Window};
 use crate::dsp::db_to_gain;
 use crate::error::Result;
 use crate::params::{Kind, ParamSpec, Params};
@@ -9,7 +9,13 @@ use crate::rng::Rng;
 pub static INFO: EffectInfo = EffectInfo {
     id: "amplify",
     group: Group::Audio,
-    version: 1,
+    version: 2,
+    // Version 1 started with bands; now every effect starts on the whole
+    // picture (D-56).
+    upgrades: &[Upgrade {
+        to: 2,
+        fill: &[("hits", "4"), ("len", "5%")],
+    }],
     audacity: "Amplify",
     summary: "Multiply every sample by a gain given in decibels, clipping at the limits.",
     details: "Positive gains push bytes away from the encoding's silence point and clip them: \
@@ -26,7 +32,7 @@ pub static INFO: EffectInfo = EffectInfo {
     }],
     placement: PlacementDefaults {
         region: "0%:100%",
-        hits: "4",
+        hits: "0",
         len: "5%",
     },
     random_within: false,

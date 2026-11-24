@@ -1,6 +1,6 @@
 //! `invert`: Audacity's Invert, `y = -x`.
 
-use super::{Effect, EffectInfo, Filter, Group, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Filter, Group, PlacementDefaults, Upgrade, Window};
 use crate::error::Result;
 use crate::params::Params;
 use crate::rng::Rng;
@@ -8,7 +8,13 @@ use crate::rng::Rng;
 pub static INFO: EffectInfo = EffectInfo {
     id: "invert",
     group: Group::Data,
-    version: 1,
+    version: 2,
+    // Version 1 started with bands; now every effect starts on the whole
+    // picture (D-56).
+    upgrades: &[Upgrade {
+        to: 2,
+        fill: &[("hits", "4"), ("len", "4%")],
+    }],
     audacity: "Invert",
     summary: "Flip every sample upside down.",
     details: "With `u8` this is close to a photographic negative. With `s8` and the \
@@ -17,7 +23,7 @@ pub static INFO: EffectInfo = EffectInfo {
     params: &[],
     placement: PlacementDefaults {
         region: "0%:100%",
-        hits: "4",
+        hits: "0",
         len: "4%",
     },
     random_within: false,

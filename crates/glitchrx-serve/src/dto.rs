@@ -119,13 +119,15 @@ impl RecipeDto {
             .iter()
             .map(|s| {
                 let info = effects::lookup(&s.effect)?;
-                Ok(Step {
+                let mut step = Step {
                     effect: s.effect.clone(),
                     effect_version: s.effect_version.unwrap_or(info.version),
                     seed: s.seed.0,
                     params: s.params.clone(),
                     mask: s.mask.clone(),
-                })
+                };
+                step.upgrade(); // an older step keeps its picture (D-56)
+                Ok(step)
             })
             .collect::<Result<Vec<_>>>()?;
         let r = Recipe {
@@ -187,6 +189,15 @@ pub struct EffectDto {
     /// A scaled preview cannot match; render exactly when idle.
     pub exact_preview: bool,
     pub params: Vec<ParamDto>,
+    /// How steps from older versions become current (D-56), for recipes
+    /// the GUI kept in the browser.
+    pub upgrades: Vec<UpgradeDto>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UpgradeDto {
+    pub to: u32,
+    pub fill: BTreeMap<&'static str, &'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -221,6 +232,14 @@ pub fn effects() -> Vec<EffectDto> {
                 details: e.details,
                 random_within: e.random_within,
                 exact_preview: e.exact_preview,
+                upgrades: e
+                    .upgrades
+                    .iter()
+                    .map(|u| UpgradeDto {
+                        to: u.to,
+                        fill: u.fill.iter().copied().collect(),
+                    })
+                    .collect(),
                 params: e
                     .all_params()
                     .into_iter()
@@ -234,6 +253,7 @@ pub fn effects() -> Vec<EffectDto> {
                             Kind::Size => ("size", None, None, None),
                             Kind::Region => ("region", None, None, None),
                             Kind::Choice(c) => ("choice", None, None, Some(c)),
+                            Kind::Set(c) => ("set", None, None, Some(c)),
                             Kind::Curve => ("curve", None, None, None),
                         };
                         ParamDto {

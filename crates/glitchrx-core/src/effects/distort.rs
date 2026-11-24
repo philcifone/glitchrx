@@ -10,6 +10,7 @@ pub static INFO: EffectInfo = EffectInfo {
     id: "distort",
     group: Group::Audio,
     version: 1,
+    upgrades: &[],
     audacity: "Distortion",
     summary: "Drive the samples into a curve: hard clipping, soft saturation, or folding back.",
     details: "Each sample is multiplied by `drive` (dB) and bent by a curve. `hard` clips at \

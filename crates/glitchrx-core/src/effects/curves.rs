@@ -16,6 +16,7 @@ pub static INFO: EffectInfo = EffectInfo {
     id: "curves",
     group: Group::Adjust,
     version: 1,
+    upgrades: &[],
     audacity: "none (an adjustment)",
     summary: "Reshape the tones with a curve through a few points.",
     details: "`points` lists `IN:OUT` pairs from 0 to 255, inputs rising, joined by `/`. \

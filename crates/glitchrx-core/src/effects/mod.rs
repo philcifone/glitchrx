@@ -135,6 +135,18 @@ pub struct PlacementDefaults {
     pub len: &'static str,
 }
 
+/// How a step saved with an older version of an effect becomes current,
+/// for changes that only move a default (D-56). Recipes do not write
+/// defaults out, so a step that relied on the old default gets it written
+/// in: the picture it makes stays the same.
+#[derive(Debug, Clone, Copy)]
+pub struct Upgrade {
+    /// The version this upgrade leads to; it applies to older steps.
+    pub to: u32,
+    /// Parameters to fill in when the step does not give them.
+    pub fill: &'static [(&'static str, &'static str)],
+}
+
 /// Which section of the effect picker an effect belongs to, and how it sees
 /// the raster.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -175,6 +187,9 @@ pub struct EffectInfo {
     /// seed changes, so old recipes are refused instead of silently
     /// replaying differently.
     pub version: u32,
+    /// How steps from older versions become current, oldest first. A
+    /// version not reachable this way is refused.
+    pub upgrades: &'static [Upgrade],
     /// The Audacity effect this one follows.
     pub audacity: &'static str,
     pub summary: &'static str,

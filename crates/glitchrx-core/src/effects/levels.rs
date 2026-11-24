@@ -11,6 +11,7 @@ pub static INFO: EffectInfo = EffectInfo {
     id: "levels",
     group: Group::Adjust,
     version: 1,
+    upgrades: &[],
     audacity: "none (an adjustment)",
     summary: "Set the black point, white point and midtone gamma.",
     details: "Input values at or below `black` become `out_black`, at or above `white` \

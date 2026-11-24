@@ -189,6 +189,27 @@ impl Step {
         }
     }
 
+    /// Bring a step saved with an older effect version up to date, where
+    /// the effect knows how (D-56): parameters whose default moved are
+    /// written in with their old value, so the step makes the same
+    /// picture. Unknown effects and unreachable versions are left for
+    /// `prepare` to refuse.
+    pub fn upgrade(&mut self) {
+        let Ok(info) = effects::lookup(&self.effect) else {
+            return;
+        };
+        for up in info.upgrades {
+            if self.effect_version < up.to {
+                for (k, v) in up.fill {
+                    self.params
+                        .entry(k.to_string())
+                        .or_insert_with(|| v.to_string());
+                }
+                self.effect_version = up.to;
+            }
+        }
+    }
+
     /// Validate and construct the effect and its placement, with the
     /// recipe's `encoding` and `channels` unless the step overrides them.
     pub fn prepare(&self, encoding: Encoding, channels: usize) -> Result<Prepared> {
@@ -436,12 +457,20 @@ impl Recipe {
         let mut r: Recipe = toml::from_str(text).map_err(|e| Error::Recipe(e.to_string()))?;
         // Older versions are subsets of this one; from here on it is current.
         r.version = VERSION;
+        r.upgrade();
         r.validate()?;
         Ok(r)
     }
 
     pub fn to_toml(&self) -> String {
         toml::to_string(self).expect("recipe serialization cannot fail")
+    }
+
+    /// Bring every step up to its effect's current version (D-56).
+    pub fn upgrade(&mut self) {
+        for s in &mut self.steps {
+            s.upgrade();
+        }
     }
 
     /// Check every step (and the recipe-wide settings).
@@ -958,5 +987,34 @@ mod tests {
         s.mask.as_mut().unwrap().ops[0].feather = -1.0;
         let err = s.prepare(Encoding::U8, 1).err().unwrap().to_string();
         assert!(err.contains("invert") && err.contains("feather"), "{err}");
+    }
+
+    #[test]
+    fn steps_from_before_the_whole_picture_default_keep_their_bands() {
+        // Invert version 1 started with 4 hits of 4%; a step that left them
+        // out still means that, and says so once upgraded.
+        let old = "format = \"glitcharaxia-recipe\"\nversion = 4\nencoding = \"u8\"\nchannels = 1\n\n\
+                   [[step]]\neffect = \"invert\"\neffect_version = 1\nseed = 7\n\n\
+                   [[step]]\neffect = \"invert\"\neffect_version = 1\nseed = 7\nhits = \"9\"\n";
+        let r = Recipe::from_toml(old).unwrap();
+        assert_eq!(r.steps[0].effect_version, 2);
+        assert_eq!(r.steps[0].params["hits"], "4");
+        assert_eq!(r.steps[0].params["len"], "4%");
+        // What the user gave stays.
+        assert_eq!(r.steps[1].params["hits"], "9");
+        // A new step starts on the whole picture.
+        let new = Step::new("invert", "", 7).unwrap();
+        assert!(!new.params.contains_key("hits"));
+        let mut img = Raster::new(10, 10, vec![0u8; 300]);
+        Recipe {
+            steps: vec![new],
+            ..Recipe::default()
+        }
+        .apply(&mut img)
+        .unwrap();
+        assert!(
+            img.bytes.iter().all(|&b| b == 255),
+            "the whole picture inverts"
+        );
     }
 }
