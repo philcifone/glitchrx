@@ -70,6 +70,9 @@
     return null;
   });
 
+  /** Whether the field shows a slider (which resets with a double tap). */
+  const hasSlider = $derived((numeric && scale !== null) || sizeSlider !== null);
+
   /** Live value from a slider position; the default exactly when on its tick. */
   function slide(p: number, dflt: number | null, value: () => string) {
     live(p === dflt ? spec.default : value());
@@ -100,17 +103,20 @@
   <div class="top">
     <label for={id} title={spec.help}>{spec.name}</label>
     <span class="help dim" title={spec.help}>{spec.help}</span>
-    <!-- Always there, so the row never changes height under a finger that
-         is dragging; at the default it is simply dimmed. -->
-    <button
-      class="icon reset"
-      onclick={() => set(null)}
-      disabled={!overridden}
-      title="Back to the default ({spec.default})"
-      aria-label="Reset {spec.name}"
-    >
-      <RotateCcw size={14} strokeWidth={2} />
-    </button>
+    <!-- Sliders reset with a double tap (D-55), so only fields without
+         one get a reset button. It stays when at the default (dimmed), so
+         the row never changes height. -->
+    {#if !hasSlider}
+      <button
+        class="icon reset"
+        onclick={() => set(null)}
+        disabled={!overridden}
+        title="Back to the default ({spec.default})"
+        aria-label="Reset {spec.name}"
+      >
+        <RotateCcw size={14} strokeWidth={2} />
+      </button>
+    {/if}
   </div>
 
   {#if numeric && scale}
