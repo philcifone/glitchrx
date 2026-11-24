@@ -1,7 +1,14 @@
 // Pull mode's brush settings and the small helpers around pull strokes
-// and pins (SPEC 8.2, D-64, D-67). The strokes and pins live in the step
-// (`pull`, `pin`); the tool is per device, like the mask brush, and not
-// part of the recipe.
+// and pins (SPEC 8.2, D-64, D-67, D-68). Strokes and pins ("marks") live
+// in the step's `pull` list, in the order made, so each goes over what
+// came before. The tool is per device, like the mask brush, and not part
+// of the recipe.
+//
+// Strokes belong to brushes: the strokes drawn while a brush is selected
+// join it, and share its size and strength. A stroke from before brushes
+// has no `brush`; it counts as a brush of its own, keyed by its place in
+// the list as a negative number, until a stroke joins it and it gets a
+// real one.
 //
 // Pins snap to a grid: `grid` cells across the photo's longer side, the
 // same size both ways, centred so the margins match. The grid is only a
@@ -9,7 +16,7 @@
 // later moves nothing.
 
 import { SLIDER_STEPS, type SliderScale } from './slider';
-import type { PullPin, PullStroke } from './types';
+import type { PullMark, PullPin, PullStroke } from './types';
 
 /** Draw strokes freehand, or pick up grid points as pins. */
 export type PullMode = 'draw' | 'pins';
@@ -69,8 +76,36 @@ export function moves(s: PullStroke): boolean {
   return s.points.length >= 4;
 }
 
+/** A pin, not a stroke. */
+export const isPin = (m: PullMark): m is PullPin => 'from' in m;
+
+/**
+ * What the card's sliders change (D-68): a brush (all its strokes, by its
+ * key) or a pin (by its place in the list). None: the next stroke or pin.
+ */
+export type PullSel = { brush: number } | { pin: number };
+
+/** The brush a mark belongs to (see the notes above), or null for a pin. */
+export function brushKey(marks: PullMark[], i: number): number | null {
+  const m = marks[i];
+  if (!m || isPin(m)) return null;
+  return m.brush ?? -(i + 1);
+}
+
+/** Where a brush's strokes are in the list. */
+export function brushStrokes(marks: PullMark[], key: number): number[] {
+  return marks.flatMap((_, i) => (brushKey(marks, i) === key ? [i] : []));
+}
+
+/** A number no brush in the list has yet. */
+export function nextBrush(marks: PullMark[]): number {
+  return marks.reduce((n, m) => (!isPin(m) && m.brush !== undefined ? Math.max(n, m.brush + 1) : n), 1);
+}
+
 /** What a pull step holds, in words: "2 strokes, 1 pin". */
-export function strokeCount(strokes: number, pins = 0): string {
+export function strokeCount(marks: PullMark[]): string {
+  const pins = marks.filter(isPin).length;
+  const strokes = marks.length - pins;
   if (!strokes && !pins) return 'Nothing pulled yet';
   const say = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
   return [strokes && say(strokes, 'stroke'), pins && say(pins, 'pin')].filter(Boolean).join(', ');
@@ -96,17 +131,21 @@ export function snap(x: number, y: number, axes: { xs: number[]; ys: number[] })
   return [roundTo(near(x, axes.xs), 6), roundTo(near(y, axes.ys), 6)];
 }
 
+type At = (q: [number, number]) => { x: number; y: number };
+
 /**
- * The pin a finger at `p` picks up: the nearest handle (where a pin was
- * put) or home (where it came from) within `reach`, handles first, else
- * -1. `at` turns a share of the photo into the same units as `p`.
+ * The pin a finger at `p` picks up, by its place in `marks`: the nearest
+ * handle (where a pin was put) or home (where it came from) within
+ * `reach`, handles first, else -1. `at` turns a share of the photo into
+ * the same units as `p`.
  */
-export function pinAt(pins: PullPin[], p: { x: number; y: number }, at: (q: [number, number]) => { x: number; y: number }, reach: number): number {
+export function pinAt(marks: PullMark[], p: { x: number; y: number }, at: At, reach: number): number {
   let best = -1;
   let bestD = reach;
   for (const end of ['to', 'from'] as const) {
-    pins.forEach((pin, i) => {
-      const q = at(pin[end]);
+    marks.forEach((m, i) => {
+      if (!isPin(m)) return;
+      const q = at(m[end]);
       const d = Math.hypot(q.x - p.x, q.y - p.y);
       if (d <= bestD) {
         best = i;
@@ -115,5 +154,27 @@ export function pinAt(pins: PullPin[], p: { x: number; y: number }, at: (q: [num
     });
     if (best >= 0) return best;
   }
+  return best;
+}
+
+/** Where a stroke's marker sits: where the finger lifted. */
+export function strokeEnd(s: PullStroke): [number, number] {
+  const n = s.points.length;
+  return [s.points[n - 2], s.points[n - 1]];
+}
+
+/** The stroke whose marker is nearest `p` within `reach`, by its place in `marks`, else -1. */
+export function strokeAt(marks: PullMark[], p: { x: number; y: number }, at: At, reach: number): number {
+  let best = -1;
+  let bestD = reach;
+  marks.forEach((m, i) => {
+    if (isPin(m)) return;
+    const q = at(strokeEnd(m));
+    const d = Math.hypot(q.x - p.x, q.y - p.y);
+    if (d <= bestD) {
+      best = i;
+      bestD = d;
+    }
+  });
   return best;
 }

@@ -27,7 +27,7 @@ import {
   type ToolState,
 } from './mask';
 import { usesSamples } from './palette';
-import { cleanPullTool, moves, type PullTool } from './pull';
+import { brushKey, brushStrokes, cleanPullTool, isPin, moves, nextBrush, type PullSel, type PullTool } from './pull';
 import { usesSeed } from './seed';
 import { shakeParams } from './shake';
 import { storageGet, storageSet } from './storage';
@@ -52,6 +52,7 @@ import type {
   Stroke,
   PresetGroup,
   PresetInfo,
+  PullMark,
   PullPin,
   PullStroke,
   RecipeDto,
@@ -131,7 +132,8 @@ function normalize(r: Partial<RecipeState>, effect: (id: string) => EffectInfo |
   const steps = (r.steps ?? [])
     .filter((s) => effect(s.effect))
     .map((s) => upgrade(s, effect(s.effect)!))
-    .map((s) => (s.mask ? { ...s, mask: migrateMask(s.mask) } : s));
+    .map((s) => (s.mask ? { ...s, mask: migrateMask(s.mask) } : s))
+    .map(pinsAmongStrokes);
   const work = typeof r.work_size === 'number' && r.work_size >= 64 ? Math.round(r.work_size) : undefined;
   return {
     encoding: typeof r.encoding === 'string' ? r.encoding : DEFAULT_ENCODING,
@@ -142,6 +144,21 @@ function normalize(r: Partial<RecipeState>, effect: (id: string) => EffectInfo |
     ...groups.tidy(steps, groups.cleanGroups(r.groups)),
   };
 }
+
+/**
+ * Pins kept apart (`pin`), as the GUI kept them before D-68, joined to the
+ * end of the step's marks: they ran after the strokes, so the picture
+ * stays the same.
+ */
+function pinsAmongStrokes<S extends { pull?: PullMark[] }>(s: S): S {
+  const { pin, ...rest } = s as S & { pin?: PullPin[] };
+  if (!pin) return s;
+  const pull = [...(s.pull ?? []), ...pin];
+  return (pull.length ? { ...rest, pull } : rest) as S;
+}
+
+/** A brush size, rounded as the recipe keeps it. */
+const roundSize = (v: number) => Math.max(0.0001, Math.round(v * 10000) / 10000);
 
 /**
  * A step saved with an older version of its effect, made current the way
@@ -509,14 +526,13 @@ export class App {
       ...(r.crop ? { crop: { ...r.crop } } : {}),
       steps: r.steps
         .filter((s) => s.enabled)
-        .map(({ effect, effect_version, seed, params, mask, pull, pin }) => ({
+        .map(({ effect, effect_version, seed, params, mask, pull }) => ({
           effect,
           ...(effect_version === undefined ? {} : { effect_version }),
           seed,
           params,
           ...(mask ? { mask } : {}),
           ...(pull?.length ? { pull } : {}),
-          ...(pin?.length ? { pin } : {}),
         })),
     };
   }
@@ -557,8 +573,11 @@ export class App {
 
   private restore(snap: string | null): void {
     if (snap === null) return;
-    // The pins may differ now; an index could point at another one.
-    this.pinSel = null;
+    // The marks may differ now: a place in the list (a pin, or a stroke
+    // from before brushes) could be another one. A brush keeps its number,
+    // so it stays selected (if it is still there, see selectedBrush).
+    const sel = this.pullSel;
+    if (!(sel && 'brush' in sel && sel.brush > 0)) this.pullSel = null;
     this.recipe = JSON.parse(snap) as RecipeState;
     this.canUndo = this.history.canUndo;
     this.canRedo = this.history.canRedo;
@@ -1053,9 +1072,10 @@ export class App {
   }
 
   // -------------------------------------------------------------------------
-  // Pull (SPEC 8.2, D-64). Strokes are drawn on the preview; each one is a
-  // single history entry. While a stroke is being drawn it is already in
-  // the recipe, uncommitted, so the preview follows the finger.
+  // Pull (SPEC 8.2, D-64, D-68). Strokes and pins are drawn on the preview;
+  // each one is a single history entry. While one is being drawn or moved
+  // (or a slider dragged) it is already in the recipe, uncommitted, so the
+  // preview follows the finger.
 
   /** The pull step being drawn and its number in the stack (from 1). */
   get pullTarget(): { n: number; step: StepState } | null {
@@ -1073,38 +1093,107 @@ export class App {
     if (!this.step(uid)) return;
     this.stopMasking();
     this.fullView = false;
+    if (this.pulling !== uid) this.pullSel = null;
     this.pulling = uid;
   }
 
   stopPulling(): void {
     this.pulling = null;
-    this.pinSel = null;
+    this.pullSel = null;
   }
 
   /**
-   * The selected pin (D-67): the last one touched, by its index in the
-   * pulled step's pins. While there is one, Size resizes it alone.
+   * What the pull card's sliders change (D-68): the selected brush or pin,
+   * or with none the next stroke or pin. Touching a marker or a pin selects
+   * it, and so does drawing or placing one; New, a tool change and undo
+   * select none.
    */
-  pinSel = $state<number | null>(null);
+  pullSel = $state<PullSel | null>(null);
 
-  /** The selected pin, if it is still there and pins are being placed. */
-  get selectedPin(): PullPin | null {
-    const pins = this.pullTarget?.step.pin;
-    if (this.pinSel === null || !pins || this.pullTool.mode !== 'pins') return null;
-    return pins[this.pinSel] ?? null;
+  /** The pull step's strokes and pins, as they stand. */
+  get pullMarks(): PullMark[] {
+    return this.pullTarget?.step.pull ?? [];
+  }
+
+  /** The selected brush (in Draw): its key, its strokes' places, and the first of them, whose settings it shows. */
+  get selectedBrush(): { key: number; strokes: number[]; first: PullStroke } | null {
+    const sel = this.pullSel;
+    if (!sel || !('brush' in sel) || this.pullTool.mode !== 'draw') return null;
+    const marks = this.pullMarks;
+    const strokes = brushStrokes(marks, sel.brush);
+    return strokes.length ? { key: sel.brush, strokes, first: marks[strokes[0]] as PullStroke } : null;
+  }
+
+  /** The selected pin (in Pins), with its place in the list. */
+  get selectedPin(): { i: number; pin: PullPin } | null {
+    const sel = this.pullSel;
+    if (!sel || !('pin' in sel) || this.pullTool.mode !== 'pins') return null;
+    const m = this.pullMarks[sel.pin];
+    return m && isPin(m) ? { i: sel.pin, pin: m } : null;
   }
 
   /**
-   * Resize the selected pin: live while a slider moves, kept (one undo
-   * step) when `commit`.
+   * The size of a new brush or pin on the photo: the tool's, which is set
+   * against the screen, so zoomed in it pulls a smaller part of the photo.
    */
-  resizePin(size: number, commit: boolean): void {
+  get newPullSize(): number {
+    return roundSize(this.pullTool.size / this.view.z);
+  }
+
+  /** What the next stroke is drawn with: the selected brush's settings, else the tool's. */
+  strokeSettings(): { size: number; strength: number } {
+    const b = this.selectedBrush?.first;
+    return b ? { size: b.size, strength: b.strength } : { size: this.newPullSize, strength: this.pullTool.strength };
+  }
+
+  /** Select the brush of the stroke at place `i`, or the pin there. */
+  selectMark(i: number): void {
+    const key = brushKey(this.pullMarks, i);
+    this.pullSel = key !== null ? { brush: key } : this.pullMarks[i] ? { pin: i } : null;
+  }
+
+  /** New (the + button): select nothing, so the sliders set the next stroke or pin. */
+  newMark(uid: string): void {
+    this.startPulling(uid);
+    this.pullSel = null;
+  }
+
+  /**
+   * Change the selected brush (every stroke of it) or pin: live while a
+   * slider moves, kept as one undo step when `commit`. With nothing
+   * selected the tool changes, for the next stroke or pin.
+   */
+  adjustPull(patch: { size?: number; strength?: number }, commit: boolean): void {
+    const brush = this.selectedBrush;
+    const pin = this.selectedPin;
+    if (!brush && !pin) {
+      this.setPullTool(patch);
+      return;
+    }
+    const size = patch.size === undefined ? undefined : roundSize(patch.size);
+    const marks = $state.snapshot(this.pullMarks) as PullMark[];
+    if (brush) {
+      for (const i of brush.strokes) {
+        const s = marks[i] as PullStroke;
+        marks[i] = { ...s, ...(size === undefined ? {} : { size }), ...(patch.strength === undefined ? {} : { strength: patch.strength }) };
+      }
+    } else if (pin && size !== undefined) {
+      marks[pin.i] = { ...pin.pin, size };
+    }
+    this.liveMarks(marks);
+    if (commit) this.endMarks(marks);
+  }
+
+  /** Remove the selected brush (all its strokes) or pin. Undoable. */
+  deleteSelected(): void {
     const s = this.pullTarget?.step;
-    const i = this.pinSel;
-    if (!s?.pin || i === null || !s.pin[i]) return;
-    const pins = ($state.snapshot(s.pin) as PullPin[]).map((p, k) => (k === i ? { ...p, size } : p));
-    this.livePins(pins);
-    if (commit) this.endPins(pins);
+    const gone = new Set(this.selectedBrush?.strokes ?? (this.selectedPin ? [this.selectedPin.i] : []));
+    if (!s?.pull || !gone.size) return;
+    const next = ($state.snapshot(s.pull) as PullMark[]).filter((_, i) => !gone.has(i));
+    if (next.length) s.pull = next;
+    else delete s.pull;
+    this.pullSel = null;
+    this.changed();
   }
 
   // -------------------------------------------------------------------------
@@ -1125,75 +1214,68 @@ export class App {
     this.editingSteps = false;
   }
 
-  /** Strokes committed so far, kept aside while one is drawn. */
-  private pullBefore: PullStroke[] | null = null;
+  /** The marks as they were before the change under way, kept aside meanwhile. */
+  private marksBefore: PullMark[] | null = null;
 
-  /** The stroke being drawn changed: show it, without a history entry. */
-  livePull(stroke: PullStroke): void {
-    const s = this.pullTarget?.step;
-    if (!s) return;
-    this.pullBefore ??= $state.snapshot(s.pull ?? []) as PullStroke[];
-    if (!moves(stroke)) return;
-    s.pull = [...this.pullBefore, stroke];
-    this.changed(false);
+  /** The marks before the change under way (or as they are, if none is), as a fresh list. */
+  pullBase(): PullMark[] {
+    return [...(this.marksBefore ?? ($state.snapshot(this.pullMarks) as PullMark[]))];
   }
 
-  /** The stroke is finished: keep it (one undo step), or drop a tap that moved nothing. */
-  endPull(stroke: PullStroke | null): void {
-    const s = this.pullTarget?.step;
-    const before = this.pullBefore;
-    this.pullBefore = null;
-    if (!s || before === null) return;
-    if (stroke && moves(stroke)) {
-      s.pull = [...before, stroke];
-      this.changed();
-    } else if ((s.pull?.length ?? 0) !== before.length) {
-      // Cancelled after it had started to show: put the step back.
-      s.pull = before;
-      this.changed(false);
-    }
-  }
-
-  /** Pins as they were before the one being moved, kept aside meanwhile. */
-  private pinsBefore: PullPin[] | null = null;
-
-  /** A pin is being placed or moved: show the step with these pins, without a history entry. */
-  livePins(pins: PullPin[]): void {
+  /** Show the pull step with these marks, without a history entry. */
+  liveMarks(marks: PullMark[]): void {
     const s = this.pullTarget?.step;
     if (!s) return;
-    this.pinsBefore ??= $state.snapshot(s.pin ?? []) as PullPin[];
-    s.pin = pins;
+    this.marksBefore ??= $state.snapshot(s.pull ?? []) as PullMark[];
+    s.pull = marks;
     this.changed(false);
   }
 
   /**
-   * The pin is down: keep these pins (one undo step), or with null put the
-   * step back as it was (a cancelled drag, or nothing changed).
+   * The change is done: keep these marks (one undo step), or with null
+   * put the step back as it was (a cancelled drag, or nothing changed).
    */
-  endPins(pins: PullPin[] | null): void {
+  endMarks(marks: PullMark[] | null): void {
     const s = this.pullTarget?.step;
-    const before = this.pinsBefore;
-    this.pinsBefore = null;
-    if (!s || before === null) return;
-    const same = (a: PullPin[]) => JSON.stringify(a) === JSON.stringify(before);
-    if (pins && !same(pins)) {
-      if (pins.length) s.pin = pins;
-      else delete s.pin;
-      this.changed();
-    } else {
-      if (before.length) s.pin = before;
-      else delete s.pin;
-      this.changed(false);
-    }
+    const before = this.pullBase();
+    const live = this.marksBefore !== null;
+    this.marksBefore = null;
+    if (!s) return;
+    const keep = marks !== null && JSON.stringify(marks) !== JSON.stringify(before);
+    if (!keep && !live) return; // nothing was shown, nothing to undo
+    const next = keep ? marks : before;
+    if (next.length) s.pull = next;
+    else delete s.pull;
+    this.changed(keep);
   }
 
-  /** Remove every stroke and pin from a pull step. Undoable. */
-  clearPull(uid: string): void {
-    const s = this.step(uid);
-    if (!s?.pull?.length && !s?.pin?.length) return;
-    delete s.pull;
-    delete s.pin;
-    this.changed();
+  /** The stroke being drawn changed: show it on top, without a history entry. */
+  livePull(stroke: PullStroke): void {
+    if (!moves(stroke)) return;
+    this.liveMarks([...this.pullBase(), stroke]);
+  }
+
+  /**
+   * The stroke is finished: keep it on top (one undo step), in the
+   * selected brush, else in a new one, which is then selected so the next
+   * strokes join it. A stroke that moved nothing is dropped.
+   */
+  endPull(stroke: PullStroke | null): void {
+    if (!stroke || !moves(stroke)) {
+      this.endMarks(null);
+      return;
+    }
+    const marks = this.pullBase();
+    const key = this.selectedBrush?.key;
+    let brush = key ?? 0;
+    if (brush <= 0) {
+      brush = nextBrush(marks);
+      // A stroke from before brushes gets a real one when another joins it.
+      if (key !== undefined) for (const i of brushStrokes(marks, key)) marks[i] = { ...(marks[i] as PullStroke), brush };
+    }
+    marks.push({ ...stroke, brush });
+    this.endMarks(marks);
+    this.pullSel = { brush };
   }
 
   setPullTool(patch: Partial<PullTool>): void {

@@ -160,11 +160,12 @@ export interface StepDto {
   /** Effect parameters, plus the step keys encoding, channels and opacity. */
   params: Record<string, string>;
   mask?: Mask;
-  /** A pull step's strokes, in the order drawn (D-64). */
-  pull?: PullStroke[];
-  /** A pull step's pins, run after its strokes (D-67). */
-  pin?: PullPin[];
+  /** A pull step's strokes and pins, in the order made (D-64, D-68). */
+  pull?: PullMark[];
 }
+
+/** One thing drawn on a pull step: a stroke or a pin (it has `from`). */
+export type PullMark = PullStroke | PullPin;
 
 /**
  * One pull pin (see crates/glitchrx-core/src/pull.rs): the point at `from`
@@ -185,6 +186,12 @@ export interface PullStroke {
   strength: number;
   /** Flat x, y list, as shares of the whole photo (like masks, D-52). */
   points: number[];
+  /**
+   * The brush it was drawn with (D-68): strokes of one brush share their
+   * size and strength, and are resized together. Absent on strokes from
+   * before brushes; each of those is a brush of its own.
+   */
+  brush?: number;
 }
 
 export interface RecipeDto {
