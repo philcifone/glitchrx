@@ -103,7 +103,6 @@ the mask shortcuts (B, E, `[` and `]`, Enter, Esc, Delete).
   (about 0.4 s a frame for 40 strokes on a 12 MP photo). Each small step of
   a stroke reads the map as it was and writes afterwards, so its rows can
   be shared out between threads without changing a byte.
-- Pull: a "Show markers" switch, if stroke markers crowd the photo.
 
 ## Done or crossed off
 
