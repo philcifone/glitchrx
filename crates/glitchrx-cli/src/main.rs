@@ -53,7 +53,7 @@ impl From<Error> for Fail {
         match e {
             Error::UnknownFormat | Error::Unsupported(_) => Fail::Unsupported(e.to_string()),
             Error::UnknownEffect(_) | Error::Param { .. } => Fail::Usage(e.to_string()),
-            Error::Malformed(_) | Error::Recipe(_) | Error::Cancelled => {
+            Error::Malformed(_) | Error::Recipe(_) | Error::Project(_) | Error::Cancelled => {
                 Fail::Runtime(e.to_string())
             }
         }

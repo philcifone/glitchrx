@@ -183,7 +183,7 @@ impl From<Error> for ApiError {
     fn from(e: Error) -> ApiError {
         let code = match e {
             Error::UnknownFormat | Error::Unsupported(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            Error::Malformed(_) => StatusCode::UNPROCESSABLE_ENTITY,
+            Error::Malformed(_) | Error::Project(_) => StatusCode::UNPROCESSABLE_ENTITY,
             _ => StatusCode::BAD_REQUEST,
         };
         ApiError(code, e.to_string())

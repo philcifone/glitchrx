@@ -29,6 +29,9 @@ libwebp-sys.workspace = true
 ravif.workspace = true
 rgb.workspace = true
 avif-serialize.workspace = true
+zip.workspace = true
+flate2.workspace = true
+crc32fast.workspace = true
 tempfile = { workspace = true, optional = true }
 same-file = { workspace = true, optional = true }
 

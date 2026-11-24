@@ -28,6 +28,11 @@ ravif = { version = "0.13", default-features = false, features = ["threading"] }
 rgb = "0.8"
 # The AVIF container, to rewrap ravif's output with Display P3 colour.
 avif-serialize = "0.8"
+# Project files (.glrx) are zips; deflate only, through flate2's pure-Rust
+# backend. 8.x is the newest line that builds on our rust-version.
+zip = { version = "8.6", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+crc32fast = "1"
 tempfile = "3"
 same-file = "1"
 clap = { version = "4", features = ["derive"] }
