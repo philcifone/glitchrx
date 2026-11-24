@@ -2,7 +2,7 @@
   // Open a photo: upload from this device, or browse the server's library
   // (the folder chosen in Settings, or --root).
   import Upload from '@lucide/svelte/icons/upload';
-  import Folder from '@lucide/svelte/icons/folder';
+  import DirList from './DirList.svelte';
   import { app } from '../lib/app.svelte';
   import * as api from '../lib/api';
   import type { Listing } from '../lib/types';
@@ -82,18 +82,7 @@
         {#if browseError}
           <p class="err">{browseError}</p>
         {:else if listing}
-          {#if listing.dirs.length}
-            <ul class="dirs">
-              {#if listing.parent !== null}
-                <li><button onclick={() => go(listing!.parent ?? '')}>Up</button></li>
-              {/if}
-              {#each listing.dirs as d (d.path)}
-                <li><button onclick={() => go(d.path)}><Folder size={16} strokeWidth={1.75} /> {d.name}</button></li>
-              {/each}
-            </ul>
-          {:else if listing.parent !== null}
-            <ul class="dirs"><li><button onclick={() => go(listing!.parent ?? '')}>Up</button></li></ul>
-          {/if}
+          <DirList dirs={listing.dirs} parent={listing.parent} ongo={go} />
           {#if listing.files.length}
             <ul class="files">
               {#each listing.files as f (f.path)}
@@ -177,18 +166,8 @@
     padding: 0;
   }
 
-  .dirs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-  }
-
-  .dirs button {
-    border-radius: 999px;
-    font-size: 0.9rem;
-  }
-
   .files {
+    margin-top: var(--pad);
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
     gap: 12px;

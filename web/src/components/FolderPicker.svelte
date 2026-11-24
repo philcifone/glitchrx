@@ -3,8 +3,7 @@
   // library, the export folder and Save As. Folders only. `pick` resolves
   // with the chosen folder (relative to home, "" for home itself), or null
   // if cancelled.
-  import Folder from '@lucide/svelte/icons/folder';
-  import ChevronLeft from '@lucide/svelte/icons/chevron-left';
+  import DirList from './DirList.svelte';
   import * as api from '../lib/api';
   import type { FolderListing } from '../lib/types';
 
@@ -64,16 +63,7 @@
     {#if error}
       <p class="err">{error}</p>
     {:else if listing}
-      <ul class="list">
-        {#if listing.parent !== null}
-          <li>
-            <button onclick={() => go(listing!.parent ?? '')}><ChevronLeft size={16} strokeWidth={1.75} /> Up</button>
-          </li>
-        {/if}
-        {#each listing.dirs as d (d.path)}
-          <li><button onclick={() => go(d.path)}><Folder size={16} strokeWidth={1.75} /> {d.name}</button></li>
-        {/each}
-      </ul>
+      <DirList dirs={listing.dirs} parent={listing.parent} ongo={go} />
       {#if !listing.dirs.length}<p class="dim small">No folders inside this one.</p>{/if}
       <p class="dim small">Choose takes the folder you are in: ~/{listing.path}</p>
     {/if}
@@ -122,36 +112,6 @@
     padding: 2px 6px;
     min-height: 30px;
     color: var(--accent);
-  }
-
-  .list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    background: var(--card);
-    border-radius: 12px;
-    overflow: hidden;
-  }
-
-  .list li + li {
-    border-top: var(--hairline);
-  }
-
-  .list button {
-    width: 100%;
-    justify-content: flex-start;
-    gap: 10px;
-    border-radius: 0;
-    background: none;
-    font-weight: 400;
-    min-height: 44px;
-  }
-
-  .list :global(svg) {
-    color: var(--accent);
-    flex: none;
   }
 
   .small {
