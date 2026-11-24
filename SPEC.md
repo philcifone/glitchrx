@@ -328,6 +328,65 @@ high = 1.0
 soft = 0.1
 ```
 
+### 8.1 Project files, `.grx` (proposed for Phase 7; for Phil's review)
+
+A project file is what a `.psd` is to Photoshop: everything needed to open an edit again on any device and carry on. A recipe alone is not enough, because it replays on the original photo, and the original lives on one device.
+
+**Container.** A zip file, as OpenDocument, EPUB, Krita (`.kra`) and OpenRaster (`.ora`) are. Anyone can unzip it with standard tools; nothing about it is secret or proprietary. Entries, in this order:
+
+| Entry | Stored | What it is |
+| --- | --- | --- |
+| `mimetype` | first, uncompressed | One line, `application/vnd.glitcharaxia.project`, so a file manager (and `file`) can tell what it is from its first bytes, whatever the name. The OpenDocument convention. |
+| `project.toml` | deflated | The manifest: `format = "glitcharaxia-project"`, `version = 1`, the original's entry name and file name, the glitchrx version that wrote it. |
+| `recipe.toml` | deflated | The recipe, exactly as section 8, with `source` naming the original. |
+| `original.jpg` (or `.png`, `.tif`) | stored | The original file, byte for byte: never re-encoded, so it decodes to the same raster and the recipe replays to the same bytes (D-25). |
+| `preview.jpg` | stored | The finished picture at preview size (1024 px on the longer side): a thumbnail for the Open dialog, a picture to show while the exact render runs, and something to look at for anyone without the app. Not needed to replay. |
+
+**Rules.**
+- Readers take only the entries above, by exact name, and ignore anything else; entry paths with `..`, absolute paths or links are refused (zip slip). Sizes are capped before anything is unpacked (zip bombs): the original by the server's upload limit, the TOML files at 1 MB, the preview at 8 MB.
+- `version` in the manifest lets the format change later: a reader refuses a version it does not know, with a message, as recipes do. Version 1 is written until something needs a change.
+- Writing is atomic: a temporary file next to the target, then a rename, so a crash never leaves half a project.
+- **Privacy:** the original goes in unchanged, with its EXIF metadata, which on a phone photo usually includes where it was taken. The save dialog says so ("includes your original photo and its metadata, such as location"). Exports are unaffected: they never carry EXIF.
+
+**In the GUI.** Export becomes two choices: **Save picture** (what Export does today) and **Save project (.grx)**: "the original photo, the steps and a preview, to open again anywhere." The "Also save the recipe beside it" switch stays for picture exports. Open accepts `.grx` beside photos, from the device or the library, with the preview as its thumbnail; opening one shows the preview at once, then the live render, with every step in place and the undo history starting there.
+
+**From the CLI.** `glitchrx project.grx -o out.tif` renders it; `glitchrx photo.jpg --recipe r.toml --project out.grx` writes one; `glitchrx --info project.grx` lists what is inside.
+
+**In the desktop app.** The app registers `.grx` (and the MIME type, for Linux file managers), so a double click opens it.
+
+**The server** keeps each opened photo's file bytes beside its decoded image (today it keeps only the decoded image), since a project must hold the original byte for byte.
+
+### 8.2 Pull (proposed for Phase 8; for Phil's review)
+
+A step whose effect is not a formula but strokes drawn on the photo: drag to pull pixels along with the finger, or twist them into a whorl, as Photoshop's Liquify does. Because it is a step, it switches on and off, has opacity and a mask, moves in the stack and goes into presets like any other.
+
+```toml
+[[step]]
+effect = "pull"
+effect_version = 1
+sampling = "pixels"     # pixels (hard, nearest) or smooth (bilinear)
+
+[[step.pull]]           # one per stroke, applied in order
+tool = "push"           # push: drag pixels along the path
+size = 0.12             # brush diameter, share of the photo's longer side
+strength = 0.6          # 0 to 1: how far the pixels follow the finger
+points = [0.40, 0.52, 0.43, 0.53, 0.47, 0.55]   # x, y as shares of the photo
+
+[[step.pull]]
+tool = "twirl"          # twirl: turn the pixels around a centre
+size = 0.2
+center = [0.6, 0.4]
+turn = -240             # degrees; negative is anticlockwise, the middle turns most
+```
+
+**Where strokes live.** In shares of the whole photo, like masks (D-52), so a crop or a work size change leaves them on the same features of the photo.
+
+**How it renders** (deterministic, D-25). A displacement map at a fixed size (1024 points on the canvas's longer side, whatever the render's size) says, for every output point, where in the input to read. Each stroke updates the map in small steps (a push every quarter of the brush radius along its path, a twirl in turns of at most 5 degrees), each step reading the map as it was, so strokes build on one another as they do in Liquify rather than tearing. The brush falls off as `(1 - t^2)^2` from its centre to its edge: basic operations only. Then every pixel is read from the input once, through the map: nearest pixel (`pixels`, hard-edged, the default proposed here, to match the raw-pixel look) or bilinear (`smooth`, closer to Liquify). The map has the same size for a preview and an export, so the preview matches the export more closely than most effects do. No seed: nothing is random. Placement (region, bands) does not apply; the strokes are the placement. The raster keeps its size.
+
+**In the GUI.** A **pull mode**, entered like mask editing (and at once when the step is added): the top bar becomes an edit bar (what is being pulled, undo, redo, Done), and a tool bar under the photo has Push and Twirl, size and strength. One finger draws with the tool, two fingers pinch and pan, `[` and `]` size the brush on a desktop. Push follows the finger; twirl is placed with a tap and turned by dragging a handle around it, like a radial mask's edge dot, so it can be adjusted until it looks right. The preview follows the drag live, rendering the pull step on the cached picture before it. Each stroke is one undo step; the step card says how many strokes there are and has Clear. To take a pull back from part of the photo, paint the step's mask, as with any step: there is no separate restore brush.
+
+**Recipe version 5** (version 4 readers refuse it, as version 3 readers refuse 4; versions 2 to 4 load unchanged).
+
 ## 9. GUI
 
 ### 9.1 Changes from 2a
@@ -424,6 +483,31 @@ Also from Phil's notes: step cards keep their collapsed state through Edit mode 
 Then, from his notes on Phase 6: sliders mark their default and reset with a double tap (D-55), every effect starts on the whole picture with a Bands switch (D-56), and hsl's colour ranges became colour dots, several at once (D-57).
 
 And from his notes of 2026-11-24: adjustments start neutral (D-58); whole-number sliders spanning up to 360 (tone values, degrees) are linear, since a log scale made levels' output black jump; the curves grid uses the dim text colour so it shows in dark mode; a parameter's help line shows in full after a tap; full view (D-59), entered with a tap on the photo, with the grabber left to pull the panel back; the photo toolbox (D-62); folders listed as a plain list with `..` for the folder above; the levels editor (D-60); and remembered pictures for switching steps (D-61).
+
+### Phase 7: project files (proposed 2026-11-24; starts on Phil's go-ahead)
+
+Section 8.1. Each part ends green and usable:
+
+- **7a Format in the core.** Read and write `.grx` (the `zip` crate, deflate only, no other features), the manifest, the safety rules, tests: round trip byte for byte, a refused unknown version, refused zip slip and oversized entries, a fixture `.grx` committed to `tests/fixtures`.
+- **7b CLI.** Render a `.grx`, write one with `--project`, `--info`. Outputs are never overwritten without `--force`.
+- **7c Server and GUI.** The server keeps opened photos' file bytes; new endpoints to make a project from the open photo (download, or save to a folder) and to open one (upload, or from the library); the export sheet's two choices; Open accepts `.grx`, with thumbnails in the library. To check on Phil's iPhone: that Safari's file picker offers `.grx` files (it greys out types it does not recognise unless the page asks for them) and that a downloaded `.grx` lands in Files.
+- **7d Desktop.** The file type registered in the Tauri bundle (Linux first, macOS with `docs/macos.md`), a double click opens it.
+
+**Open question for Phil:** saving changes back into the `.grx` that was opened. A project is a working file, so saving in place (with a confirmation) is what Photoshop does. It conflicts with the invariant "inputs are never written", which exists to protect photos; the original inside a project is copied unchanged, so the photo stays safe. Proposed: allow replacing a `.grx` (never a photo) after a confirmation in the GUI, or `--force` in the CLI, and say so in section 13. The alternative is that Save project always makes a new file.
+
+Effort: about Phase 5's size; most of it is 7c.
+
+### Phase 8: pull (proposed 2026-11-24; starts on Phil's go-ahead, after Phase 7)
+
+Section 8.2. Each part ends green and usable:
+
+- **8a The effect in the core.** The displacement map, push and twirl, both samplings, the strokes in the recipe (version 5), mapping onto a cropped or shrunk canvas, golden hashes, a test that a preview and an export agree closely, a contact sheet of push and twirl at a few sizes and strengths.
+- **8b Pull mode in the GUI.** The edit bar and tool bar, push with a live preview, undo per stroke, the step card's count and Clear.
+- **8c Twirl handles and desktop keys,** and a speed check on the slow test photo (target: the preview keeps up with a finger on a 12 MP photo).
+
+**Open questions for Phil:** the default sampling (hard `pixels`, proposed, or `smooth`); whether twirl belongs in the first version (proposed: yes, since a whorl is what he asked for), with pinch and bloat (shrink and swell under the brush) left for later.
+
+Effort: a little larger than Phase 7; the GUI mode is most of it, and it reuses the mask painter's gestures.
 
 ### Parked
 
