@@ -2,14 +2,14 @@
   // A pull step's strokes and pins (SPEC 8.2, D-67, D-68). The card looks
   // the same whether or not the photo is being pulled (Phil, 2026-11-24):
   // the tools (Draw or Pins; picking one starts pulling), what the sliders
-  // change (the selected brush or pin, or the next one), New and Delete,
-  // and the tool's sliders. Done is in the top bar only.
+  // change (the selected brush or pin, or the next one) and New, then the
+  // tool's settings, then "Delete this pin" (or brush) while one is
+  // selected. There is no Delete all. Done is in the top bar only.
   import Hand from '@lucide/svelte/icons/hand-grab';
   import Grid from '@lucide/svelte/icons/grid-3x3';
   import Plus from '@lucide/svelte/icons/plus';
   import Trash from '@lucide/svelte/icons/trash-2';
   import { app } from '../lib/app.svelte';
-  import { tip } from '../lib/hold';
   import { percent } from '../lib/mask';
   import { GRID_MAX, GRID_MIN, pullSizeScale, strokeCount, STRENGTH_MIN, type GridShow, type PullMode } from '../lib/pull';
   import { SLIDER_STEPS } from '../lib/slider';
@@ -78,21 +78,9 @@
       </button>
     {/each}
   </div>
-  <!-- What the sliders below change; New starts the next brush or pin,
-       Delete removes the selected one. -->
+  <!-- What the sliders below change; New starts the next brush or pin. -->
   <div class="target">
     <span class="what" class:sel={selected}>{target}</span>
-    {#if selected}
-      <button
-        class="icon danger"
-        onclick={() => app.deleteSelected()}
-        title={brush ? `Delete this brush (${brush.strokes.length === 1 ? 'its stroke' : `all ${brush.strokes.length} strokes`})` : 'Delete this pin'}
-        aria-label={brush ? 'Delete brush' : 'Delete pin'}
-        {@attach tip}
-      >
-        <Trash size={18} strokeWidth={1.75} />
-      </button>
-    {/if}
     <!-- Labelled, unlike the icons around it: the add-effect button is a
          plus too, and sits nearby. -->
     <button
@@ -138,6 +126,17 @@
       />
       <span class="val">{Math.round(strength * 100)}%</span>
     </div>
+    <label class="row">
+      <span class="lbl">Markers</span>
+      <span class="grow"></span>
+      <input
+        class="switch"
+        type="checkbox"
+        checked={tool.markers}
+        onchange={(e) => app.setPullTool({ markers: e.currentTarget.checked })}
+        title="A dot where each stroke ends; tap one to select its brush"
+      />
+    </label>
   {:else}
     <div class="row">
       <span class="lbl">Grid</span>
@@ -163,13 +162,20 @@
       </div>
     </div>
   {/if}
+  <!-- Only the one selected; there is no Delete all (Phil, 2026-11-24). -->
+  {#if selected}
+    <button class="plain danger delete" onclick={() => app.deleteSelected()} title={brush ? `Remove the ${brush.strokes.length === 1 ? 'stroke' : `${brush.strokes.length} strokes`} of this brush (undo brings them back)` : 'Remove this pin (undo brings it back)'}>
+      <Trash size={16} strokeWidth={1.75} />
+      {brush ? 'Delete this brush' : 'Delete this pin'}
+    </button>
+  {/if}
   <p class="dim note">
     {#if !active}
       Tap Draw or Pins to pull the photo.
     {:else if drawing}
-      Drag on the photo to pull it. Strokes join the selected brush; tap a stroke's marker to select its brush, or + for a new one. Whatever you do last goes on top.
+      Drag on the photo to pull it. Strokes join the selected brush; {tool.markers ? "tap a stroke's marker to select its brush, or New" : 'New'} for a new one. Whatever you do last goes on top.
     {:else}
-      Drag a grid point to pull it; drag a pin to move it again (it comes to the top), or back home to remove it. Tap a pin to select it, or + for a new one.
+      Drag a grid point to pull it; drag a pin to move it again (it comes to the top), or back home to remove it. Tap a pin to select it, or New for a new one.
     {/if}
   </p>
 </section>
@@ -203,6 +209,16 @@
 
   .new {
     gap: 4px;
+  }
+
+  .grow {
+    flex: 1;
+  }
+
+  .delete {
+    align-self: flex-start;
+    gap: 6px;
+    margin-top: 2px;
   }
 
   .what.sel {

@@ -32,10 +32,12 @@ export interface PullTool {
   /** Pin grid: cells across the photo's longer side. */
   grid: number;
   show: GridShow;
+  /** Show a marker where each stroke ends (D-68); off, the photo is clear. */
+  markers: boolean;
 }
 
 /** The core's default strength (pull.rs), and a brush that reads at a glance. */
-export const DEFAULT_PULL_TOOL: PullTool = { size: 0.12, strength: 0.6, mode: 'draw', grid: 8, show: 'dots' };
+export const DEFAULT_PULL_TOOL: PullTool = { size: 0.12, strength: 0.6, mode: 'draw', grid: 8, show: 'dots', markers: true };
 export const GRID_MIN = 2;
 export const GRID_MAX = 32;
 
@@ -57,6 +59,7 @@ export function cleanPullTool(saved: unknown): PullTool {
     mode: s.mode === 'pins' ? 'pins' : 'draw',
     grid: Math.round(clamp(num(s.grid, DEFAULT_PULL_TOOL.grid), GRID_MIN, GRID_MAX)),
     show: s.show === 'lines' || s.show === 'off' ? s.show : 'dots',
+    markers: s.markers !== false,
   };
 }
 

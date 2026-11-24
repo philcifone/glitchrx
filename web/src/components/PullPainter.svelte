@@ -11,7 +11,8 @@
   //   starts a new one, which is then selected. Each stroke has a marker
   //   where the finger lifted; tapping one selects its brush (all its
   //   markers light up, with their reach), and tapping an empty spot
-  //   selects none.
+  //   selects none. With markers switched off nothing shows, and a tap
+  //   only selects none: nothing hidden can be picked.
   // - Pins: a grid over the photo. Touching near a grid point picks it up
   //   as a new pin; touching near a pin (where it was put, or its home)
   //   picks that pin up again. Dragging moves it, live, and brings it to
@@ -214,7 +215,7 @@
     }
     // A tap: select the brush whose marker is under it, or none.
     app.endPull(null);
-    const i = strokeAt($state.snapshot(marks) as PullMark[], onStage(e), at, reach(e));
+    const i = app.pullTool.markers ? strokeAt($state.snapshot(marks) as PullMark[], onStage(e), at, reach(e)) : -1;
     if (i >= 0) app.selectMark(i);
     else app.pullSel = null;
   }
@@ -282,7 +283,7 @@
         {/if}
       {/each}
     </svg>
-  {:else}
+  {:else if app.pullTool.markers}
     <!-- A marker where each stroke ends; the selected brush's light up,
          with their reach. The stroke being drawn has none yet. -->
     <svg class="pins" width="100%" height="100%">

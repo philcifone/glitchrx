@@ -31,6 +31,8 @@ describe('pull tool', () => {
       grid: GRID_MAX,
     });
     expect(cleanPullTool({ mode: 'pins', show: 'lines', grid: 5.6 })).toMatchObject({ mode: 'pins', show: 'lines', grid: 6 });
+    expect(cleanPullTool({ markers: false }).markers).toBe(false);
+    expect(cleanPullTool({ markers: 'no' }).markers).toBe(true); // only a real false hides them
   });
 
   it('maps the size slider end to end, and back', () => {
