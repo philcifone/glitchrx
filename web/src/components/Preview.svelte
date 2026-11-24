@@ -6,8 +6,10 @@
   // by itself, so there is no button for that.
   //
   // Gestures (SPEC 9.6), the same with a finger or the mouse:
+  // - a tap: full view and back (as in Photos), once it is clear the tap
+  //   is not the first of two
   // - press and hold: the original, until released (as in Instagram)
-  // - double tap, the magnifier or Z: fit to 100% and back
+  // - double tap, the zoom button in the panel or Z: fit to 100% and back
   // - two fingers: pinch to zoom, and pan; ctrl + wheel or a trackpad pinch
   //   zooms too
   // - zoomed in, one finger (or the middle mouse button) pans, so does the
@@ -19,19 +21,13 @@
   // (soft), with a sharp patch on top: the visible part cut from the
   // full-resolution render, asked for once the view holds still.
   import { onMount } from 'svelte';
-  import ZoomIn from '@lucide/svelte/icons/zoom-in';
-  import Maximize2 from '@lucide/svelte/icons/maximize-2';
-  import Minimize2 from '@lucide/svelte/icons/minimize-2';
-  import ZoomOut from '@lucide/svelte/icons/zoom-out';
-  import CropIcon from '@lucide/svelte/icons/crop';
   import CropTool from './CropTool.svelte';
   import RecipePicker from './RecipePicker.svelte';
   import X from '@lucide/svelte/icons/x';
   import { ago, recipeTitle } from '../lib/age';
   import { app } from '../lib/app.svelte';
-  import { WORK_SIZES } from '../lib/canvas';
   import { photoRect } from '../lib/mask';
-  import { pan, percent, pinch, placement, spread, wheelZoom, type Point, type Spread, type View } from '../lib/view';
+  import { pan, pinch, placement, spread, wheelZoom, type Point, type Spread, type View } from '../lib/view';
   import MaskPainter from './MaskPainter.svelte';
 
   let { onopen }: { onopen: () => void } = $props();
@@ -207,12 +203,25 @@
     }
   }
 
-  /** Two taps close together toggle the zoom about where they landed. */
+  /**
+   * Two taps close together toggle the zoom about where they landed. One
+   * tap alone toggles full view, but only once the second has had its
+   * chance not to come, so a double tap never flashes the panels.
+   */
+  let singleTimer = 0;
   function tap(p: Point) {
     const now = performance.now();
     const near = lastTap && now - lastTap.t < DOUBLE_TAP_MS && Math.hypot(p.x - lastTap.p.x, p.y - lastTap.p.y) < 30;
     lastTap = near ? null : { t: now, p };
-    if (near) app.toggleZoom(p);
+    clearTimeout(singleTimer);
+    if (near) {
+      app.toggleZoom(p);
+    } else {
+      singleTimer = window.setTimeout(() => {
+        lastTap = null;
+        if (!app.masking && !app.cropping) app.fullView = !app.fullView;
+      }, DOUBLE_TAP_MS);
+    }
   }
 
   function wheel(e: WheelEvent) {
@@ -340,66 +349,6 @@
   {/if}
   {#if app.cropping && app.doc}
     <CropTool />
-  {:else if app.doc && app.imageUrl && g}
-    <!-- Work size (5b): the size the steps run on. Smaller is faster and
-         exact at once, with coarser glitch texture. -->
-    <div class="work glass" role="radiogroup" aria-label="Work size" title="The size the steps run on: smaller is faster, with coarser texture">
-      {#each WORK_SIZES as ws (ws.label)}
-        <button
-          role="radio"
-          aria-checked={(app.recipe.work_size ?? null) === ws.size}
-          class:on={(app.recipe.work_size ?? null) === ws.size}
-          onclick={() => app.setWorkSize(ws.size)}
-          disabled={ws.size !== null && !!app.croppedSize && Math.max(app.croppedSize.w, app.croppedSize.h) <= ws.size}
-        >
-          {ws.label}
-        </button>
-      {/each}
-    </div>
-    <!-- Full view: the photo on the whole screen, the panels hidden. -->
-    {#if !app.masking}
-      <button
-        class="zoom full-btn"
-        class:on={app.fullView}
-        onclick={() => (app.fullView = !app.fullView)}
-        title={app.fullView ? 'Back to the panels (Esc)' : 'Full view: the photo on the whole screen'}
-        aria-label={app.fullView ? 'Leave full view' : 'Full view'}
-        aria-pressed={app.fullView}
-      >
-        {#if app.fullView}
-          <Minimize2 size={18} strokeWidth={1.75} />
-        {:else}
-          <Maximize2 size={18} strokeWidth={1.75} />
-        {/if}
-      </button>
-    {/if}
-    <div class="tools">
-    <button
-      class="zoom crop-btn"
-      class:on={!!app.recipe.crop}
-      onclick={() => app.startCrop()}
-      title="Crop: keep part of the photo, before the steps"
-      aria-label="Crop"
-    >
-      <CropIcon size={18} strokeWidth={1.75} />
-    </button>
-    <button
-      class="zoom"
-      class:on={app.zoomed}
-      onclick={() => app.toggleZoom()}
-      title={app.zoomed
-        ? 'Back to fit (Z, or double tap)'
-        : 'Zoom to 100% (Z, or double tap; pinch to zoom). Press and hold the photo for the original.'}
-      aria-label={app.zoomed ? 'Zoom to fit' : 'Zoom to 100%'}
-    >
-      {#if app.zoomed}
-        <ZoomOut size={18} strokeWidth={1.75} />
-        <span>{percent(app.view, g)}%</span>
-      {:else}
-        <ZoomIn size={18} strokeWidth={1.75} />
-      {/if}
-    </button>
-    </div>
   {/if}
 </div>
 
@@ -408,8 +357,7 @@
 <style>
   .continue {
     position: absolute;
-    /* Under the full view button in the corner. */
-    top: 60px;
+    top: 12px;
     left: 50%;
     transform: translateX(-50%);
     width: max-content;
@@ -514,16 +462,12 @@
   }
 
   /* Floating "glass" elements over the photo: blurred, rounded pills. */
-  .working,
-  .zoom {
+  .working {
     background: var(--glass);
     backdrop-filter: saturate(180%) blur(16px);
     -webkit-backdrop-filter: saturate(180%) blur(16px);
     box-shadow: var(--shadow);
     border-radius: 999px;
-  }
-
-  .working {
     position: absolute;
     top: 12px;
     left: 50%;
@@ -531,6 +475,11 @@
     padding: 6px 14px;
     font-size: 0.9rem;
     white-space: nowrap;
+  }
+
+  /* Full view reaches the screen's top edge: keep clear of the notch. */
+  .full .working {
+    top: max(12px, env(safe-area-inset-top));
   }
 
   /* Region band: shade outside it, thin accent edges along it. */
@@ -559,7 +508,7 @@
     align-items: center;
     gap: 10px;
     padding: 4px 4px 4px 14px;
-    max-width: calc(100% - 128px);
+    max-width: calc(100% - 24px);
     white-space: normal;
     color: var(--warn);
   }
@@ -568,82 +517,5 @@
     border-radius: 999px;
     min-height: 30px;
     flex: none;
-  }
-
-  /* The magnifier: a round glass button, a pill with the zoom when zoomed. */
-  .tools {
-    position: absolute;
-    right: 12px;
-    bottom: 12px;
-    display: flex;
-    gap: 8px;
-  }
-
-  .zoom {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 40px;
-    min-height: 40px;
-    padding: 6px 11px;
-    font-size: 0.9rem;
-    font-variant-numeric: tabular-nums;
-    color: var(--accent);
-  }
-
-  .zoom span {
-    color: var(--fg);
-  }
-
-  .zoom:hover:not(:disabled) {
-    background: var(--glass);
-  }
-
-  .full-btn {
-    position: absolute;
-    right: 12px;
-    top: 12px;
-  }
-
-  /* Full view reaches the screen's edges: keep clear of the notch and the
-     home indicator. */
-  .full .full-btn {
-    top: max(12px, env(safe-area-inset-top));
-  }
-
-  .full .tools,
-  .full .work {
-    bottom: max(12px, env(safe-area-inset-bottom));
-  }
-
-  .work {
-    position: absolute;
-    left: 12px;
-    bottom: 12px;
-    display: flex;
-    padding: 3px;
-    gap: 2px;
-    border-radius: 999px;
-    background: var(--glass);
-    backdrop-filter: saturate(180%) blur(16px);
-    -webkit-backdrop-filter: saturate(180%) blur(16px);
-    box-shadow: var(--shadow);
-  }
-
-  .work button {
-    min-height: 34px;
-    min-width: 40px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: none;
-    font-size: 0.85rem;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .work button.on,
-  .work button.on:hover:not(:disabled) {
-    background: var(--card);
-    font-weight: 600;
-    color: var(--accent);
   }
 </style>
