@@ -557,6 +557,8 @@ export class App {
 
   private restore(snap: string | null): void {
     if (snap === null) return;
+    // The pins may differ now; an index could point at another one.
+    this.pinSel = null;
     this.recipe = JSON.parse(snap) as RecipeState;
     this.canUndo = this.history.canUndo;
     this.canRedo = this.history.canRedo;
@@ -1076,6 +1078,33 @@ export class App {
 
   stopPulling(): void {
     this.pulling = null;
+    this.pinSel = null;
+  }
+
+  /**
+   * The selected pin (D-67): the last one touched, by its index in the
+   * pulled step's pins. While there is one, Size resizes it alone.
+   */
+  pinSel = $state<number | null>(null);
+
+  /** The selected pin, if it is still there and pins are being placed. */
+  get selectedPin(): PullPin | null {
+    const pins = this.pullTarget?.step.pin;
+    if (this.pinSel === null || !pins || this.pullTool.mode !== 'pins') return null;
+    return pins[this.pinSel] ?? null;
+  }
+
+  /**
+   * Resize the selected pin: live while a slider moves, kept (one undo
+   * step) when `commit`.
+   */
+  resizePin(size: number, commit: boolean): void {
+    const s = this.pullTarget?.step;
+    const i = this.pinSel;
+    if (!s?.pin || i === null || !s.pin[i]) return;
+    const pins = ($state.snapshot(s.pin) as PullPin[]).map((p, k) => (k === i ? { ...p, size } : p));
+    this.livePins(pins);
+    if (commit) this.endPins(pins);
   }
 
   // -------------------------------------------------------------------------

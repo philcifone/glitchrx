@@ -34,7 +34,6 @@
   ];
   const active = $derived(app.pulling === step.uid && !!app.pullTarget);
   const usable = $derived(step.enabled && !!app.doc);
-  const sizeT = $derived(pullSizeScale.toSlider(app.pullTool.size));
 </script>
 
 <section class="group" aria-label="Strokes">
@@ -68,20 +67,30 @@
     </button>
   </div>
   {#if active}
+    {@const pin = app.selectedPin}
+    {@const shown = pin ? pin.size : app.pullTool.size}
+    {@const t = pullSizeScale.toSlider(shown)}
     <div class="row">
-      <span class="lbl">Size</span>
+      <span class="lbl">{pin ? 'This pin' : 'Size'}</span>
       <input
         type="range"
         min="0"
         max={SLIDER_STEPS}
         step="1"
-        value={sizeT}
-        style:--pct="{(sizeT / SLIDER_STEPS) * 100}%"
-        oninput={(e) => app.setPullTool({ size: pullSizeScale.fromSlider(Number(e.currentTarget.value)) })}
-        aria-label="Brush size"
-        title="Brush size ([ and ] keys)"
+        value={t}
+        style:--pct="{(t / SLIDER_STEPS) * 100}%"
+        oninput={(e) => {
+          const size = pullSizeScale.fromSlider(Number(e.currentTarget.value));
+          if (pin) app.resizePin(size, false);
+          else app.setPullTool({ size });
+        }}
+        onchange={(e) => {
+          if (pin) app.resizePin(pullSizeScale.fromSlider(Number(e.currentTarget.value)), true);
+        }}
+        aria-label={pin ? 'Size of the selected pin' : 'Brush size'}
+        title={pin ? 'Resize the selected pin ([ and ] keys)' : 'Brush size ([ and ] keys)'}
       />
-      <span class="val">{percent(app.pullTool.size)}</span>
+      <span class="val">{percent(shown)}</span>
     </div>
     {#if tool.mode === 'draw'}
     <div class="row">
@@ -127,7 +136,7 @@
       </div>
     </div>
     <p class="dim note">
-      Drag a grid point to pull it; touch a pin to move it again, or drag it home to remove it. Each move is one undo. Size applies to new pins; the grid only picks points, so changing it moves nothing.
+      Drag a grid point to pull it; touch a pin to move it again, or drag it home to remove it. The pin last touched is selected, and its size changes only it; tap an empty spot to set the size for new pins. Each move is one undo. The grid only picks points, so changing it moves nothing.
     </p>
     {/if}
   {:else if !count}

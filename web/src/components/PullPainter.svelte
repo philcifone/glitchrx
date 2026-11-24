@@ -11,7 +11,9 @@
   // - Pins: a grid over the photo. Touching near a grid point picks it up
   //   as a new pin; touching near a pin (where it was put, or its home)
   //   picks that pin up again. Dragging moves it, live; dragging it back
-  //   home removes it. Each move is one undo step.
+  //   home removes it. Each move is one undo step. The pin last touched is
+  //   selected (its reach stays drawn), and Size then resizes it alone; a
+  //   tap on an empty spot selects none.
   //
   // The brush is sized against the screen, as the mask brush is: zoomed in,
   // the same setting pulls a smaller area of the photo.
@@ -53,7 +55,7 @@
   const axes = $derived(gridAxes(rect.w, rect.h, app.pullTool.grid));
   const pins = $derived<PullPin[]>(app.pullTarget?.step.pin ?? []);
   /** The pin being moved: its index, the pins around it, and where the finger holds it. */
-  let held = $state<{ i: number; base: PullPin[]; grip: { x: number; y: number } } | null>(null);
+  let held = $state<{ i: number; base: PullPin[]; grip: { x: number; y: number }; fresh: boolean } | null>(null);
 
   /** A share of the photo, on the stage. */
   const at = (q: [number, number]) => ({ x: rect.x + q[0] * rect.w, y: rect.y + q[1] * rect.h });
@@ -65,12 +67,13 @@
     const i = pinAt(current, p, at, e.pointerType === 'mouse' ? REACH_MOUSE : REACH_TOUCH);
     if (i >= 0) {
       const to = at(current[i].to);
-      held = { i, base: current, grip: { x: p.x - to.x, y: p.y - to.y } };
+      held = { i, base: current, grip: { x: p.x - to.x, y: p.y - to.y }, fresh: false };
+      app.pinSel = i;
     } else {
       const home = snap((p.x - rect.x) / rect.w, (p.y - rect.y) / rect.h, axes);
       const pin: PullPin = { size: Math.max(0.0001, Math.round(size * 10000) / 10000), from: home, to: home };
       const h = at(home);
-      held = { i: current.length, base: [...current, pin], grip: { x: p.x - h.x, y: p.y - h.y } };
+      held = { i: current.length, base: [...current, pin], grip: { x: p.x - h.x, y: p.y - h.y }, fresh: true };
     }
   }
 
@@ -98,8 +101,17 @@
     const pin = out[held.i];
     const a = at(pin.from);
     const b = at(pin.to);
-    // Back home (or never moved): the pin goes.
-    if (Math.hypot(a.x - b.x, a.y - b.y) <= HOME) out = out.filter((_, k) => k !== held!.i);
+    // Dropped home, the pin goes (a new pin that never left was a tap on
+    // an empty spot: nothing is selected). A pin only tapped, not moved,
+    // stays and is selected, even if it sits close to home.
+    const start = at(held.base[held.i].to);
+    const dragged = Math.hypot(b.x - start.x, b.y - start.y) > 3;
+    if (Math.hypot(a.x - b.x, a.y - b.y) <= HOME && (held.fresh || dragged)) {
+      out = out.filter((_, k) => k !== held!.i);
+      app.pinSel = null;
+    } else {
+      app.pinSel = held.i;
+    }
     held = null;
     latest = null;
     app.endPins(out);
@@ -223,14 +235,15 @@
         {@const a = at(pin.from)}
         {@const b = at(pin.to)}
         {@const active = held?.i === i}
-        {#if active}
+        {@const chosen = active || (!held && app.pinSel === i)}
+        {#if chosen}
           <!-- How far this pin reaches. -->
           <circle class="reach" cx={b.x} cy={b.y} r={(pin.size / 2) * long} />
         {/if}
         <line class="shade" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
         <line class="tie" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
         <circle class="home" cx={a.x} cy={a.y} r="4" />
-        <circle class="handle" class:active cx={b.x} cy={b.y} r={active ? 9 : 7} />
+        <circle class="handle" class:chosen cx={b.x} cy={b.y} r={chosen ? 9 : 7} />
       {/each}
     </svg>
   {:else if ring}
@@ -302,6 +315,10 @@
     fill: var(--accent);
     stroke: white;
     stroke-width: 2;
+  }
+
+  .handle.chosen {
+    stroke-width: 3;
   }
 
   .reach {

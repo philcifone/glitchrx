@@ -179,7 +179,9 @@
 
   /** Pull mode: [ and ] size the brush, Enter or Esc finish. */
   function pullKey(e: KeyboardEvent) {
-    if (e.key === '[' || e.key === ']') app.setPullTool({ size: stepSize(app.pullTool.size, e.key === '[' ? -1 : 1) });
+    const pin = app.selectedPin;
+    if ((e.key === '[' || e.key === ']') && pin) app.resizePin(stepSize(pin.size, e.key === '[' ? -1 : 1), true);
+    else if (e.key === '[' || e.key === ']') app.setPullTool({ size: stepSize(app.pullTool.size, e.key === '[' ? -1 : 1) });
     else if (e.key === 'Escape' || e.key === 'Enter') app.stopPulling();
     else return;
     e.preventDefault();
