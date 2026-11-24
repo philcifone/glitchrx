@@ -2,6 +2,8 @@
 
 Operational rules for agents working on glitcharaxia. `SPEC.md` is the source of truth for behaviour, and `VOCAB.md` defines the terms.
 
+Beyond the planned phases: `docs/roadmap.md` (unscheduled ideas, RAW and macOS plans, notes for Phil) and `docs/hosting.md` (sharing it with friends or the public: steps, hardware, Cloudflare Tunnel, the public mode still to build). Keep both current when plans change.
+
 ## Gate
 
 Run `just check` (or `scripts/check.sh` if `just` is not installed) before calling any work done. It runs:

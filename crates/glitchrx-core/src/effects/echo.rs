@@ -10,6 +10,7 @@ pub static INFO: EffectInfo = EffectInfo {
     id: "echo",
     group: Group::Audio,
     version: 1,
+    upgrades: &[],
     audacity: "Echo",
     summary: "Feedback delay: every sample adds a fading copy of the output `delay` earlier.",
     details: "`y[n] = x[n] + decay * y[n - delay]`. A delay of a fraction of a row ghosts the \

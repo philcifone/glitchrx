@@ -10,6 +10,7 @@ pub static INFO: EffectInfo = EffectInfo {
     id: "wahwah",
     group: Group::Audio,
     version: 1,
+    upgrades: &[],
     audacity: "Wahwah",
     summary: "A resonant filter whose cutoff an LFO sweeps up and down: smears that pulse down the picture.",
     details: "Audacity's wahwah: a two-pole resonant low-pass (a biquad) whose cutoff follows \

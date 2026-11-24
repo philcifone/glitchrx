@@ -111,7 +111,7 @@ Multiply every sample by a gain given in decibels, clipping at the limits.
 
 Positive gains push bytes away from the encoding's silence point and clip them: with `u8` that is a harsh contrast boost around mid grey, with `s8` it folds highlights into shadows, with the multi-byte encodings it explodes into noise.
 
-Follows Audacity's Amplify. Version: 1.
+Follows Audacity's Amplify. Version: 2.
 
 The seed only picks where hits land, so it has no effect with `hits=0`.
 
@@ -119,7 +119,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 | --- | --- | --- |
 | `gain` | `6` | gain in dB (+6 dB doubles, -6 dB halves) |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
-| `hits` | `4` | number of windows at seeded places; 0 = one window over the whole region |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
 | `len` | `5%` | length of each window (%, rows, px or bytes); unused when hits=0 |
 
 Example:
@@ -134,14 +134,14 @@ Flip every sample upside down.
 
 With `u8` this is close to a photographic negative. With `s8` and the multi-byte encodings the flip happens around a different point in each byte, so only some channels or some brightness ranges invert.
 
-Follows Audacity's Invert. Version: 1.
+Follows Audacity's Invert. Version: 2.
 
 The seed only picks where hits land, so it has no effect with `hits=0`.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
-| `hits` | `4` | number of windows at seeded places; 0 = one window over the whole region |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
 | `len` | `4%` | length of each window (%, rows, px or bytes); unused when hits=0 |
 
 Example:
@@ -179,14 +179,14 @@ Play each window backwards.
 
 Reverses the order of the samples (not the bytes inside a sample). A window covering whole rows mirrors them left to right and flips their order; with `u8` the colour channels also swap, red with blue.
 
-Follows Audacity's Reverse. Version: 1.
+Follows Audacity's Reverse. Version: 2.
 
 The seed only picks where hits land, so it has no effect with `hits=0`.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
-| `hits` | `6` | number of windows at seeded places; 0 = one window over the whole region |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
 | `len` | `2%` | length of each window (%, rows, px or bytes); unused when hits=0 |
 
 Example:
@@ -201,7 +201,7 @@ Rotate each window forward by `by`; what falls off the end wraps to the start.
 
 A fraction of a row slides a band of the picture sideways. `phase` adds bytes to the distance, which moves the colour channels out of step (red into green, green into blue). Edits move whole samples, so with multi-byte encodings the distance is rounded down to a whole sample.
 
-Follows Audacity's cut and paste. Version: 1.
+Follows Audacity's cut and paste. Version: 2.
 
 The seed only picks where hits land, so it has no effect with `hits=0`.
 
@@ -210,7 +210,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 | `by` | `0.25rows` | distance (rows, px, % or bytes) |
 | `phase` | `1` | extra bytes on top of the distance: 0 keeps colours, 1 or 2 rotates them |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
-| `hits` | `6` | number of windows at seeded places; 0 = one window over the whole region |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
 | `len` | `3%` | length of each window (%, rows, px or bytes); unused when hits=0 |
 
 Example:
@@ -225,7 +225,7 @@ Split each window into blocks and swap a share of them at random.
 
 Blocks of whole rows rearrange bands of the picture; blocks of part of a row tear it into sideways-displaced strips. A percentage `block` is of the window, not the image. Seeded, so the same seed picks the same blocks.
 
-Follows Audacity's cut and paste. Version: 1.
+Follows Audacity's cut and paste. Version: 2.
 
 The seed picks where hits land and what happens inside each window.
 
@@ -234,7 +234,7 @@ The seed picks where hits land and what happens inside each window.
 | `block` | `0.5rows` | block size (rows, px, bytes, or % of the window) |
 | `fraction` | `0.5` | share of the blocks that move |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
-| `hits` | `4` | number of windows at seeded places; 0 = one window over the whole region |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
 | `len` | `10%` | length of each window (%, rows, px or bytes); unused when hits=0 |
 
 Example:
@@ -249,7 +249,7 @@ Copy the first `chunk` of each window over the rest of it, again and again.
 
 Whole rows repeat a strip of the picture down the window; part of a row gives a diagonal smear, since each repeat starts a little further along the row. A percentage `chunk` is of the window.
 
-Follows Audacity's Repeat. Version: 1.
+Follows Audacity's Repeat. Version: 2.
 
 The seed only picks where hits land, so it has no effect with `hits=0`.
 
@@ -257,7 +257,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 | --- | --- | --- |
 | `chunk` | `1rows` | length of the repeated piece (rows, px, bytes, or % of the window) |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
-| `hits` | `3` | number of windows at seeded places; 0 = one window over the whole region |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
 | `len` | `5%` | length of each window (%, rows, px or bytes); unused when hits=0 |
 
 Example:
@@ -354,7 +354,7 @@ Play each window faster or slower, wrapping around to keep its length: shears an
 
 Output sample `i` reads the input at `i * factor`, between samples by linear interpolation, wrapping back to the start of the window. Faster than 1 squeezes the window's rows and repeats it, and since a squeezed row no longer lines up with the picture's rows, everything leans into a diagonal shear. Slower than 1 stretches the start of the window across all of it. With `step=pixel` (the default) whole pixels are resampled, so colours hold. `step=sample` resamples each sample like Audacity, which drifts across the R, G and B bytes and blends them into grey stripes.
 
-Follows Audacity's Change Speed. Version: 1.
+Follows Audacity's Change Speed. Version: 2.
 
 The seed only picks where hits land, so it has no effect with `hits=0`.
 
@@ -363,7 +363,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 | `factor` | `1.5` | playback speed; above 1 squeezes and repeats, below 1 stretches |
 | `step` | `pixel` | resample whole pixels (colours hold) or single samples (grey stripes) |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
-| `hits` | `4` | number of windows at seeded places; 0 = one window over the whole region |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
 | `len` | `8%` | length of each window (%, rows, px or bytes); unused when hits=0 |
 
 Example:
@@ -474,7 +474,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
-| `range` | `all` | which colours change: all, or one family |
+| `range` | `all` | which colours change: all, or families joined by + (reds+blues) |
 | `hue` | `0` | turn the colours round the wheel, in degrees |
 | `saturation` | `30` | -100 grey, 0 unchanged, 100 twice as vivid |
 | `lightness` | `0` | -100 black, 0 unchanged, 100 white |

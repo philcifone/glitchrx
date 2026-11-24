@@ -1,6 +1,6 @@
 //! `stutter`: repeat the start of each window across it.
 
-use super::{Effect, EffectInfo, Group, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Group, PlacementDefaults, Upgrade, Window};
 use crate::error::Result;
 use crate::params::{Bound, Kind, ParamSpec, Params};
 use crate::rng::Rng;
@@ -8,7 +8,13 @@ use crate::rng::Rng;
 pub static INFO: EffectInfo = EffectInfo {
     id: "stutter",
     group: Group::Audio,
-    version: 1,
+    version: 2,
+    // Version 1 started with bands; now every effect starts on the whole
+    // picture (D-56).
+    upgrades: &[Upgrade {
+        to: 2,
+        fill: &[("hits", "3"), ("len", "5%")],
+    }],
     audacity: "Repeat",
     summary: "Copy the first `chunk` of each window over the rest of it, again and again.",
     details: "Whole rows repeat a strip of the picture down the window; part of a row gives a \
@@ -22,7 +28,7 @@ pub static INFO: EffectInfo = EffectInfo {
     }],
     placement: PlacementDefaults {
         region: "0%:100%",
-        hits: "3",
+        hits: "0",
         len: "5%",
     },
     random_within: false,

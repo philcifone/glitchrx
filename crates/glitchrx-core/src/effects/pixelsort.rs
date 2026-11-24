@@ -16,6 +16,7 @@ pub static INFO: EffectInfo = EffectInfo {
     id: "pixelsort",
     group: Group::Pixel,
     version: 1,
+    upgrades: &[],
     audacity: "none (a pixel effect)",
     summary: "Sort runs of pixels by brightness, hue or saturation: streaks that melt down or across the picture.",
     details: "Each column (or row, with `direction=horizontal`) is cut into runs of pixels \

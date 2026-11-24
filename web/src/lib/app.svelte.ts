@@ -109,9 +109,10 @@ const emptyRecipe = (): RecipeState => ({ encoding: DEFAULT_ENCODING, channels: 
  * dropped and the defaults filled in. Masks from before components had one
  * operation per brush stroke; those become brushes.
  */
-function normalize(r: Partial<RecipeState>, known: (effect: string) => boolean): RecipeState {
+function normalize(r: Partial<RecipeState>, effect: (id: string) => EffectInfo | undefined): RecipeState {
   const steps = (r.steps ?? [])
-    .filter((s) => known(s.effect))
+    .filter((s) => effect(s.effect))
+    .map((s) => upgrade(s, effect(s.effect)!))
     .map((s) => (s.mask ? { ...s, mask: migrateMask(s.mask) } : s));
   const work = typeof r.work_size === 'number' && r.work_size >= 64 ? Math.round(r.work_size) : undefined;
   return {
@@ -122,6 +123,24 @@ function normalize(r: Partial<RecipeState>, known: (effect: string) => boolean):
     ...(validCrop(r.crop) ? { crop: { ...r.crop } } : {}),
     ...groups.tidy(steps, groups.cleanGroups(r.groups)),
   };
+}
+
+/**
+ * A step saved with an older version of its effect, made current the way
+ * the server does it (D-56): defaults that moved are written in with their
+ * old value, so the step keeps its picture.
+ */
+function upgrade<S extends { effect_version?: number; params: Record<string, string> }>(s: S, info: EffectInfo): S {
+  let version = s.effect_version;
+  if (version === undefined) return s; // made by this build: current
+  let params = s.params;
+  for (const up of info.upgrades ?? []) {
+    if (version < up.to) {
+      params = { ...up.fill, ...params };
+      version = up.to;
+    }
+  }
+  return params === s.params ? s : { ...s, params, effect_version: version };
 }
 
 interface Box {
@@ -290,7 +309,7 @@ export class App {
     const saved = storageGet(RECIPE_KEY);
     if (saved) {
       try {
-        this.recipe = normalize(JSON.parse(saved), (e) => !!this.effect(e));
+        this.recipe = normalize(JSON.parse(saved), (e) => this.effect(e));
         this.history = new History(this.snapshot());
       } catch {
         // A stale or corrupt saved recipe is simply ignored.
@@ -312,6 +331,31 @@ export class App {
   }
 
   /** Whether a new seed would change this step's result. */
+  /** Whether a step lands in bands (hits above 0) rather than on the whole picture. */
+  banded(step: StepState): boolean {
+    const spec = this.effect(step.effect)?.params.find((p) => p.name === 'hits');
+    return Number(step.params.hits ?? spec?.default ?? '0') > 0;
+  }
+
+  /** Hits a step had before its bands were switched off, to restore them. */
+  private lastHits: Record<string, string> = {};
+
+  /**
+   * Bands on or off (D-56). Every effect starts on the whole picture;
+   * switching bands on scatters it in 4 seeded bands (or the number it had
+   * before they were switched off).
+   */
+  setBands(uid: string, on: boolean): void {
+    const s = this.step(uid);
+    if (!s) return;
+    if (on) {
+      this.setParam(uid, 'hits', this.lastHits[uid] ?? '4');
+    } else {
+      if (s.params.hits) this.lastHits[uid] = s.params.hits;
+      this.setParam(uid, 'hits', '0');
+    }
+  }
+
   seeded(step: StepState): boolean {
     return usesSeed(step.params, this.effect(step.effect));
   }
@@ -978,7 +1022,7 @@ export class App {
         })),
         groups: group ? [group] : [],
       },
-      () => true, // the server already checked the effects
+      (e) => this.effect(e), // the server already checked and upgraded them
     );
     this.changed();
   }

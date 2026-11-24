@@ -102,12 +102,12 @@ A distance of whole pixels keeps colours. `phase=1` or `phase=2` adds one or two
 | `pixelsort` | (pixel effect) | Sorts runs of pixels by brightness, hue or saturation: streaks down or across the picture |
 | `levels` | (adjustment) | Black point, white point and midtone gamma |
 | `curves` | (adjustment) | A tone curve through up to 16 points, `points=0:0/64:52/192:204/255:255` |
-| `hsl` | (adjustment) | Hue turn, saturation and lightness, for every colour or one range (`range=reds`, `blues`, ...) |
+| `hsl` | (adjustment) | Hue turn, saturation and lightness, for every colour or some (`range=reds`, `range=reds+blues`, ...) |
 | `balance` | (adjustment) | Tints the shadows, midtones or highlights, keeping brightness |
 
 `pixelsort` and the adjustments are not audio: they work on whole pixels, so the encoding and channels do not apply. Adjustments are ordinary steps, so masks and opacity limit them like any other. Every step also takes `opacity` (0 to 1), which blends its result over the picture it received.
 
-All parameters are documented in `docs/effects.md`, which is generated from the code. Where an effect lands is set by `region`, `hits` and `len`, shared by every effect.
+All parameters are documented in `docs/effects.md`, which is generated from the code. Plans and ideas are in `docs/roadmap.md`; hosting it for others is in `docs/hosting.md`. Where an effect lands is set by `region`, `hits` and `len`, shared by every effect.
 
 ### Safety rules
 
@@ -137,7 +137,8 @@ In the GUI:
 - **Open** a photo from your device (it is sent to your own server, nowhere else) or from the server's library folder (chosen in Settings, or `--root`). If steps are already in the stack, you are asked whether to keep them or start fresh (undoable; "Don't ask again" is changeable in Settings).
 - **Pick the encoding** for the whole recipe (and mono, stereo or RGB) at the top. Any step can override both.
 - **Add steps** by tapping an effect in the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter), data effects (invert, bitcrush, backwards, shift, shuffle) pixel effects (pixelsort) and adjustments (levels, curves, hsl, balance; curves has a curve editor). On a phone the palette sits behind the floating + button. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
-- **Placement** (`region`, `hits`, `len`) is always shown on each step. Dragging the region's two handles shades the preview outside the band it covers.
+- **Placement** is always shown on each step. Every effect starts on the whole picture; the **Bands** switch scatters it in seeded bands instead and shows `hits`, `len` and the seed. Dragging the region's two handles shades the preview outside the band it covers.
+- **Sliders** mark their default with a small tick and snap onto it; double tap a slider, or use the reset arrow above it, to go back to the default.
 - **Edit** (beside Clear) shows every step on one line: tap the circles to select several and duplicate or remove them, or drag the grip on the right to reorder. A preset group drags as a block.
 - **Shake** (the shuffle arrows at the top of a step's settings) rolls a step's own settings at random, within the useful range; placement and encoding stay. **Re-roll** (the dice, beside the seed at the end of Placement) picks a new seed, which moves where hits land; it is greyed out when a step has nothing random (`hits=0`, except for `shuffle`).
 - **Blend** each step with its opacity, and **mask** it. A mask is built from components: brushes (paint and erase), linear gradients, radials (hard-edged circles; feather fades them), rectangles (resize, turn and move them), pen paths (tap out points, drag while placing one to curve the sides, tap the first to close; points stay editable) and brightness ranges that limit the mask to light or dark parts. Tap a component to make it active; a radial, linear or rectangle then shows handles on the photo to move or resize it, and the others show pins to tap. Each component adds, subtracts or intersects, and has its own opacity and feather (side by side when it is active); long-press to select several and set them together. Copy, Cut and Paste move components between steps. Paint in shows the step only inside the mask; Paint out shows it everywhere else. The red overlay shows the mask; Done ends editing. On a desktop, B and E paint and erase and [ and ] size the brush. Masks are saved in the recipe as strokes and shapes, so they replay exactly at full resolution.

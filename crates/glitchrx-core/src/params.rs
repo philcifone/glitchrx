@@ -24,6 +24,10 @@ pub enum Kind {
     Region,
     /// One word out of a fixed list.
     Choice(&'static [&'static str]),
+    /// Any of a fixed list of words, joined by `+` (`reds+blues`), or
+    /// `all` for none in particular (D-57). `+` rather than `,` because the
+    /// command line separates parameters with commas.
+    Set(&'static [&'static str]),
     /// A tone curve: points `IN:OUT` in 0..=255, joined by `/`, inputs
     /// rising (`0:0/64:40/192:215/255:255`). `/` rather than `,` because
     /// the command line separates parameters with commas.
@@ -244,6 +248,8 @@ enum Value {
     Size(Bound),
     Region(Bound, Bound),
     Choice(String),
+    /// Positions in the list, in list order without repeats; empty for `all`.
+    Set(Vec<usize>),
     Curve(Vec<(u8, u8)>),
 }
 
@@ -334,6 +340,14 @@ impl Params {
         }
     }
 
+    /// A set's members, as positions in its list (empty: `all`).
+    pub fn set(&self, name: &str) -> &[usize] {
+        match self.get(name) {
+            Value::Set(v) => v,
+            other => panic!("{name} is not a set: {other:?}"),
+        }
+    }
+
     /// A curve's points, inputs rising.
     pub fn curve(&self, name: &str) -> &[(u8, u8)] {
         match self.get(name) {
@@ -395,8 +409,27 @@ fn parse_value(spec: &ParamSpec, text: &str) -> std::result::Result<Value, Strin
                 Err(format!("`{t}` is not one of: {}", options.join(", ")))
             }
         }
+        Kind::Set(options) => parse_set(t, options).map(Value::Set),
         Kind::Curve => parse_curve(t).map(Value::Curve),
     }
+}
+
+/// `all`, or words from `options` joined by `+`, in any order.
+fn parse_set(t: &str, options: &[&str]) -> std::result::Result<Vec<usize>, String> {
+    if t == "all" {
+        return Ok(Vec::new());
+    }
+    let mut picked = vec![false; options.len()];
+    for word in t.split('+').map(str::trim) {
+        let i = options.iter().position(|o| *o == word).ok_or_else(|| {
+            format!(
+                "`{word}` is not one of: all, {} (join several with +)",
+                options.join(", ")
+            )
+        })?;
+        picked[i] = true;
+    }
+    Ok((0..options.len()).filter(|&i| picked[i]).collect())
 }
 
 /// `IN:OUT/IN:OUT/...`, each 0..=255, at least two points, inputs rising.

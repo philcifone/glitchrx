@@ -10,6 +10,7 @@ pub static INFO: EffectInfo = EffectInfo {
     id: "reverb",
     group: Group::Audio,
     version: 1,
+    upgrades: &[],
     audacity: "Reverb",
     summary: "Freeverb: eight damped feedback combs in parallel, then four allpass diffusers.",
     details: "Smears the picture into a haze of overlapping ghosts. `size` is the longest comb \
