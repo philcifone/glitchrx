@@ -333,7 +333,7 @@ high = 1.0
 soft = 0.1
 ```
 
-### 8.1 Project files, `.glrx` (Phase 7, D-63)
+### 8.1 Project files, `.glrx` (Phase 7, done, D-63)
 
 A project file is what a `.psd` is to Photoshop: everything needed to open an edit again on any device and carry on. A recipe alone is not enough, because it replays on the original photo, and the original lives on one device.
 
@@ -485,14 +485,14 @@ Then, from his notes on Phase 6: sliders mark their default and reset with a dou
 
 And from his notes of 2026-11-24: adjustments start neutral (D-58); whole-number sliders spanning up to 360 (tone values, degrees) are linear, since a log scale made levels' output black jump; the curves grid uses the dim text colour so it shows in dark mode; a parameter's help line shows in full after a tap; full view (D-59), entered with a tap on the photo, with the grabber left to pull the panel back; the photo toolbox (D-62); folders listed as a plain list with `..` for the folder above; the levels editor (D-60); and remembered pictures for switching steps (D-61).
 
-### Phase 7: project files (planned with Phil, 2026-11-24; branch `phase-7-projects`)
+### Phase 7: project files (done, D-63; branch `phase-7-projects`)
 
 Section 8.1. Each part ends green and usable:
 
-- **7a Format in the core.** Read and write `.glrx` (the `zip` crate, deflate only, no other features), the manifest, the safety rules, location removal, tests: round trip, the same raster after location removal, a refused unknown version, refused zip slip and oversized entries, a fixture `.glrx` committed to `tests/fixtures`.
-- **7b CLI.** Render a `.glrx`, write one with `--project`, `--info`. Outputs are never overwritten without `--force`.
-- **7c Server and GUI.** The server keeps opened photos' file bytes; new endpoints to make a project from the open photo (download, or save to a folder) and to open one (upload, or from the library); the export sheet's two choices; Open accepts `.glrx`, with thumbnails, and a project can be saved over after a confirmation in the library. To check on Phil's iPhone: that Safari's file picker offers `.glrx` files (it greys out types it does not recognise unless the page asks for them) and that a downloaded `.glrx` lands in Files.
-- **7d Desktop.** The file type registered for Linux (installer and bundle) and a double click opens it; macOS with `docs/macos.md`.
+- **7a Format in the core (done).** Read and write `.glrx` (the `zip` crate, deflate only, no other features), the manifest, the safety rules, location removal, tests: round trip, the same raster after location removal, a refused unknown version, refused zip slip and oversized entries, a fixture `.glrx` committed to `tests/fixtures`.
+- **7b CLI (done).** Render a `.glrx`, write one with `--project`, `--info`. Outputs are never overwritten without `--force`.
+- **7c Server and GUI (done).** The server keeps opened photos' file bytes; new endpoints to make a project from the open photo (download, or save to a folder) and to open one (upload, or from the library); the export sheet's two choices; Open accepts `.glrx`, with thumbnails, and a project can be saved over after a confirmation in the library. To check on Phil's iPhone: that Safari's file picker offers `.glrx` files (it greys out types it does not recognise unless the page asks for them) and that a downloaded `.glrx` lands in Files.
+- **7d Desktop (done for Linux).** The file type registered for Linux (installer and bundle) and a double click opens it; macOS with `docs/macos.md`.
 
 Phil's answers (2026-11-24): the extension is `.glrx`; a project can be saved over; location is removed; the thumbnail is a JPEG.
 
