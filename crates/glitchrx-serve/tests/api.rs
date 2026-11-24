@@ -745,7 +745,7 @@ async fn masks_travel_and_show() {
     assert_eq!(s, StatusCode::OK);
     let toml = String::from_utf8(toml).unwrap();
     assert!(
-        toml.contains("[[step.mask.op]]") && toml.contains("version = 6"),
+        toml.contains("[[step.mask.op]]") && toml.contains("version = 7"),
         "{toml}"
     );
     let req = Request::post("/api/recipe/from-toml")
@@ -1528,14 +1528,18 @@ async fn pull_strokes_travel_through_json_and_toml() {
             "effect": "pull",
             "seed": "0",
             "params": { "sampling": "smooth" },
-            "pull": [{ "size": 0.2, "strength": 0.7, "points": [0.3, 0.5, 0.6, 0.5] }]
+            "pull": [
+                { "size": 0.2, "strength": 0.7, "points": [0.3, 0.5, 0.6, 0.5], "brush": 1 },
+                { "size": 0.1, "from": [0.4, 0.4], "to": [0.45, 0.4] },
+                { "size": 0.3, "strength": 0.5, "points": [0.2, 0.2] }
+            ]
         }]
     });
     let (s, _, toml) = send(&app, post_json("/api/recipe/to-toml", recipe.clone())).await;
     assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&toml));
     let toml = String::from_utf8(toml).unwrap();
     assert!(
-        toml.contains("[[step.pull]]") && toml.contains("version = 6"),
+        toml.contains("[[step.pull]]") && toml.contains("version = 7"),
         "{toml}"
     );
     let (s, _, back) = send(
@@ -1548,6 +1552,15 @@ async fn pull_strokes_travel_through_json_and_toml() {
     assert_eq!(s, StatusCode::OK);
     let back = json_of(&back);
     assert_eq!(back["steps"][0]["pull"], recipe["steps"][0]["pull"]);
+    // A page from before D-68 sends its pins apart; they run last.
+    let mut old = recipe.clone();
+    old["steps"][0]["pull"] = json!([recipe["steps"][0]["pull"][0]]);
+    old["steps"][0]["pin"] = json!([recipe["steps"][0]["pull"][1]]);
+    let (s, _, toml) = send(&app, post_json("/api/recipe/to-toml", old)).await;
+    assert_eq!(s, StatusCode::OK);
+    let toml = String::from_utf8(toml).unwrap();
+    assert_eq!(toml.matches("[[step.pull]]").count(), 2, "{toml}");
+    assert!(toml.find("from = ").unwrap() > toml.find("points = ").unwrap());
     // Strokes on another effect, or placement on a pull, are refused.
     let mut bad = recipe.clone();
     bad["steps"][0]["effect"] = json!("echo");

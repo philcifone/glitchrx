@@ -151,7 +151,7 @@ proptest! {
         div in 1usize..=4,
     ) {
         let mut step = Step::new("pull", if smooth { "sampling=smooth" } else { "" }, 0).unwrap();
-        step.pull = strokes;
+        step.pull = strokes.into_iter().map(Into::into).collect();
         let recipe = Recipe { steps: vec![step], ..Recipe::default() };
         let units = Units {
             full_width: w,

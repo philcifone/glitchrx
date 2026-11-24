@@ -80,11 +80,13 @@ pub struct StepDto {
     /// Where the result shows; absent means everywhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mask: Option<Mask>,
-    /// A pull step's strokes (SPEC 8.2); absent for every other step.
+    /// A pull step's strokes and pins, in the order made (SPEC 8.2, D-68);
+    /// absent for every other step.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pull: Vec<glitchrx_core::pull::Stroke>,
-    /// A pull step's pins (D-67); absent for every other step.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pull: Vec<glitchrx_core::pull::Mark>,
+    /// Pins sent apart, as pages before D-68 did (a tab left open across
+    /// an update): read only, and run after the strokes, as they were then.
+    #[serde(default, skip_serializing)]
     pub pin: Vec<glitchrx_core::pull::Pin>,
 }
 
@@ -131,8 +133,12 @@ impl RecipeDto {
                     seed: s.seed.0,
                     params: s.params.clone(),
                     mask: s.mask.clone(),
-                    pull: s.pull.clone(),
-                    pin: s.pin.clone(),
+                    pull: s
+                        .pull
+                        .iter()
+                        .cloned()
+                        .chain(s.pin.iter().cloned().map(Into::into))
+                        .collect(),
                 };
                 step.upgrade(); // an older step keeps its picture (D-56)
                 Ok(step)
@@ -175,7 +181,7 @@ impl RecipeDto {
                     params: s.params.clone(),
                     mask: s.mask.clone(),
                     pull: s.pull.clone(),
-                    pin: s.pin.clone(),
+                    pin: Vec::new(),
                 })
                 .collect(),
         }

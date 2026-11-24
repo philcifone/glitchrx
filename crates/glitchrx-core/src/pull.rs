@@ -29,19 +29,27 @@
 //! Reads past an edge take the edge pixel.
 //!
 //! **Pins** (D-67). A pin is a point picked up and put down elsewhere,
-//! `[[step.pin]]` with `from`, `to` and `size`. It is built exactly as a
-//! straight stroke from `from` to `to` at full strength, so the point under
-//! it lands where it was put and the picture around it stretches smoothly
-//! rather than folding, however far it goes. Pins run after the strokes,
-//! in order. Unlike a stroke a pin is meant to be moved again: the GUI
-//! changes its `to`, and the map is built afresh.
+//! with `from`, `to` and `size`. It is built exactly as a straight stroke
+//! from `from` to `to` at full strength, so the point under it lands where
+//! it was put and the picture around it stretches smoothly rather than
+//! folding, however far it goes. Unlike a stroke a pin is meant to be moved
+//! again: the GUI changes its `to`, and the map is built afresh.
+//!
+//! **One list, in the order made** (D-68). Strokes and pins are
+//! [`Mark`]s in a single `[[step.pull]]` list and run in that order, so a
+//! stroke drawn after a pin was moved lands on top of it, as layers do. A
+//! stroke may belong to a **brush** (`brush = n`): strokes the GUI made
+//! with one brush, which it resizes together. Rendering ignores it.
+//! Version 6 recipes kept pins apart (`[[step.pin]]`, after all strokes);
+//! they load with the pins appended, which is how they rendered.
 //!
 //! **Speed** (8c). Building the map is most of the cost (about 8 ms a
 //! stroke on a laptop), and while a stroke is drawn the step is rendered
 //! every frame with all the earlier strokes too. So maps are kept at a few
-//! checkpoints ([`Checkpoints`]): before the last stroke (the one being
-//! drawn), after the strokes (where pins start), where this build first
-//! differs from the last (the pin being moved), and whole. A build starts from the longest checkpoint its strokes begin
+//! checkpoints ([`Checkpoints`]): where a build first differs from the
+//! last (the stroke or pin being changed), and whole (which is where the
+//! next stroke drawn starts). Grabbing a mark far back in the list takes
+//! one slow frame; the rest of that drag starts from its checkpoint. A build starts from the longest checkpoint its strokes begin
 //! with. A map built from a checkpoint is the very same map, since the
 //! strokes run in the same order on the same values.
 //!
@@ -174,6 +182,124 @@ impl Pin {
     }
 }
 
+/// One thing drawn in a pull step: a stroke (with the brush it belongs
+/// to, if any) or a pin. In a recipe both are `[[step.pull]]` tables: a
+/// stroke has `points`, a pin `from` and `to`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "RawMark", into = "RawMark")]
+pub enum Mark {
+    Stroke { stroke: Stroke, brush: Option<u32> },
+    Pin(Pin),
+}
+
+impl From<Stroke> for Mark {
+    fn from(stroke: Stroke) -> Mark {
+        Mark::Stroke {
+            stroke,
+            brush: None,
+        }
+    }
+}
+
+impl From<Pin> for Mark {
+    fn from(pin: Pin) -> Mark {
+        Mark::Pin(pin)
+    }
+}
+
+impl Mark {
+    /// What it is built as.
+    fn as_stroke(&self) -> Stroke {
+        match self {
+            Mark::Stroke { stroke, .. } => stroke.clone(),
+            Mark::Pin(p) => p.as_stroke(),
+        }
+    }
+}
+
+/// A mark as written: the fields of both kinds, of which a stroke uses
+/// `points` (and `strength`, `brush`) and a pin `from` and `to`.
+#[derive(Serialize, Deserialize)]
+struct RawMark {
+    size: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    strength: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    points: Option<Vec<f64>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    from: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    to: Option<[f64; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    brush: Option<u32>,
+}
+
+impl TryFrom<RawMark> for Mark {
+    type Error = String;
+
+    fn try_from(r: RawMark) -> std::result::Result<Mark, String> {
+        match (r.points, r.from, r.to) {
+            (Some(points), None, None) => Ok(Mark::Stroke {
+                stroke: Stroke {
+                    size: r.size,
+                    strength: r.strength.unwrap_or_else(default_strength),
+                    points,
+                },
+                brush: r.brush,
+            }),
+            (None, Some(from), Some(to)) if r.strength.is_none() && r.brush.is_none() => {
+                Ok(Mark::Pin(Pin {
+                    size: r.size,
+                    from,
+                    to,
+                }))
+            }
+            _ => Err(
+                "pull: each mark is a stroke (`points`, maybe `strength` and \
+                      `brush`) or a pin (`from` and `to`)"
+                    .into(),
+            ),
+        }
+    }
+}
+
+impl From<Mark> for RawMark {
+    fn from(m: Mark) -> RawMark {
+        match m {
+            Mark::Stroke { stroke, brush } => RawMark {
+                size: stroke.size,
+                strength: Some(stroke.strength),
+                points: Some(stroke.points),
+                from: None,
+                to: None,
+                brush,
+            },
+            Mark::Pin(p) => RawMark {
+                size: p.size,
+                strength: None,
+                points: None,
+                from: Some(p.from),
+                to: Some(p.to),
+                brush: None,
+            },
+        }
+    }
+}
+
+/// Check a step's marks; bad ones fail before any work.
+pub fn validate_marks(marks: &[Mark]) -> Result<()> {
+    let mut strokes = Vec::new();
+    let mut pins = Vec::new();
+    for m in marks {
+        match m {
+            Mark::Stroke { stroke, .. } => strokes.push(stroke.clone()),
+            Mark::Pin(p) => pins.push(p.clone()),
+        }
+    }
+    validate(&strokes)?;
+    validate_pins(&pins)
+}
+
 /// Strokes and pins may run a little off the picture, but not absurdly far.
 fn on_canvas(v: f64) -> bool {
     v.is_finite() && (-4.0..=5.0).contains(&v)
@@ -238,24 +364,16 @@ pub fn validate(strokes: &[Stroke]) -> Result<()> {
 /// A pull step, ready to run.
 #[derive(Debug, Clone)]
 pub struct Pull {
-    /// The strokes, then the pins as the strokes they are built as.
+    /// The marks in order, as the strokes they are built as.
     strokes: Vec<Stroke>,
-    /// How many of `strokes` were drawn (the rest are pins).
-    drawn: usize,
     smooth: bool,
 }
 
 impl Pull {
-    /// Build from the step's parameters, strokes and pins (already
-    /// validated). Pins run after the strokes.
-    pub fn new(params: &Params, strokes: &[Stroke], pins: &[Pin]) -> Pull {
+    /// Build from the step's parameters and marks (already validated).
+    pub fn new(params: &Params, marks: &[Mark]) -> Pull {
         Pull {
-            strokes: strokes
-                .iter()
-                .cloned()
-                .chain(pins.iter().map(Pin::as_stroke))
-                .collect(),
-            drawn: strokes.len(),
+            strokes: marks.iter().map(Mark::as_stroke).collect(),
             smooth: params.choice("sampling") == "smooth",
         }
     }
@@ -306,18 +424,12 @@ impl Pull {
         }
         let mut map = Arc::unwrap_or_clone(map);
         // Where this build first differs from one kept: in the middle of a
-        // drag, where the moving stroke or pin is, so the next frame starts
-        // there.
+        // drag, where the moving stroke or pin is (or the first stroke of a
+        // brush being resized), so the next frame starts there. A stroke
+        // being drawn is the last mark, so the whole map before it (kept
+        // from the last build) is already its checkpoint.
         let differs = CHECKPOINTS.shared(cw, ch, all);
-        // Where a later build is likely to pick up (see the module notes).
-        // A map already kept is not copied again, so the fixed points cost
-        // a copy only now and then; a pin being moved (the last one
-        // included) is covered by `differs`.
-        let keep = |k: usize| {
-            (k == differs && k > from)
-                || (self.drawn > 0 && k == self.drawn - 1)
-                || (n > self.drawn && k == self.drawn)
-        };
+        let keep = |k: usize| k == differs && k > from;
         for (k, s) in all.iter().enumerate().skip(from) {
             if cancel() {
                 return Err(Error::Cancelled);
@@ -617,11 +729,17 @@ mod tests {
     use crate::recipe::NEVER;
 
     fn pull(strokes: Vec<Stroke>, smooth: bool) -> Pull {
-        Pull {
-            drawn: strokes.len(),
-            strokes,
-            smooth,
-        }
+        Pull { strokes, smooth }
+    }
+
+    /// Strokes, then pins, as marks.
+    fn marks(strokes: &[Stroke], pins: &[Pin]) -> Vec<Mark> {
+        strokes
+            .iter()
+            .cloned()
+            .map(Mark::from)
+            .chain(pins.iter().cloned().map(Mark::from))
+            .collect()
     }
 
     /// A picture whose every pixel says where it came from.
@@ -742,7 +860,7 @@ mod tests {
         };
         let mut b = base.clone();
         let params = Params::new("pull", INFO.params, &Default::default()).unwrap();
-        Pull::new(&params, &[], std::slice::from_ref(&pin))
+        Pull::new(&params, &[Mark::Pin(pin.clone())])
             .apply(&mut b, &units, NEVER)
             .unwrap();
         let at = |x: usize, y: usize| (b[(y * w + x) * 3], b[(y * w + x) * 3 + 1]);
@@ -770,7 +888,7 @@ mod tests {
             to: pin.from,
             ..pin.clone()
         };
-        Pull::new(&params, &[], &[home])
+        Pull::new(&params, &[Mark::Pin(home)])
             .apply(&mut d, &units, NEVER)
             .unwrap();
         assert_eq!(d, base);
@@ -831,7 +949,7 @@ mod tests {
         };
         let run = |s: &[Stroke], p: &[Pin]| {
             let mut b = base.clone();
-            Pull::new(&params, s, p)
+            Pull::new(&params, &marks(s, p))
                 .apply(&mut b, &units, NEVER)
                 .unwrap();
             b
@@ -905,7 +1023,7 @@ mod tests {
                 height: h,
             };
             let mut bytes = coords(w, h);
-            let pull = Pull::new(&params, s, p);
+            let pull = Pull::new(&params, &marks(s, p));
             CHECKPOINTS.forget();
             let t = Instant::now();
             pull.apply(&mut bytes, &units, NEVER).unwrap();
@@ -939,7 +1057,7 @@ mod tests {
         let frame = |s: &[Stroke], p: &[Pin]| {
             let mut bytes = coords(1024, 768);
             let t = Instant::now();
-            Pull::new(&params, s, p)
+            Pull::new(&params, &marks(s, p))
                 .apply(&mut bytes, &preview, NEVER)
                 .unwrap();
             t.elapsed().as_secs_f64() * 1000.0
@@ -978,34 +1096,98 @@ mod tests {
             .map(|k| frame(down, &moved(19, k as f64 * 0.002)))
             .sum::<f64>()
             / 10.0;
+        // The first frame of a grab rebuilds from the last checkpoint
+        // before the pin; the rest start at the pin.
         let firsts: Vec<f64> = (1..=10)
             .map(|k| frame(down, &moved(0, k as f64 * 0.002)))
             .collect();
-        println!("  first pin, frame by frame: {firsts:.0?}");
-        let first = firsts.iter().sum::<f64>() / 10.0;
+        let first = firsts[1..].iter().sum::<f64>() / 9.0;
         println!(
-            "moving a pin over 50 strokes and 20 pins: last {last:.1} ms, first {first:.1} ms a frame"
+            "moving a pin over 50 strokes and 20 pins: last {last:.1} ms, first {first:.1} ms a frame \
+             (grabbing it {:.0} ms)",
+            firsts[0]
         );
-        // The map alone for the first pin's moves (8 x 6 raster, no render).
-        let tiny = Units {
-            full_width: fw,
-            full_height: fh,
-            width: 8,
-            height: 6,
+        // A brush resized live: its strokes are the 11th to the 50th of 50,
+        // so every frame rebuilds them all.
+        let resized = |k: usize| {
+            let mut s = down.to_vec();
+            for st in &mut s[10..] {
+                st.size = 0.12 + k as f64 * 0.002;
+            }
+            s
         };
-        let map_only: f64 = (11..=20)
-            .map(|k| {
-                let mut bytes = coords(8, 6);
-                let p = moved(0, k as f64 * 0.002);
-                let t = Instant::now();
-                Pull::new(&params, down, &p)
-                    .apply(&mut bytes, &tiny, NEVER)
-                    .unwrap();
-                t.elapsed().as_secs_f64() * 1000.0
-            })
-            .sum::<f64>()
-            / 10.0;
-        println!("  of which the map: {map_only:.1} ms");
+        let sizes: Vec<f64> = (1..=6).map(|k| frame(&resized(k), &[])).collect();
+        println!(
+            "resizing a brush of 40 strokes over 10: {:.0} ms a frame",
+            sizes[1..].iter().sum::<f64>() / 5.0
+        );
+    }
+
+    /// Marks run in the order made (D-68): a stroke drawn after a pin was
+    /// moved goes over it, and gives another picture than the other way
+    /// round.
+    #[test]
+    fn marks_run_in_order() {
+        let (w, h) = (120, 80);
+        let base = coords(w, h);
+        let units = Units::full(w, h);
+        let params = Params::new("pull", INFO.params, &Default::default()).unwrap();
+        let stroke = drag((0.3, 0.5), (0.7, 0.5), 0.4, 1.0);
+        let pin = Pin {
+            size: 0.4,
+            from: [0.5, 0.3],
+            to: [0.5, 0.7],
+        };
+        let run = |m: Vec<Mark>| {
+            let mut b = base.clone();
+            Pull::new(&params, &m).apply(&mut b, &units, NEVER).unwrap();
+            b
+        };
+        let pin_first = run(vec![pin.clone().into(), stroke.clone().into()]);
+        let stroke_first = run(vec![stroke.clone().into(), pin.clone().into()]);
+        assert_ne!(pin_first, stroke_first);
+        let mut map = Map::new(w, h);
+        map.stroke(&pin.as_stroke());
+        map.stroke(&stroke);
+        let mut by_hand = base.clone();
+        map.render(&base, &mut by_hand, w, h, false, NEVER).unwrap();
+        assert_eq!(pin_first, by_hand);
+    }
+
+    /// In a recipe a stroke has `points` (and maybe a `brush`), a pin `from`
+    /// and `to`; a table with some of each is refused.
+    #[test]
+    fn marks_read_and_write_as_tables() {
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct Doc {
+            pull: Vec<Mark>,
+        }
+        let doc = Doc {
+            pull: vec![
+                Mark::Stroke {
+                    stroke: drag((0.1, 0.1), (0.2, 0.2), 0.1, 0.5),
+                    brush: Some(3),
+                },
+                Mark::Pin(Pin {
+                    size: 0.2,
+                    from: [0.5, 0.5],
+                    to: [0.6, 0.5],
+                }),
+                drag((0.3, 0.3), (0.4, 0.4), 0.1, 0.5).into(),
+            ],
+        };
+        let text = toml::to_string(&doc).unwrap();
+        assert!(text.contains("brush = 3"), "{text}");
+        assert_eq!(text.matches("brush").count(), 1, "{text}");
+        assert_eq!(toml::from_str::<Doc>(&text).unwrap(), doc);
+        for bad in [
+            "[[pull]]\nsize = 0.1\npoints = [0.5, 0.5]\nto = [0.6, 0.5]\n",
+            "[[pull]]\nsize = 0.1\nfrom = [0.5, 0.5]\nto = [0.6, 0.5]\nbrush = 1\n",
+            "[[pull]]\nsize = 0.1\nfrom = [0.5, 0.5]\n",
+            "[[pull]]\nsize = 0.1\n",
+        ] {
+            assert!(toml::from_str::<Doc>(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]
