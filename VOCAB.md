@@ -96,8 +96,8 @@ Background, mostly from the archived JPEG byte engine (`archive/jpeg-bytes`). JP
 - **Region.** The part of the raster where hits may land, for example `40%:60%`. In the raster, percent of the data is percent of the image height, so that really is the middle band.
 - **Bands.** A step scattered in seeded windows (`hits` above 0) instead of covering its whole region; a switch in Placement. Every effect starts without them.
 - **Full view.** The photo on the whole screen, with the bars hidden and the step panel lowered to its grabber; a tap on the photo or a swipe down on the grabber.
-- **Project file (`.grx`).** A zip holding the original photo byte for byte, the recipe and a preview, so an edit opens again on any device; like a `.psd`. Proposed for Phase 7 (SPEC 8.1).
-- **Pull, push, twirl.** Pull is a step made of strokes drawn on the photo (proposed for Phase 8, SPEC 8.2): push drags pixels along with the finger, twirl turns them around a centre into a whorl. Its **displacement map** says, for every point of the output, where in the input to read.
+- **Project file (`.glrx`).** A zip holding the original photo (without its location), the recipe and a preview, so an edit opens again on any device; like a `.psd` (SPEC 8.1, D-63).
+- **Pull.** A step made of strokes drawn on the photo, each dragging pixels along with the finger (SPEC 8.2, D-64). Its **displacement map** says, for every point of the output, where in the input to read.
 - **Photo toolbox.** The card at the top of the step panel with crop, zoom and the work size (D-62).
 - **Remembered picture.** An exact result the browser keeps, keyed by the recipe that made it, so going back to that recipe (a step switched off and on) shows it without rendering.
 - **Midtone handle.** The grey handle of the levels editor; where it sits in the stretch between black and white sets `gamma`.
