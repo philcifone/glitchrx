@@ -11,6 +11,7 @@
   import { MAX_POINTS, curveFn, formatCurve, parseCurve, type CurvePoint } from '../lib/curve';
   import { app } from '../lib/app.svelte';
   import type { Histogram } from '../lib/api';
+  import { countsFor, histogramPath } from '../lib/histogram';
 
   let {
     uid,
@@ -64,18 +65,7 @@
 
   const channel = $derived(app.step(uid)?.params.channel ?? 'rgb');
   /** The histogram as a filled shape under a 255 x 255 box. */
-  const histPath = $derived.by(() => {
-    if (!hist) return '';
-    const counts = channel === 'red' ? hist.red : channel === 'green' ? hist.green : channel === 'blue' ? hist.blue : hist.luma;
-    // Scale to the tallest level away from the ends: clipped blacks and
-    // whites pile up at 0 and 255 and would flatten everything else.
-    const top = Math.max(1, ...counts.slice(1, 255));
-    let d = 'M0,255';
-    counts.forEach((n, i) => {
-      d += `L${i},${(255 - Math.min(1, n / top) * 230).toFixed(1)}`;
-    });
-    return `${d}L255,255Z`;
-  });
+  const histPath = $derived(hist ? histogramPath(countsFor(hist, channel), 255) : '');
 
   let svg: SVGSVGElement;
   let dragging = -1;
@@ -221,15 +211,17 @@
     fill: var(--fill);
   }
 
+  /* The dim text colour, not the hairline one: hairlines are tuned to
+     barely show against a card, and the curve's fill is close to it. */
   .grid {
-    stroke: var(--line);
-    stroke-width: 0.5;
-    opacity: 0.6;
+    stroke: var(--fg-dim);
+    stroke-width: 0.6;
+    opacity: 0.3;
   }
 
   .grid.major {
-    stroke-width: 1;
-    opacity: 1;
+    stroke-width: 0.9;
+    opacity: 0.5;
   }
 
   .hist {

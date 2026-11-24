@@ -26,7 +26,10 @@ function rounder(isInt: boolean): (v: number) => number {
 export function sliderScale(min: number, max: number, isInt: boolean): SliderScale {
   const round = rounder(isInt);
   const span = max - min;
-  const linear = isInt ? span <= 200 : span <= 10;
+  // Tone values (0..255) and degrees (-180..180) read linearly: every
+  // step means the same at both ends, and the snap onto a default near an
+  // end does not swallow the first few values.
+  const linear = isInt ? span <= 360 : span <= 10;
 
   if (linear) {
     return {

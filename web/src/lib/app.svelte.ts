@@ -9,6 +9,7 @@ import * as api from './api';
 import { ApiError, TooHeavyError } from './api';
 import { History } from './history';
 import { LatestOnly } from './latest';
+import { ResultCache } from './results';
 import {
   DEFAULT_TOOL,
   MASK_TINT,
@@ -69,6 +70,11 @@ const REGION_LINGER_MS = 900;
 const IDLE_MS = 250;
 /** ...or this long before an exact one, for effects that need it. */
 const EXACT_IDLE_MS = 600;
+/**
+ * After a one-off change (a step switched on or off) there is no stream
+ * of changes to wait out: the exact render follows almost at once.
+ */
+const DISCRETE_IDLE_MS = 120;
 /** A zoomed view that holds still this long asks for its sharp patch. */
 const VIEW_SETTLE_MS = 150;
 const RECIPE_KEY = 'glitchrx.recipe';
@@ -184,11 +190,18 @@ export class App {
   originalUrl = $state<string | null>(null);
   /** Showing the original (before/after). */
   comparing = $state(false);
+  /**
+   * The photo on the whole screen: the bars and the step panel hidden.
+   * Not while masking or cropping, which need the top bar.
+   */
+  fullView = $state(false);
 
   busy = $state(false);
   /** A long-running action (upload, export) in progress, for the UI to show. */
   working = $state<string | null>(null);
   renderMs = $state<number | null>(null);
+  /** The picture on screen came from the results kept in the browser. */
+  remembered = $state(false);
   /** How the whole-picture preview was rendered. */
   private baseQuality = $state<'fast' | 'full' | 'exact'>('fast');
   /** Zoom and pan (SPEC 9.6). Zoom 1 fits the picture in the stage. */
@@ -283,11 +296,16 @@ export class App {
 
   private history = new History(JSON.stringify(emptyRecipe()));
   private queue = new LatestOnly(() => this.idle());
+  /** Exact pictures already seen, so going back to one is instant. */
+  private results = new ResultCache();
   /** Crops have their own lane, so a pan never waits behind a render. */
   private cropQueue = new LatestOnly(() => this.idle());
   private maskQueue = new LatestOnly();
   private maskKey = '';
   private box = $state<Box>({ w: 0, h: 0, dpr: 1 });
+  /** The stage's size when the picture on screen was asked for. */
+  private renderedBox: Box = { w: 0, h: 0, dpr: 1 };
+  private resizeTimer: ReturnType<typeof setTimeout> | undefined;
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private viewTimer: ReturnType<typeof setTimeout> | undefined;
   private originalKey = '';
@@ -479,13 +497,16 @@ export class App {
     return JSON.stringify($state.snapshot(this.recipe));
   }
 
-  /** Call after every recipe mutation. */
-  changed(commit = true): void {
+  /**
+   * Call after every recipe mutation. `settle` is how long to wait for
+   * more changes before the exact render.
+   */
+  changed(commit = true, settle = EXACT_IDLE_MS): void {
     this.tidyGroups();
     const numbered = numberSteps(this.recipe.steps);
     if (numbered !== this.recipe.steps) this.recipe.steps = numbered;
     this.revision++;
-    this.render('fast');
+    this.render('fast', settle);
     if (commit) this.commit();
   }
 
@@ -606,7 +627,7 @@ export class App {
     const s = this.step(uid);
     if (!s) return;
     s.enabled = !s.enabled;
-    this.changed();
+    this.changed(true, DISCRETE_IDLE_MS);
   }
 
   reroll(uid: string): void {
@@ -1202,11 +1223,17 @@ export class App {
 
   /** The preview area's size in CSS pixels, and the device pixel ratio. */
   setViewport(w: number, h: number, dpr: number): void {
-    const old = this.box;
     this.box = { w, h, dpr };
-    const grew = w * dpr > old.w * old.dpr * 1.1 || h * dpr > old.h * old.dpr * 1.1;
     if (this.zoomed) this.setView(this.view); // keep it valid; a new patch follows
-    else if (this.doc && grew) this.render('full');
+    // The panel animates (or follows a finger), so the stage resizes every
+    // frame: the photo scales with it, and a sharper render waits until it
+    // holds still, if it grew enough to need one.
+    clearTimeout(this.resizeTimer);
+    this.resizeTimer = setTimeout(() => {
+      const old = this.renderedBox;
+      const grew = w * dpr > old.w * old.dpr * 1.1 || h * dpr > old.h * old.dpr * 1.1;
+      if (!this.zoomed && this.doc && grew) this.render('full');
+    }, 150);
   }
 
   // -------------------------------------------------------------------------
@@ -1469,13 +1496,17 @@ export class App {
    * Schedule a render. A `fast` render is followed, once things are idle
    * for IDLE_MS, by a `full` one at device resolution (when that differs).
    */
-  render(quality: 'fast' | 'full' | 'exact'): void {
+  render(quality: 'fast' | 'full' | 'exact', settle = EXACT_IDLE_MS): void {
     const doc = this.doc;
     if (!doc) return;
     clearTimeout(this.idleTimer);
     // Zoomed in, settling means a sharp exact patch of what is on screen.
     if (quality === 'exact' && this.zoomed) return this.requestCrop();
     const recipe = this.dto();
+    this.renderedBox = this.box;
+    // A picture seen before (a step switched off and on again) is shown
+    // at once, already exact: nothing to render.
+    if (!this.zoomed && this.needsExact && this.showRemembered(doc.id, recipe)) return;
     const exact = quality === 'exact';
     const { w, h } = this.target(exact ? 'full' : quality);
     const rev = this.revision;
@@ -1493,7 +1524,7 @@ export class App {
       this.idleTimer = setTimeout(() => this.requestCrop(), EXACT_IDLE_MS);
     } else if (!exact && this.needsExact && !whole) {
       // Approximate while things change; exact once they stop.
-      this.idleTimer = setTimeout(() => this.render('exact'), EXACT_IDLE_MS);
+      this.idleTimer = setTimeout(() => this.render('exact'), settle);
     } else if (quality === 'fast' && this.box.dpr > 1) {
       this.idleTimer = setTimeout(() => this.render('full'), IDLE_MS);
     }
@@ -1512,11 +1543,15 @@ export class App {
     try {
       const res = await api.preview(docId, recipe, w, h, quality === 'exact');
       if (!res || this.doc?.id !== docId) return; // superseded or switched photo
+      // A newer picture is already showing (one remembered, below).
+      if (rev < this.imageRevision) return;
+      if (quality === 'exact' || whole) this.results.put(this.resultKey(docId, recipe), res.blob);
       const url = URL.createObjectURL(res.blob);
       await preload(url);
       this.setImage(url);
       this.imageRevision = rev;
       this.renderMs = res.ms;
+      this.remembered = false;
       this.baseQuality = whole ? 'exact' : quality;
       this.heavy = null;
       this.error = null;
@@ -1525,6 +1560,30 @@ export class App {
       if (e instanceof TooHeavyError) this.heavy = e.message;
       else this.fail(e);
     }
+  }
+
+  /**
+   * What decides an exact picture of the whole view: the photo, the size
+   * it is rendered at, and the recipe (with its framing and masks).
+   */
+  private resultKey(docId: string, recipe: RecipeDto): string {
+    const { w, h } = this.target('full');
+    return JSON.stringify([docId, w, h, recipe]);
+  }
+
+  /** Show a remembered exact picture of `recipe`, if there is one. */
+  private showRemembered(docId: string, recipe: RecipeDto): boolean {
+    const blob = this.results.get(this.resultKey(docId, recipe));
+    if (!blob) return false;
+    this.setImage(URL.createObjectURL(blob));
+    this.imageRevision = this.revision;
+    this.baseQuality = 'exact';
+    this.remembered = true;
+    this.heavy = null;
+    this.error = null;
+    if (this.masking) this.refreshMask();
+    if (this.comparing) void this.loadOriginal();
+    return true;
   }
 
   /** Start or stop showing the original. */

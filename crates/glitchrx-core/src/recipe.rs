@@ -1017,4 +1017,16 @@ mod tests {
             "the whole picture inverts"
         );
     }
+
+    #[test]
+    fn adjustments_from_before_the_neutral_defaults_keep_their_look() {
+        // Balance version 1 tinted the midtones warm by default (D-58).
+        let old = "format = \"glitcharaxia-recipe\"\nversion = 4\nencoding = \"u8\"\nchannels = 1\n\n\
+                   [[step]]\neffect = \"balance\"\neffect_version = 1\nseed = 7\nblue = \"5\"\n";
+        let r = Recipe::from_toml(old).unwrap();
+        assert_eq!(r.steps[0].effect_version, 2);
+        assert_eq!(r.steps[0].params["red"], "12");
+        assert_eq!(r.steps[0].params["blue"], "5");
+        assert!(!r.steps[0].params.contains_key("green"));
+    }
 }

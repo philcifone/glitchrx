@@ -3,7 +3,7 @@
 Where glitcharaxia is going after the planned phases. `SPEC.md` section 10
 holds the phases that were planned and built; this file holds everything
 else: ideas not yet scheduled, things deliberately put off, and what is
-needed before sharing the tool more widely. Updated 2026-11-23.
+needed before sharing the tool more widely. Updated 2026-11-24.
 
 ## Where it stands
 
@@ -83,9 +83,15 @@ colours. A recipe setting `layout = "bmp"` would reproduce that look.
 Small to medium effort; the main work is tests and making masks and the
 crop still line up.
 
+### Desktop keyboard shortcuts
+
+Phil, 2026-11-24: define a sensible set once he has time at a desktop.
+No action until then. Today there are undo and redo (Ctrl or Cmd with Z,
+Y), `\` held for the original, `Z` to zoom, Esc to leave full view, and
+the mask shortcuts (B, E, `[` and `]`, Enter, Esc, Delete).
+
 ### Smaller ideas
 
-- A histogram in the levels editor too, like the curves editor's.
 - Dragging mask parts from one step to another (copy and paste already
   works).
 - Per-effect strength sliders (D-38 explains why opacity covers most of
@@ -97,6 +103,7 @@ crop still line up.
   play with it again.
 - **Recipe work size.** Built in Phase 5b (D-48).
 - **Several hsl colour ranges at once.** Built after Phase 6 (D-57).
+- **A histogram in the levels editor.** Built as the classic levels view (D-60).
 
 ## Future (after the tool is shared)
 

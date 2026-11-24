@@ -16,12 +16,18 @@
   import { CHANNEL_CHOICES, channelName } from '../lib/channels';
   import type { Channels, StepState } from '../lib/types';
   import ParamField from './ParamField.svelte';
+  import LevelsField from './LevelsField.svelte';
   import BlendSection from './BlendSection.svelte';
 
   let { step, index }: { step: StepState; index: number } = $props();
 
   const info = $derived(app.effect(step.effect));
   const own = $derived(info?.params.filter((p) => !p.placement) ?? []);
+  // Levels gets one editor for its points (histogram and handles, as in
+  // Photoshop); its other settings (channel) stay ordinary fields.
+  const LEVEL_POINTS = ['black', 'white', 'gamma', 'out_black', 'out_white'];
+  const levels = $derived(step.effect === 'levels' ? own.filter((p) => LEVEL_POINTS.includes(p.name)) : []);
+  const fields = $derived(levels.length ? own.filter((p) => !LEVEL_POINTS.includes(p.name)) : own);
   const placement = $derived(info?.params.filter((p) => p.placement) ?? []);
   const seeded = $derived(app.seeded(step));
   const banded = $derived(app.banded(step));
@@ -78,9 +84,12 @@
               </button>
             {/if}
           </div>{/if}
-          {#each own as spec (spec.name)}
+          {#each fields as spec (spec.name)}
             <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
           {/each}
+          {#if levels.length}
+            <LevelsField uid={step.uid} specs={levels} params={step.params} />
+          {/if}
         </section>
         {#if usesSamples(info)}
         <div class="sample">

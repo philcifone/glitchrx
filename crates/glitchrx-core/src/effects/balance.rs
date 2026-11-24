@@ -11,7 +11,7 @@
 //! only the colour changes.
 
 use super::adjust::{luma, per_pixel, to_byte};
-use super::{Effect, EffectInfo, Group, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Group, PlacementDefaults, Upgrade, Window};
 use crate::error::Result;
 use crate::params::{Kind, ParamSpec, Params};
 use crate::rng::Rng;
@@ -19,8 +19,13 @@ use crate::rng::Rng;
 pub static INFO: EffectInfo = EffectInfo {
     id: "balance",
     group: Group::Adjust,
-    version: 1,
-    upgrades: &[],
+    version: 2,
+    // Version 1 started with a visible change; adjustments now start
+    // neutral (D-58).
+    upgrades: &[Upgrade {
+        to: 2,
+        fill: &[("red", "12"), ("blue", "-12")],
+    }],
     audacity: "none (an adjustment)",
     summary: "Tint the shadows, midtones or highlights.",
     details: "Pick the `tones`, then push them towards red or cyan, green or magenta, \
@@ -41,7 +46,7 @@ pub static INFO: EffectInfo = EffectInfo {
                 min: -100,
                 max: 100,
             },
-            default: "12",
+            default: "0",
             help: "towards red; below 0 towards cyan",
         },
         ParamSpec {
@@ -59,7 +64,7 @@ pub static INFO: EffectInfo = EffectInfo {
                 min: -100,
                 max: 100,
             },
-            default: "-12",
+            default: "0",
             help: "towards blue; below 0 towards yellow",
         },
         ParamSpec {

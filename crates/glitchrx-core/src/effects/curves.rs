@@ -7,7 +7,7 @@
 //! last the curve is flat, so moving an end point in clips.
 
 use super::adjust::{CHANNEL, apply_table, channels, table};
-use super::{Effect, EffectInfo, Group, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Group, PlacementDefaults, Upgrade, Window};
 use crate::error::Result;
 use crate::params::{Kind, ParamSpec, Params};
 use crate::rng::Rng;
@@ -15,20 +15,25 @@ use crate::rng::Rng;
 pub static INFO: EffectInfo = EffectInfo {
     id: "curves",
     group: Group::Adjust,
-    version: 1,
-    upgrades: &[],
+    version: 2,
+    // Version 1 started with a visible change; adjustments now start
+    // neutral (D-58).
+    upgrades: &[Upgrade {
+        to: 2,
+        fill: &[("points", "0:0/64:52/192:204/255:255")],
+    }],
     audacity: "none (an adjustment)",
     summary: "Reshape the tones with a curve through a few points.",
     details: "`points` lists `IN:OUT` pairs from 0 to 255, inputs rising, joined by `/`. \
-              The default is a gentle S, which adds contrast; `0:0/255:255` changes \
-              nothing, and `0:255/255:0` is a negative. The curve passes smoothly \
+              The default `0:0/255:255` changes nothing; `0:0/64:52/192:204/255:255` \
+              is a gentle S that adds contrast, and `0:255/255:0` is a negative. The curve passes smoothly \
               through every point without overshooting. `channel` limits it to one colour.",
     params: &[
         CHANNEL,
         ParamSpec {
             name: "points",
             kind: Kind::Curve,
-            default: "0:0/64:52/192:204/255:255",
+            default: "0:0/255:255",
             help: "IN:OUT pairs, 0 to 255, inputs rising, joined by /",
         },
     ],

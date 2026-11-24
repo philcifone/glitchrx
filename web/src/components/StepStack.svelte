@@ -15,6 +15,7 @@
   import EffectPalette from './EffectPalette.svelte';
   import StepCard from './StepCard.svelte';
   import StepEditList from './StepEditList.svelte';
+  import PhotoTools from './PhotoTools.svelte';
 
   const encodings = $derived(app.config?.encodings ?? []);
   const current = $derived(encodings.find((e) => e.id === app.recipe.encoding));
@@ -53,6 +54,9 @@
 
 <div class="wrap">
 <div class="stack" class:editing>
+  {#if app.doc}
+    <PhotoTools />
+  {/if}
   <section class="card sample">
     <div class="row">
       <label for="encoding">Encoding</label>

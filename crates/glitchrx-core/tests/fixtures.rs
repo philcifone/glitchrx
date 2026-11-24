@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use glitchrx_core::codec::{self, Format};
-use glitchrx_core::effects::REGISTRY;
+use glitchrx_core::effects::{Group, REGISTRY};
 use glitchrx_core::mask::{Mask, MaskOp, Mode, Shape, Stroke};
 use glitchrx_core::{Encoding, Raster, Recipe, Step, Units};
 
@@ -154,10 +154,29 @@ fn shapes_mask() -> Mask {
     }
 }
 
+/// Adjustments start neutral (D-58), so their defaults change nothing. The
+/// tests give them their old, visible defaults instead, which also keeps
+/// their golden hashes: a recipe relying on the old defaults replays
+/// exactly once upgraded.
+fn lively(effect: &str) -> &'static str {
+    match effect {
+        "levels" => "black=12,white=240",
+        "curves" => "points=0:0/64:52/192:204/255:255",
+        "hsl" => "saturation=30",
+        "balance" => "red=12,blue=-12",
+        _ => "",
+    }
+}
+
 fn recipe(effect: &str, params: &str, seed: u64, encoding: Encoding) -> Recipe {
+    let params = [lively(effect), params]
+        .into_iter()
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join(",");
     Recipe {
         encoding,
-        steps: vec![Step::new(effect, params, seed).unwrap()],
+        steps: vec![Step::new(effect, &params, seed).unwrap()],
         ..Recipe::default()
     }
 }
@@ -300,6 +319,23 @@ fn every_effect_keeps_dimensions_and_stays_in_its_windows() {
                 e.id
             );
         }
+    }
+}
+
+/// Adjustments open neutral (D-58): added with their defaults, they leave
+/// the picture as it was, and the person moves a slider from there.
+#[test]
+fn adjustments_start_neutral() {
+    let base = decode("baseline-444.jpg").raster;
+    for e in REGISTRY.iter().filter(|e| e.group == Group::Adjust) {
+        let mut out = base.clone();
+        Recipe {
+            steps: vec![Step::new(e.id, "", 7).unwrap()],
+            ..Recipe::default()
+        }
+        .apply(&mut out)
+        .unwrap();
+        assert_eq!(out, base, "{} changed the picture at its defaults", e.id);
     }
 }
 

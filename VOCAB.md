@@ -95,13 +95,19 @@ Background, mostly from the archived JPEG byte engine (`archive/jpeg-bytes`). JP
 - **Recipe.** A TOML file (version 3) that lists the effects, parameters, seeds, opacities and masks, plus the recipe-wide encoding and channels. Replaying it on the same input gives the same output. Version 2 files (no opacity or masks) still load.
 - **Region.** The part of the raster where hits may land, for example `40%:60%`. In the raster, percent of the data is percent of the image height, so that really is the middle band.
 - **Bands.** A step scattered in seeded windows (`hits` above 0) instead of covering its whole region; a switch in Placement. Every effect starts without them.
+- **Full view.** The photo on the whole screen, with the bars hidden and the step panel lowered to its grabber; a tap on the photo or a swipe down on the grabber.
+- **Project file (`.grx`).** A zip holding the original photo byte for byte, the recipe and a preview, so an edit opens again on any device; like a `.psd`. Proposed for Phase 7 (SPEC 8.1).
+- **Pull, push, twirl.** Pull is a step made of strokes drawn on the photo (proposed for Phase 8, SPEC 8.2): push drags pixels along with the finger, twirl turns them around a centre into a whorl. Its **displacement map** says, for every point of the output, where in the input to read.
+- **Photo toolbox.** The card at the top of the step panel with crop, zoom and the work size (D-62).
+- **Remembered picture.** An exact result the browser keeps, keyed by the recipe that made it, so going back to that recipe (a step switched off and on) shows it without rendering.
+- **Midtone handle.** The grey handle of the levels editor; where it sits in the stretch between black and white sets `gamma`.
 - **Upgrade.** How a step saved with an older version of its effect is brought up to date when its only change was a moved default: the old value is written in, so the picture stays the same.
 - **Set (parameter).** Any of a fixed list of words, joined by `+` (`reds+blues`), or `all`; shown as toggles, such as hsl's colour dots.
 - **Seed.** The number that drives a step's randomness: where its hits land, and anything else the effect randomizes. The same seed always gives the same result on any machine, which is what makes recipes replay. Any whole number from 0 to 2^64 - 1; the dice picks one under a million so it is easy to type. No seed is stronger than another and neighbours are unrelated (41 and 42 differ as much as 41 and 900,000): think of it as a variation number. With `hits=0` nothing is random, so the dice is greyed out. In the GUI it sits at the end of Placement.
 - **Target.** Choosing a byte region by image position, for example "rows 40-60%" (Phase 3). It is approximate, because damage bleeds downward.
 - **Bottom sheet.** On a phone, the step panel sits under the preview and can be pulled taller with its handle. A common mobile pattern.
 - **Compare.** Pressing and holding the photo (or the `\` key) to see the untouched original in place of the glitch, as in Instagram. While masking, holding the photo paints, so the top bar has a compare button to hold instead.
-- **Zoom, fit, 100%.** Fit shows the whole picture; 100% shows one photo pixel per device pixel (as in Lightroom). The magnifier, a double tap or Z switch between them; a pinch or ctrl + wheel goes anywhere up to 800%.
+- **Zoom, fit, 100%.** Fit shows the whole picture; 100% shows one photo pixel per device pixel (as in Lightroom). The magnifier in the photo toolbox, a double tap or Z switch between them; a pinch or ctrl + wheel goes anywhere up to 800%.
 - **Patch.** The sharp part of a zoomed view: what is on screen, cut from the full-resolution render and laid over the enlarged preview once the view holds still. Always exact.
 - **Full-resolution cache.** The server's two kept full-size rasters for the photo being worked on: the picture just before the step being edited, and the last finished render. They make exact previews, pans and exports of what was just shown cheap.
 - **Document (doc).** A photo open in `glitchrx serve`. The server keeps up to four, closing the least recently used.
