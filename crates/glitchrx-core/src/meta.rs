@@ -6,7 +6,8 @@
 //! (camera, date, orientation, colour profile) stays.
 //!
 //! Everything is done **in place**, without moving a byte: values are
-//! overwritten with zeros or spaces, never cut out. The image data is not
+//! overwritten with zeros or spaces, never cut out (PNG text chunks, which
+//! stand alone, may also be dropped whole; see [`png`]). The image data is not
 //! touched, so the photo decodes to exactly the same raster and a recipe
 //! replays to the same bytes (D-25). Where the location can hide:
 //!
@@ -30,7 +31,7 @@ pub fn remove_location(bytes: &[u8]) -> Result<Vec<u8>> {
     let mut out = bytes.to_vec();
     match Format::sniff(bytes) {
         Some(Format::Jpeg) => jpeg(&mut out)?,
-        Some(Format::Png) => png(&mut out)?,
+        Some(Format::Png) => return png(bytes),
         Some(Format::Tiff) => tiff_file(&mut out)?,
         _ => return Err(Error::UnknownFormat),
     }
@@ -219,9 +220,27 @@ fn tiff_file(b: &mut [u8]) -> Result<()> {
 
 // ---------------------------------------------------------------------------
 // PNG: chunks, each with a CRC that must be redone after a change.
+//
+// PNG is the one format where metadata is also *removed* rather than
+// blanked: chunks stand alone, so dropping a text chunk moves nothing the
+// decoder reads (and this decoder takes no orientation from PNG metadata).
+// That covers what cannot be blanked in place: compressed XMP, and the
+// "Raw profile type ..." chunks in which ImageMagick and exiftool keep
+// whole EXIF, IPTC or XMP blocks as compressed hex.
 
-fn png(b: &mut [u8]) -> Result<()> {
-    let mut i = 8; // after the signature
+/// Text chunks dropped whole, by keyword.
+const PNG_DROPPED: &[&[u8]] = &[
+    b"Raw profile type exif",
+    b"Raw profile type APP1",
+    b"Raw profile type iptc",
+    b"Raw profile type 8bim",
+    b"Raw profile type xmp",
+];
+
+/// A copy of the PNG `b` without its location.
+fn png(b: &[u8]) -> Result<Vec<u8>> {
+    let mut out = b[..8].to_vec(); // the signature
+    let mut i = 8;
     while i + 12 <= b.len() {
         let len = u32::from_be_bytes([b[i], b[i + 1], b[i + 2], b[i + 3]]) as usize;
         let end = i + 8 + len;
@@ -229,46 +248,51 @@ fn png(b: &mut [u8]) -> Result<()> {
             return Err(refuse("a PNG chunk runs past the end"));
         }
         let kind = [b[i + 4], b[i + 5], b[i + 6], b[i + 7]];
-        let changed = match &kind {
+        let mut chunk = b[i..end + 4].to_vec();
+        let data = 8..8 + len;
+        let keyword = &b[i + 8..end][..b[i + 8..end].iter().position(|&c| c == 0).unwrap_or(0)];
+        let text = matches!(&kind, b"tEXt" | b"zTXt" | b"iTXt");
+        let keep = match &kind {
+            _ if text && PNG_DROPPED.contains(&keyword) => false,
             b"eXIf" => {
-                clear_gps(&mut b[i + 8..end])?;
+                clear_gps(&mut chunk[data])?;
                 true
             }
-            b"iTXt" => xmp_itxt(&mut b[i + 8..end])?,
-            b"IEND" => return Ok(()),
-            _ => false,
+            b"iTXt" if keyword == b"XML:com.adobe.xmp" => xmp_itxt(&mut chunk[data]),
+            _ => true,
         };
-        if changed {
-            let crc = crc32fast::hash(&b[i + 4..end]);
-            b[end..end + 4].copy_from_slice(&crc.to_be_bytes());
+        if keep {
+            let crc = crc32fast::hash(&chunk[4..8 + len]);
+            chunk[8 + len..].copy_from_slice(&crc.to_be_bytes());
+            out.extend_from_slice(&chunk);
         }
         i = end + 4;
+        if &kind == b"IEND" {
+            break;
+        }
     }
-    Ok(())
+    // Anything after IEND is not part of the picture; leave it out too.
+    Ok(out)
 }
 
 /// An iTXt chunk holding XMP: keyword, NUL, compression flag and method,
-/// language tag, NUL, translated keyword, NUL, then the text.
-fn xmp_itxt(d: &mut [u8]) -> Result<bool> {
+/// language tag, NUL, translated keyword, NUL, then the text. Blanked in
+/// place; false (drop the chunk) when it is compressed or malformed.
+fn xmp_itxt(d: &mut [u8]) -> bool {
     const KEY: &[u8] = b"XML:com.adobe.xmp\0";
-    if !d.starts_with(KEY) {
-        return Ok(false);
-    }
     let rest = KEY.len();
     if d.get(rest) != Some(&0) {
-        // Compressed XMP cannot be blanked in place, and is rare.
-        return Err(refuse("compressed XMP in a PNG"));
+        return false; // compressed
     }
     let mut at = rest + 2;
     for _ in 0..2 {
-        let nul = d[at..]
-            .iter()
-            .position(|&c| c == 0)
-            .ok_or_else(|| refuse("bad iTXt chunk"))?;
+        let Some(nul) = d.get(at..).and_then(|t| t.iter().position(|&c| c == 0)) else {
+            return false;
+        };
         at += nul + 1;
     }
     blank_xmp(&mut d[at..]);
-    Ok(true)
+    true
 }
 
 // ---------------------------------------------------------------------------
@@ -580,9 +604,29 @@ pub(crate) mod tests {
         let mut src = plain[..33].to_vec();
         src.extend(chunk(b"eXIf", &exif(false)));
         src.extend(chunk(b"iTXt", &itxt));
+        // Whole metadata blocks as compressed hex (ImageMagick, exiftool),
+        // compressed XMP, and a comment that has nothing to do with it.
+        src.extend(chunk(b"zTXt", b"Raw profile type iptc\0\0x\x9c\x03\x00"));
+        src.extend(chunk(
+            b"iTXt",
+            b"XML:com.adobe.xmp\0\x01\0\0\0x\x9c\x03\x00",
+        ));
+        src.extend(chunk(b"tEXt", b"Comment\0made on a Tuesday"));
         src.extend_from_slice(&plain[33..]);
         let out = remove_location(&src).unwrap();
         assert_no_location(&out);
+        assert!(!contains(&out, b"Raw profile type iptc"));
+        assert_eq!(
+            out.windows(17)
+                .filter(|w| w == b"XML:com.adobe.xmp")
+                .count(),
+            1
+        );
+        assert!(contains(&out, b"made on a Tuesday"));
+        assert!(
+            contains(&out, b"tiff:Make"),
+            "the uncompressed XMP is blanked, not dropped"
+        );
         // The png decoder checks CRCs; it reads the same picture.
         assert_eq!(
             codec::decode(&src).unwrap().raster,

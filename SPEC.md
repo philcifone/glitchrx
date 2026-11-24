@@ -240,6 +240,8 @@ glitchrx --echo photo.jpg                                writes photo-glitch.tif
 glitchrx --echo delay=0.33rows,decay=0.5,encoding=ulaw photo.jpg
 glitchrx --reverb --echo phase=1 photo.tif photo-bent.tif
 glitchrx --recipe moody.toml --batch *.jpg
+glitchrx --recipe moody.toml --project photo.jpg       also writes photo-glitch.glrx
+glitchrx edit.glrx out.png                               renders a project with its own recipe
 ```
 
 | Option | Behaviour |
@@ -247,13 +249,14 @@ glitchrx --recipe moody.toml --batch *.jpg
 | `--seed N` | Master seed. The default is random and is always printed. |
 | `--recipe FILE` | Apply a saved recipe instead of effect flags. |
 | `--save-recipe[=FILE]` | Write the recipe used. Default `<output-stem>.recipe.toml`. |
+| `--project[=FILE]` | Also write a project (8.1): the original without its location, the recipe and a preview. Default `<output-stem>.glrx`. With `--force` it may replace the project given as input (D-63). |
 | `--format tiff\|png\|jpeg\|webp\|avif` | Output format when OUTPUT is not given (default `tiff`); otherwise taken from OUTPUT's extension. |
 | `--crop X,Y,W,H` | Keep part of the photo before anything else, as shares of its width and height (D-50). |
 | `--work-size N`, `--scale-back` | Run the steps on a copy whose longer side is N px, and optionally enlarge the result back with hard pixel edges (D-48). |
 | `--quality N`, `--lossless`, `--avif-speed N` | Encoder settings (D-44): quality 1-100 for JPEG (95), lossy WebP (90) and AVIF (80); lossless WebP; AVIF speed 1-10 (6). |
 | `--encoding E`, `--channels 1\|2\|3` | Recipe-wide sample encoding and channel count (default `u8`, `1`). |
-| `--force` | Allow overwriting an existing output. Never the input. |
-| `--batch`, `--info`, `--list`, `-q`, `-v`, `--help` | As before. `--info` reports the format, size, orientation and colour profile. |
+| `--force` | Allow overwriting an existing output. Never the input, except a project saved over itself with `--project`. |
+| `--batch`, `--info`, `--list`, `-q`, `-v`, `--help` | As before. `--info` reports the format, size, orientation and colour profile, and for a project also its original's name, steps and preview. |
 
 Removed: `--reverse`, `--mode`, `--restart`, `--bake` (every output is already a normal image).
 
@@ -349,11 +352,11 @@ A project file is what a `.psd` is to Photoshop: everything needed to open an ed
 - `version` in the manifest lets the format change later: a reader refuses a version it does not know, with a message, as recipes do. Version 1 is written until something needs a change.
 - Writing is atomic: a temporary file next to the target, then a rename, so a crash never leaves half a project.
 - **A project can be saved over** (Phil, 2026-11-24): it is a working file, like a `.psd`. The GUI asks first, the CLI needs `--force`. Photos are still never written (section 13).
-- **Location is removed** from the original as it goes in, as a phone does when sharing a photo: the GPS block of its EXIF (JPEG, TIFF, PNG's `eXIf`) is emptied in place and XMP location fields are blanked, without touching the image data, so it decodes to the same raster (a test checks this on every fixture). Other metadata (camera, date, orientation, colour profile) stays. Exports never carried EXIF.
+- **Location is removed** from the original as it goes in, as a phone does when sharing a photo: the GPS block of its EXIF (JPEG, TIFF, PNG's `eXIf`) is emptied in place, XMP and IPTC location fields are blanked, and in a PNG the text chunks that hold whole metadata blocks compressed (ImageMagick's and exiftool's "Raw profile type ...", compressed XMP) are dropped, all without touching the image data, so it decodes to the same raster (a test checks this on every fixture). Other metadata (camera, date, orientation, colour profile) stays. Exports never carried EXIF.
 
 **In the GUI.** Export becomes two choices: **Save picture** (what Export does today) and **Save project (.glrx)**: "the original photo, the steps and a preview, to open again anywhere." The "Also save the recipe beside it" switch stays for picture exports. Open accepts `.glrx` beside photos, from the device or the library, with the preview as its thumbnail; opening one shows the preview at once, then the live render, with every step in place and the undo history starting there.
 
-**From the CLI.** `glitchrx project.glrx -o out.tif` renders it; `glitchrx photo.jpg --recipe r.toml --project out.glrx` writes one; `glitchrx --info project.glrx` lists what is inside.
+**From the CLI.** A `.glrx` input replays its own recipe (`glitchrx edit.glrx out.png`; `--recipe` and effect flags are refused with it, the recipe-wide options apply); `--project[=FILE]` writes one beside the picture; `--info` lists what is inside (section 7).
 
 **In the desktop app.** The app registers `.glrx` (and the MIME type, for Linux file managers), so a double click opens it.
 

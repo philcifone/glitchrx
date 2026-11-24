@@ -14,7 +14,8 @@ use std::process::ExitCode;
 
 use clap::{CommandFactory, FromArgMatches};
 use glitchrx_core::codec::{self, Format};
-use glitchrx_core::io::{WriteError, auto_output, write_output};
+use glitchrx_core::io::{WriteError, auto_output, write_output, write_project};
+use glitchrx_core::project::{self, Project};
 use glitchrx_core::{Error, Recipe, Step};
 
 use args::{Cli, EffectArg};
@@ -114,15 +115,32 @@ fn run(cli: &Cli, effects: &[EffectArg]) -> Result<(), Fail> {
         return Ok(());
     }
 
-    let (recipe, master_seed) = build_recipe(cli, effects)?;
+    // A project carries its own recipe; anything else needs one given.
     let jobs = plan_jobs(cli)?;
+    let given = cli.recipe.is_some() || !effects.is_empty();
+    if given && jobs.iter().any(|j| is_project_path(&j.input)) {
+        return Err(Fail::Usage(
+            "a project (.glrx) replays its own recipe; leave out --recipe and the effect flags"
+                .into(),
+        ));
+    }
+    let base = if given || !jobs.iter().all(|j| is_project_path(&j.input)) {
+        Some(build_recipe(cli, effects)?)
+    } else {
+        None
+    };
     if jobs.len() > 1 && matches!(cli.save_recipe, Some(Some(_))) {
         return Err(Fail::Usage(
             "--save-recipe=FILE takes a single input; omit FILE in batch mode".into(),
         ));
     }
+    if jobs.len() > 1 && matches!(cli.project, Some(Some(_))) {
+        return Err(Fail::Usage(
+            "--project=FILE takes a single input; omit FILE in batch mode".into(),
+        ));
+    }
 
-    if cli.verbose {
+    if let (true, Some((recipe, _))) = (cli.verbose, &base) {
         let prepared = recipe.prepare_all()?;
         for (i, (s, p)) in recipe.steps.iter().zip(&prepared).enumerate() {
             eprintln!(
@@ -141,7 +159,7 @@ fn run(cli: &Cli, effects: &[EffectArg]) -> Result<(), Fail> {
     // Keep going after a failed file in batch mode; report the worst error.
     let mut worst: Option<Fail> = None;
     for job in &jobs {
-        if let Err(f) = process(cli, &recipe, master_seed, job) {
+        if let Err(f) = process(cli, base.as_ref(), job) {
             if jobs.len() > 1 {
                 eprintln!("glitchrx: {}: {}", job.input.display(), f.message());
             }
@@ -172,11 +190,7 @@ fn build_recipe(cli: &Cli, effects: &[EffectArg]) -> Result<(Recipe, Option<u64>
         }
         let text = fs::read_to_string(path)
             .map_err(|e| Fail::Runtime(format!("{}: {e}", path.display())))?;
-        let mut r = Recipe::from_toml(&text)?;
-        if let Some(seed) = cli.seed {
-            r.reseed(seed);
-        }
-        (r, cli.seed)
+        return adjust(cli, Recipe::from_toml(&text)?);
     } else {
         if effects.is_empty() {
             return Err(Fail::Usage(
@@ -197,6 +211,22 @@ fn build_recipe(cli: &Cli, effects: &[EffectArg]) -> Result<(Recipe, Option<u64>
             Some(master),
         )
     };
+    overrides(cli, &mut recipe)?;
+    Ok((recipe, master))
+}
+
+/// A recipe read from a file or a project: new seeds with `--seed`, then
+/// the recipe-wide options. Returns it with the master seed, if any.
+fn adjust(cli: &Cli, mut recipe: Recipe) -> Result<(Recipe, Option<u64>), Fail> {
+    if let Some(seed) = cli.seed {
+        recipe.reseed(seed);
+    }
+    overrides(cli, &mut recipe)?;
+    Ok((recipe, cli.seed))
+}
+
+/// `--encoding`, `--channels`, `--work-size`, `--scale-back`, `--crop`.
+fn overrides(cli: &Cli, recipe: &mut Recipe) -> Result<(), Fail> {
     if let Some(e) = cli.encoding {
         recipe.encoding = e;
     }
@@ -213,7 +243,13 @@ fn build_recipe(cli: &Cli, effects: &[EffectArg]) -> Result<(Recipe, Option<u64>
         recipe.crop = Some(c);
     }
     recipe.validate()?;
-    Ok((recipe, master))
+    Ok(())
+}
+
+/// Named like a project (`.glrx`, any case).
+fn is_project_path(p: &Path) -> bool {
+    p.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case(project::EXTENSION))
 }
 
 /// A short, typeable seed (0..1,000,000). Not cryptographic, just varied.
@@ -292,11 +328,31 @@ fn output_format(cli: &Cli, output: Option<&Path>) -> Result<Format, Fail> {
     }
 }
 
-fn process(cli: &Cli, recipe: &Recipe, master_seed: Option<u64>, job: &Job) -> Result<(), Fail> {
+fn process(cli: &Cli, base: Option<&(Recipe, Option<u64>)>, job: &Job) -> Result<(), Fail> {
     let input = &job.input;
     let format = output_format(cli, job.output.as_deref())?;
     let bytes = fs::read(input).map_err(|e| Fail::Runtime(format!("{}: {e}", input.display())))?;
-    let mut image = codec::decode(&bytes)?;
+    // The photo, its name, and the recipe to run on it: a project's own,
+    // or the one given.
+    let (original, name, recipe, master_seed) = if project::is_project(&bytes) {
+        let p = Project::from_bytes(&bytes)?;
+        let (recipe, seed) = adjust(cli, p.recipe)?;
+        (p.original, p.name, recipe, seed)
+    } else if is_project_path(input) {
+        return Err(Error::Project("not a glitcharaxia project".into()).into());
+    } else {
+        let Some((recipe, seed)) = base else {
+            return Err(Fail::Usage(
+                "no effect given, e.g. `glitchrx --echo photo.jpg` (see --list)".into(),
+            ));
+        };
+        let name = input
+            .file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        (bytes, name, recipe.clone(), *seed)
+    };
+    let recipe = &recipe;
+    let mut image = codec::decode(&original)?;
     // Canvas (work size), steps, then scale back if asked.
     image.raster = recipe.render(&image.raster)?;
     let settings = codec::EncodeSettings {
@@ -329,11 +385,20 @@ fn process(cli: &Cli, recipe: &Recipe, master_seed: Option<u64>, job: &Job) -> R
             .unwrap_or_else(|| output.with_extension("recipe.toml"));
         // Note the photo's name, so the GUI can offer to continue from it.
         let named = glitchrx_core::Recipe {
-            source: input.file_name().map(|n| n.to_string_lossy().into_owned()),
+            source: Some(name.clone()),
             ..recipe.clone()
         };
         write_output(input, &path, named.to_toml().as_bytes(), cli.force)?;
         extra.push(format!("recipe {}", path.display()));
+    }
+    if let Some(save) = &cli.project {
+        let path = save
+            .clone()
+            .unwrap_or_else(|| output.with_extension(project::EXTENSION));
+        let preview = project::preview(&image.raster, image.icc.as_deref())?;
+        let p = Project::new(recipe.clone(), &name, &original, Some(preview))?;
+        write_project(input, &path, &p.to_bytes()?, cli.force)?;
+        extra.push(format!("project {}", path.display()));
     }
 
     if !cli.quiet {
@@ -353,9 +418,52 @@ fn process(cli: &Cli, recipe: &Recipe, master_seed: Option<u64>, job: &Job) -> R
 
 fn print_info(path: &Path) -> Result<(), Fail> {
     let bytes = fs::read(path).map_err(|e| Fail::Runtime(format!("{}: {e}", path.display())))?;
-    let img = codec::decode(&bytes)?;
-    let r = &img.raster;
     println!("{}", path.display());
+    if project::is_project(&bytes) {
+        return print_project(&bytes);
+    }
+    print_photo(&bytes)
+}
+
+/// What a project holds, then its original as for a photo.
+fn print_project(bytes: &[u8]) -> Result<(), Fail> {
+    let p = Project::from_bytes(bytes)?;
+    println!(
+        "  project      {}{}",
+        human_size(bytes.len()),
+        p.writer
+            .as_deref()
+            .map_or(String::new(), |w| format!(", made by {w}"))
+    );
+    println!("  original     {}", p.name);
+    let steps: Vec<_> = p.recipe.steps.iter().map(|s| s.effect.as_str()).collect();
+    let mut recipe = match steps.len() {
+        0 => "no steps".to_string(),
+        1 => format!("1 step: {}", steps[0]),
+        n => format!("{n} steps: {}", steps.join(", ")),
+    };
+    if p.recipe.crop.is_some() {
+        recipe.push_str("; cropped");
+    }
+    if let Some(w) = p.recipe.work_size {
+        recipe.push_str(&format!("; work size {w}"));
+    }
+    println!("  recipe       {recipe}");
+    if let Some(pv) = &p.preview {
+        let img = codec::decode(pv)?;
+        println!(
+            "  preview      {} x {}, {}",
+            img.raster.width,
+            img.raster.height,
+            human_size(pv.len())
+        );
+    }
+    print_photo(&p.original)
+}
+
+fn print_photo(bytes: &[u8]) -> Result<(), Fail> {
+    let img = codec::decode(bytes)?;
+    let r = &img.raster;
     println!("  file         {}, {}", img.format, human_size(bytes.len()));
     println!("  dimensions   {} x {} (upright)", r.width, r.height);
     let turn = match img.orientation {

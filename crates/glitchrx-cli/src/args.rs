@@ -132,6 +132,12 @@ pub struct Cli {
     #[arg(long, value_name = "FILE", num_args = 0..=1, require_equals = true)]
     pub save_recipe: Option<Option<PathBuf>>,
 
+    /// Also write a project: the original, the recipe and a preview, to open
+    /// again anywhere [default: OUTPUT-STEM.glrx]. The photo's location is
+    /// left out.
+    #[arg(long, value_name = "FILE", num_args = 0..=1, require_equals = true)]
+    pub project: Option<Option<PathBuf>>,
+
     /// Output format when no output file is named [default: tiff].
     /// A named output's extension decides its format.
     #[arg(long, value_enum, value_name = "FORMAT")]
@@ -178,7 +184,8 @@ pub struct Cli {
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u8).range(1..=3))]
     pub channels: Option<u8>,
 
-    /// Allow overwriting an existing output file (never the input).
+    /// Allow overwriting an existing output file (never the input, unless
+    /// the input is a project and --project writes over it).
     #[arg(long)]
     pub force: bool,
 
@@ -226,9 +233,12 @@ pub fn after_help() -> String {
          glitchrx --reverb --echo phase=2 --encoding ulaw photo.jpg\n  \
          glitchrx --shift by=0.5rows,hits=12 --format jpeg photo.jpg\n  \
          glitchrx --recipe moody.toml --batch *.jpg\n  \
-         glitchrx --info photo.jpg\n  \
+         glitchrx --recipe moody.toml --project photo.jpg   also writes photo-glitch.glrx\n  \
+         glitchrx edit.glrx out.png                     renders a project with its own recipe\n  \
+         glitchrx --info photo.jpg edit.glrx\n  \
          glitchrx serve --root ~/Pictures               web GUI (see glitchrx serve --help)\n\
-         \nOriginals are never modified, and existing files are never overwritten without --force.",
+         \nOriginals are never modified, and existing files are never overwritten without --force.\n\
+         A project (.glrx) is a working file: --project --force may save over the one given as input.",
     );
     s
 }
