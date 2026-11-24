@@ -77,6 +77,7 @@ Decisions from earlier versions keep their numbers. Superseded ones say so.
 | D-62 | **Photo toolbox** | Phil found the crop button, the magnifier and the work size distracting on the photo while editing. They move into a toolbox card at the top of the step panel, above the encoding: crop and zoom as icon buttons (zoom shows the percentage while zoomed in), the work size as a segmented control on the right, one row. Nothing floats over the photo now but messages and the resume banner. The full view button went with them; a tap on the photo does that instead (D-59). |
 | D-63 | **Project files** (Phase 7) | Phil wanted an edit to open on any device, as a `.psd` does, without carrying the original and the recipe around separately. A zip container (the OpenDocument pattern) holding the original, the recipe and a JPEG preview; section 8.1. The extension is `.glrx` (Phil: four letters, and closer to the name). The original keeps its image data exactly, so replays match, but loses its location. A project may be saved over, after a confirmation or `--force`: the rule that inputs are never written protects photos, and a project is a working file. |
 | D-64 | **Pull** (Phase 8) | Phil asked for a manual way to push pixels around, like a crop-style mode, but as a step that switches on and off and takes a mask. Strokes stored in shares of the photo, rendered through a fixed-size displacement map, hard pixels by default; section 8.2. Pull only; twirl and others later. |
+| D-65 | **New folder** (Phase 8) | Phil, 2026-11-24: when saving on the server he wants to make a folder there and then (a `projects` folder, a folder per format), by his own choice; the app never sorts files into folders by itself. The folder browser that Save As and Settings share gains a **New folder** button: a name, then the folder is made inside the one being shown and opened, ready to save into. Same rules as a file name in Save As: one name (no slashes, no leading dot), never outside the server user's home folder, and an existing name is refused (409) rather than reused silently. Only a folder is made: nothing is moved or renamed, and an empty folder is left for the user to remove. Permissions are not a new risk: the server already writes files under home as the user it runs as, and making a folder there is the same right; a folder it may not write in gives a plain error. |
 | D-39 | **Presets** | Presets are Phil's own saved recipes, not built-in looks. The server keeps them as ordinary recipe files in `~/.config/glitchrx/presets` (`--presets DIR` to move them), so phone and desktop share them and the CLI replays them with `--recipe`. Names are checked, not cleaned up (no slashes, no leading dot), so two names never share a file and nothing escapes the directory. Saving over a name needs an explicit confirmation. Using a preset replaces the steps (undoable); adding one appends its steps and pins their encoding and channels if they differ from the current recipe. |
 
 ## 1. Goals and non-goals
@@ -498,17 +499,18 @@ Phil's answers (2026-11-24): the extension is `.glrx`; a project can be saved ov
 
 Effort: about Phase 5's size; most of it is 7c.
 
-### Phase 8: pull (planned with Phil, 2026-11-24; after Phase 7)
+### Phase 8: pull, and New folder (planned with Phil, 2026-11-24; branch `phase-8-pull`)
 
 Section 8.2. Each part ends green and usable:
 
 - **8a The effect in the core.** The displacement map, both samplings, the strokes in the recipe (version 5), mapping onto a cropped or shrunk canvas, golden hashes, a test that a preview and an export agree closely, a contact sheet at a few sizes and strengths.
 - **8b Pull mode in the GUI.** The edit bar and tool bar, pulling with a live preview, undo per stroke, the step card's count and Clear, `[` and `]` on a desktop.
 - **8c Speed.** A check on the slow test photo (target: the preview keeps up with a finger on a 12 MP photo), and caching the map while only later steps change.
+- **8d New folder (D-65).** `POST /api/folders` making one folder inside a home-relative path, with the name checks and tests for escapes (`..`, slashes, symlinks out of home) and a taken name; the button in the folder browser (Save As and Settings); the new folder opens at once.
 
 Phil's answers (2026-11-24): hard `pixels` sampling by default; only the pull tool for now.
 
-Effort: a little larger than Phase 7; the GUI mode is most of it, and it reuses the mask painter's gestures.
+Effort: a little larger than Phase 7; the GUI mode is most of it, and it reuses the mask painter's gestures. 8d is small and independent, so it can go first.
 
 ### Parked
 
