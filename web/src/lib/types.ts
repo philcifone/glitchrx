@@ -162,6 +162,19 @@ export interface StepDto {
   mask?: Mask;
   /** A pull step's strokes, in the order drawn (D-64). */
   pull?: PullStroke[];
+  /** A pull step's pins, run after its strokes (D-67). */
+  pin?: PullPin[];
+}
+
+/**
+ * One pull pin (see crates/glitchrx-core/src/pull.rs): the point at `from`
+ * picked up and put down at `to`, as shares of the whole photo.
+ */
+export interface PullPin {
+  /** Brush diameter, as a share of the photo's longer side. */
+  size: number;
+  from: [number, number];
+  to: [number, number];
 }
 
 /** One pull stroke (see crates/glitchrx-core/src/pull.rs). */

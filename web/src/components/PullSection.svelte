@@ -1,18 +1,30 @@
 <script lang="ts">
-  // A pull step's strokes (SPEC 8.2): how many there are, Draw (pull mode)
-  // or Done, and Clear. In pull mode the brush settings show here, under
-  // the photo, while the photo takes the strokes.
+  // A pull step's strokes and pins (SPEC 8.2, D-67): how many there are,
+  // Draw (pull mode) or Done, and Clear. In pull mode the tool shows here,
+  // under the photo, while the photo takes the gestures: Draw (strokes, with
+  // size and strength) or Pins (grid points picked up and moved, with size,
+  // the grid's spacing and how it shows).
   import Hand from '@lucide/svelte/icons/hand-grab';
   import Eraser from '@lucide/svelte/icons/eraser';
   import { app } from '../lib/app.svelte';
   import { percent } from '../lib/mask';
-  import { pullSizeScale, strokeCount, STRENGTH_MIN } from '../lib/pull';
+  import { GRID_MAX, GRID_MIN, pullSizeScale, strokeCount, STRENGTH_MIN, type GridShow, type PullMode } from '../lib/pull';
   import { SLIDER_STEPS } from '../lib/slider';
   import type { StepState } from '../lib/types';
 
   let { step }: { step: StepState } = $props();
 
-  const count = $derived(step.pull?.length ?? 0);
+  const count = $derived((step.pull?.length ?? 0) + (step.pin?.length ?? 0));
+  const tool = $derived(app.pullTool);
+  const MODES: [PullMode, string][] = [
+    ['draw', 'Draw'],
+    ['pins', 'Pins'],
+  ];
+  const SHOWS: [GridShow, string][] = [
+    ['dots', 'Dots'],
+    ['lines', 'Lines'],
+    ['off', 'Off'],
+  ];
   const active = $derived(app.pulling === step.uid && !!app.pullTarget);
   const usable = $derived(step.enabled && !!app.doc);
   const sizeT = $derived(pullSizeScale.toSlider(app.pullTool.size));
@@ -20,8 +32,8 @@
 
 <section class="group" aria-label="Strokes">
   <div class="head">
-    <h3 class="section-label">Strokes</h3>
-    <span class="dim count">{strokeCount(count)}</span>
+    <h3 class="section-label">Strokes and pins</h3>
+    <span class="dim count">{strokeCount(step.pull?.length ?? 0, step.pin?.length ?? 0)}</span>
   </div>
   <div class="actions">
     {#if active}
@@ -36,11 +48,16 @@
         <Hand size={16} strokeWidth={1.75} /> Draw
       </button>
     {/if}
-    <button class="plain danger" onclick={() => app.clearPull(step.uid)} disabled={!count} title="Remove every stroke (undo brings them back)">
+    <button class="plain danger" onclick={() => app.clearPull(step.uid)} disabled={!count} title="Remove every stroke and pin (undo brings them back)">
       <Eraser size={16} strokeWidth={1.75} /> Clear
     </button>
   </div>
   {#if active}
+    <div class="segmented mode" role="radiogroup" aria-label="Pull tool">
+      {#each MODES as [id, label] (id)}
+        <button role="radio" aria-checked={tool.mode === id} class:on={tool.mode === id} onclick={() => app.setPullTool({ mode: id })}>{label}</button>
+      {/each}
+    </div>
     <div class="row">
       <span class="lbl">Size</span>
       <input
@@ -56,6 +73,7 @@
       />
       <span class="val">{percent(app.pullTool.size)}</span>
     </div>
+    {#if tool.mode === 'draw'}
     <div class="row">
       <span class="lbl">Strength</span>
       <input
@@ -74,8 +92,36 @@
     <p class="dim note">
       Drag on the photo to pull it; two fingers zoom and pan. Each stroke is one undo. Size and strength apply to the next stroke.
     </p>
+    {:else}
+    <div class="row">
+      <span class="lbl">Grid</span>
+      <input
+        type="range"
+        min={GRID_MIN}
+        max={GRID_MAX}
+        step="1"
+        value={tool.grid}
+        style:--pct="{((tool.grid - GRID_MIN) / (GRID_MAX - GRID_MIN)) * 100}%"
+        oninput={(e) => app.setPullTool({ grid: Number(e.currentTarget.value) })}
+        aria-label="Grid cells across the photo"
+        title="How many grid cells across the photo's longer side"
+      />
+      <span class="val">{tool.grid}</span>
+    </div>
+    <div class="row">
+      <span class="lbl">Show</span>
+      <div class="segmented" role="radiogroup" aria-label="Show the grid as">
+        {#each SHOWS as [id, label] (id)}
+          <button role="radio" aria-checked={tool.show === id} class:on={tool.show === id} onclick={() => app.setPullTool({ show: id })}>{label}</button>
+        {/each}
+      </div>
+    </div>
+    <p class="dim note">
+      Drag a grid point to pull it; touch a pin to move it again, or drag it home to remove it. Each move is one undo. Size applies to new pins; the grid only picks points, so changing it moves nothing.
+    </p>
+    {/if}
   {:else if !count}
-    <p class="dim note">Draw on the photo to pull pixels along with your finger.</p>
+    <p class="dim note">Draw on the photo to pull pixels along with your finger, or pin grid points and move them.</p>
   {/if}
 </section>
 
@@ -134,6 +180,16 @@
     font-size: 0.85rem;
     font-variant-numeric: tabular-nums;
     color: var(--fg-dim);
+  }
+
+  .mode {
+    align-self: stretch;
+    display: flex;
+    margin: 4px 0 2px;
+  }
+
+  .mode button {
+    flex: 1;
   }
 
   .note {

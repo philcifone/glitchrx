@@ -52,6 +52,7 @@ import type {
   Stroke,
   PresetGroup,
   PresetInfo,
+  PullPin,
   PullStroke,
   RecipeDto,
   RecipeState,
@@ -508,13 +509,14 @@ export class App {
       ...(r.crop ? { crop: { ...r.crop } } : {}),
       steps: r.steps
         .filter((s) => s.enabled)
-        .map(({ effect, effect_version, seed, params, mask, pull }) => ({
+        .map(({ effect, effect_version, seed, params, mask, pull, pin }) => ({
           effect,
           ...(effect_version === undefined ? {} : { effect_version }),
           seed,
           params,
           ...(mask ? { mask } : {}),
           ...(pull?.length ? { pull } : {}),
+          ...(pin?.length ? { pin } : {}),
         })),
     };
   }
@@ -1123,11 +1125,45 @@ export class App {
     }
   }
 
-  /** Remove every stroke from a pull step. Undoable. */
+  /** Pins as they were before the one being moved, kept aside meanwhile. */
+  private pinsBefore: PullPin[] | null = null;
+
+  /** A pin is being placed or moved: show the step with these pins, without a history entry. */
+  livePins(pins: PullPin[]): void {
+    const s = this.pullTarget?.step;
+    if (!s) return;
+    this.pinsBefore ??= $state.snapshot(s.pin ?? []) as PullPin[];
+    s.pin = pins;
+    this.changed(false);
+  }
+
+  /**
+   * The pin is down: keep these pins (one undo step), or with null put the
+   * step back as it was (a cancelled drag, or nothing changed).
+   */
+  endPins(pins: PullPin[] | null): void {
+    const s = this.pullTarget?.step;
+    const before = this.pinsBefore;
+    this.pinsBefore = null;
+    if (!s || before === null) return;
+    const same = (a: PullPin[]) => JSON.stringify(a) === JSON.stringify(before);
+    if (pins && !same(pins)) {
+      if (pins.length) s.pin = pins;
+      else delete s.pin;
+      this.changed();
+    } else {
+      if (before.length) s.pin = before;
+      else delete s.pin;
+      this.changed(false);
+    }
+  }
+
+  /** Remove every stroke and pin from a pull step. Undoable. */
   clearPull(uid: string): void {
     const s = this.step(uid);
-    if (!s?.pull?.length) return;
+    if (!s?.pull?.length && !s?.pin?.length) return;
     delete s.pull;
+    delete s.pin;
     this.changed();
   }
 
