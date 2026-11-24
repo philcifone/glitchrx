@@ -1555,3 +1555,63 @@ async fn pull_strokes_travel_through_json_and_toml() {
     let (s, _, _) = send(&app, post_json("/api/recipe/to-toml", bad)).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
 }
+
+/// A picture made from a project is named after the project (as an editor
+/// exports poster.psd to poster.jpg), wherever it goes; a new project from
+/// it still takes the next -glitch name.
+#[tokio::test]
+async fn pictures_from_a_project_take_its_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join("jpeg")).unwrap();
+    let app = app_with_settings(&home, None);
+    let photo = upload(&app, "IMG_1.jpg", fixture("baseline-444.jpg")).await;
+    let pid = photo["id"].as_str().unwrap();
+    let (_, _, proj) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{pid}/export"),
+            json!({"recipe": sample_recipe(), "format": "tiff", "project": true}),
+        ),
+    )
+    .await;
+    let doc = upload(&app, "IMG_1-glitch-2.glrx", proj.to_vec()).await;
+    let id = doc["id"].as_str().unwrap();
+    let suggest = |body: serde_json::Value| {
+        let app = app.clone();
+        async move {
+            let (_, _, b) = send(&app, post_json(&format!("/api/docs/{id}/suggest"), body)).await;
+            json_of(&b)["name"].as_str().unwrap().to_string()
+        }
+    };
+    assert_eq!(
+        suggest(json!({"folder": "jpeg", "format": "jpeg"})).await,
+        "IMG_1-glitch-2"
+    );
+    fs::write(home.join("jpeg/IMG_1-glitch-2.jpg"), b"x").unwrap();
+    assert_eq!(
+        suggest(json!({"folder": "jpeg", "format": "jpeg"})).await,
+        "IMG_1-glitch-2-1"
+    );
+    assert_eq!(
+        suggest(json!({"folder": "jpeg", "format": "jpeg", "project": true})).await,
+        "IMG_1-glitch-3",
+        "a new project: the photo's next -glitch number (any extension counts)"
+    );
+    // Download: the project's name too.
+    let (s, h, _) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/export"),
+            json!({"recipe": sample_recipe(), "format": "png"}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(
+        h[header::CONTENT_DISPOSITION]
+            .to_str()
+            .unwrap()
+            .contains("IMG_1-glitch-2.png")
+    );
+}

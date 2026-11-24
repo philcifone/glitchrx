@@ -108,6 +108,43 @@ pub fn auto_output(input: &Path, extension: &str) -> io::Result<PathBuf> {
     Ok(input.with_file_name(name))
 }
 
+/// Pick the name for a picture rendered from a project file (`.glrx`):
+/// the project's own name, as an editor exports `poster.psd` to
+/// `poster.jpg`, so the picture is plainly that project's. `-glitch` is not
+/// added again: the project is already the glitched work. When the name is
+/// taken in that folder (with this extension), `-1`, `-2`, ... follow.
+///
+/// `project` need not exist: only its folder and name are used.
+pub fn project_output(project: &Path, extension: &str) -> PathBuf {
+    let stem = project
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut n = 0u64;
+    loop {
+        let name = if n == 0 {
+            format!("{stem}.{extension}")
+        } else {
+            format!("{stem}-{n}.{extension}")
+        };
+        let path = project.with_file_name(name);
+        if fs::symlink_metadata(&path).is_err() {
+            return path;
+        }
+        n += 1;
+    }
+}
+
+/// The automatic name for a picture made from `input`: [`project_output`]
+/// for a project file, [`auto_output`] for a photo.
+pub fn picture_output(input: &Path, extension: &str) -> io::Result<PathBuf> {
+    if is_project_file(input) {
+        Ok(project_output(input, extension))
+    } else {
+        auto_output(input, extension)
+    }
+}
+
 /// True if `a` and `b` are the same file on disk (symlinks and hard links
 /// included). A path that does not exist is never the same as anything.
 pub fn same_file(a: &Path, b: &Path) -> bool {
@@ -207,6 +244,30 @@ fn write_file(like: &Path, output: &Path, bytes: &[u8], force: bool) -> Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pictures_from_a_project_take_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("IMG_1-glitch-2.glrx");
+        fs::write(&project, b"x").unwrap();
+        // The project itself does not count: only pictures of this type.
+        let first = project_output(&project, "jpg");
+        assert_eq!(first.file_name().unwrap(), "IMG_1-glitch-2.jpg");
+        fs::write(&first, b"x").unwrap();
+        assert_eq!(
+            project_output(&project, "jpg").file_name().unwrap(),
+            "IMG_1-glitch-2-1.jpg"
+        );
+        assert_eq!(
+            project_output(&project, "png").file_name().unwrap(),
+            "IMG_1-glitch-2.png"
+        );
+        // A folder the project is not in works the same.
+        let other = dir.path().join("jpeg");
+        fs::create_dir(&other).unwrap();
+        let there = project_output(&other.join("IMG_1-glitch-2.glrx"), "jpg");
+        assert_eq!(there, other.join("IMG_1-glitch-2.jpg"));
+    }
 
     #[test]
     fn base_stems() {

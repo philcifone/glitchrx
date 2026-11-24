@@ -16,7 +16,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use glitchrx_core::codec;
-use glitchrx_core::io::{WriteError, auto_output, base_stem, write_output, write_project};
+use glitchrx_core::io::{
+    WriteError, auto_output, base_stem, project_output, write_output, write_project,
+};
 use glitchrx_core::project::{self, Project};
 use glitchrx_core::recipe::NEVER;
 use glitchrx_core::{Error, Raster, Recipe};
@@ -948,6 +950,22 @@ impl ExportRequest {
 }
 
 /// File name for a download: `photo.jpg` -> `photo-glitch.tif`.
+/// The download name for an export of `doc`. A picture made from a
+/// project takes the project's name (see [`project_output`]); everything
+/// else gets the photo's `-glitch` name.
+fn download_name(doc: &Doc, project: bool, ext: &str) -> String {
+    match &doc.project {
+        Some(p) if !project => {
+            let stem = std::path::Path::new(p)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            format!("{stem}.{ext}")
+        }
+        _ => export_name(&doc.name, ext),
+    }
+}
+
 fn export_name(doc_name: &str, ext: &str) -> String {
     let stem = std::path::Path::new(doc_name)
         .file_stem()
@@ -1004,7 +1022,7 @@ async fn export(
     let settings = req.settings()?;
     blocking(move || {
         let bytes = output_bytes(&doc, &recipe, &req, &settings)?;
-        let name = export_name(&doc.name, req.ext());
+        let name = download_name(&doc, req.project, req.ext());
         // RFC 6266: an ASCII fallback plus the exact UTF-8 name.
         let ascii: String = name
             .chars()
@@ -1083,7 +1101,13 @@ async fn save(
                 saved: vec![browse::relative(&root, &source)],
             }));
         }
-        let out = auto_output(&source, req.ext()).map_err(|e| ApiError::internal(e.to_string()))?;
+        // A picture from a project is named after the project; anything
+        // else takes the next free -glitch name.
+        let out = if doc.project.is_some() && !req.project {
+            project_output(&source, req.ext())
+        } else {
+            auto_output(&source, req.ext()).map_err(|e| ApiError::internal(e.to_string()))?
+        };
         let write = |path: &std::path::Path, data: &[u8]| {
             write_output(&source, path, data, false).map_err(conflict)
         };
@@ -1187,13 +1211,17 @@ async fn save_as(
         let ext = req.ext();
         let (dir, name) = match &doc.source {
             Some(src) => {
-                let suggested = auto_output(src, ext)
-                    .ok()
+                let next = if doc.project.is_some() && !req.project {
+                    Some(project_output(src, ext))
+                } else {
+                    auto_output(src, ext).ok()
+                };
+                let suggested = next
                     .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-                    .unwrap_or_else(|| export_name(&doc.name, ext));
+                    .unwrap_or_else(|| download_name(&doc, req.project, ext));
                 (src.parent().map(|p| p.to_path_buf()), suggested)
             }
-            None => (pictures_dir(), export_name(&doc.name, ext)),
+            None => (pictures_dir(), download_name(&doc, req.project, ext)),
         };
         let Some(out) = dialogs.save_as(dir.as_deref(), &name) else {
             return Ok(cancelled());
@@ -1457,7 +1485,8 @@ struct Suggested {
 }
 
 /// The name Save As suggests: the photo's next free `-glitch` name in the
-/// chosen folder, as the CLI would pick it there.
+/// chosen folder, as the CLI would pick it there; for a picture made from
+/// a project, the project's own name (with `-1`, ... if taken).
 async fn suggest_name(
     State(st): State<Shared>,
     Path(id): Path<String>,
@@ -1473,8 +1502,13 @@ async fn suggest_name(
     } else {
         codec::Format::from(req.format).extension()
     };
-    let out =
-        auto_output(&folder.join(&doc.name), ext).map_err(|e| ApiError::internal(e.to_string()))?;
+    // A picture from a project takes the project's name (D-63); otherwise
+    // the photo's next free -glitch name.
+    let out = match &doc.project {
+        Some(p) if !req.project => project_output(&folder.join(p), ext),
+        _ => auto_output(&folder.join(&doc.name), ext)
+            .map_err(|e| ApiError::internal(e.to_string()))?,
+    };
     let name = out
         .file_stem()
         .map(|n| n.to_string_lossy().into_owned())

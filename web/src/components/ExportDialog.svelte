@@ -240,11 +240,16 @@
         {/if}
         {#if doc?.path && !app.desktop}
           <button onclick={() => run(() => app.saveOnServer(opts, withRecipe))} disabled={blocked}>
-            <Save size={18} strokeWidth={1.75} /> Save next to original
+            <Save size={18} strokeWidth={1.75} /> {doc.project ? 'Save next to project' : 'Save next to original'}
           </button>
         {/if}
       </div>
-      {#if app.desktop}
+      {#if doc?.project}
+        <!-- A picture of a project takes the project's name, as an editor
+             exports poster.psd to poster.jpg. -->
+        {@const stem = doc.project.replace(/\.[^.]*$/, '')}
+        <p class="dim small">Named after the project: {stem}.{ext}, then {stem}-1, ... Nothing is overwritten.</p>
+      {:else if app.desktop}
         <p class="dim small">Suggests the next free -glitch name next to the original. The original is never written.</p>
       {:else if doc?.path}
         <p class="dim small">Next to the original as {doc.name.replace(/\.[^.]*$/, '')}-glitch, -glitch-1, ... Nothing is overwritten.</p>
