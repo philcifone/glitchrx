@@ -5,6 +5,11 @@
   // change (the selected brush or pin, or the next one) and New, then the
   // tool's settings, then "Delete this pin" (or brush) while one is
   // selected. There is no Delete all. Done is in the top bar only.
+  //
+  // What changes is the tool's segment: while the photo is being pulled it
+  // is filled with the accent (engaged), and after Done it goes back to the
+  // plain selected look (chosen, not engaged), so the card itself says
+  // whether a drag on the photo pulls (Phil, 2026-11-24).
   import Hand from '@lucide/svelte/icons/hand-grab';
   import Grid from '@lucide/svelte/icons/grid-3x3';
   import Plus from '@lucide/svelte/icons/plus';
@@ -69,9 +74,10 @@
         role="radio"
         aria-checked={tool.mode === id}
         class:on={tool.mode === id}
+        class:engaged={active && tool.mode === id}
         onclick={() => pick(id)}
         disabled={!usable}
-        title={why || (id === 'draw' ? 'Drag on the photo to pull it' : 'Pick up grid points and move them')}
+        title={why || (active && tool.mode === id ? 'Pulling: drags on the photo pull it (Done to stop)' : id === 'draw' ? 'Drag on the photo to pull it' : 'Pick up grid points and move them')}
       >
         {#if id === 'draw'}<Hand size={16} strokeWidth={1.75} />{:else}<Grid size={16} strokeWidth={1.75} />{/if}
         {label}
@@ -262,6 +268,13 @@
 
   .mode button {
     flex: 1;
+  }
+
+  /* Engaged: the photo takes this tool's gestures (until Done). */
+  .mode button.engaged,
+  .mode button.engaged:hover:not(:disabled) {
+    background: var(--accent);
+    color: var(--accent-fg);
   }
 
   .note {
