@@ -16,7 +16,7 @@
 //! greys and near-greys, whose hue means little, are left alone.
 
 use super::adjust::{per_pixel, to_byte};
-use super::{Effect, EffectInfo, Group, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Group, PlacementDefaults, Upgrade, Window};
 use crate::error::Result;
 use crate::params::{Kind, ParamSpec, Params};
 use crate::rng::Rng;
@@ -24,8 +24,13 @@ use crate::rng::Rng;
 pub static INFO: EffectInfo = EffectInfo {
     id: "hsl",
     group: Group::Adjust,
-    version: 1,
-    upgrades: &[],
+    version: 2,
+    // Version 1 started with a visible change; adjustments now start
+    // neutral (D-58).
+    upgrades: &[Upgrade {
+        to: 2,
+        fill: &[("saturation", "30")],
+    }],
     audacity: "none (an adjustment)",
     summary: "Turn the hues, and change saturation and lightness.",
     details: "`range` limits it to one family of colours (`reds`, `yellows`, ...), \
@@ -56,7 +61,7 @@ pub static INFO: EffectInfo = EffectInfo {
                 min: -100,
                 max: 100,
             },
-            default: "30",
+            default: "0",
             help: "-100 grey, 0 unchanged, 100 twice as vivid",
         },
         ParamSpec {

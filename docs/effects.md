@@ -410,7 +410,7 @@ Set the black point, white point and midtone gamma.
 
 Input values at or below `black` become `out_black`, at or above `white` become `out_white`, and the range between is stretched to fit. `gamma` bends the middle: above 1 lightens the midtones, below 1 darkens them. `channel` limits it to one colour, which shifts the colour balance.
 
-Version: 1.
+Version: 2.
 
 An adjustment: a photo tool rather than a glitch. It works on whole RGB pixels, so the encoding and channels do not apply; masks, opacity and placement do, as for any step.
 
@@ -419,8 +419,8 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `channel` | `rgb` | which colours it changes: all three, or one |
-| `black` | `12` | input black point: this value and below become out_black |
-| `white` | `240` | input white point: this value and above become out_white |
+| `black` | `0` | input black point: this value and below become out_black |
+| `white` | `255` | input white point: this value and above become out_white |
 | `gamma` | `1` | midtones: above 1 lighter, below 1 darker |
 | `out_black` | `0` | darkest output value |
 | `out_white` | `255` | lightest output value (below out_black inverts) |
@@ -438,9 +438,9 @@ glitchrx --levels black=20,white=230,gamma=1.2 photo.jpg
 
 Reshape the tones with a curve through a few points.
 
-`points` lists `IN:OUT` pairs from 0 to 255, inputs rising, joined by `/`. The default is a gentle S, which adds contrast; `0:0/255:255` changes nothing, and `0:255/255:0` is a negative. The curve passes smoothly through every point without overshooting. `channel` limits it to one colour.
+`points` lists `IN:OUT` pairs from 0 to 255, inputs rising, joined by `/`. The default `0:0/255:255` changes nothing; `0:0/64:52/192:204/255:255` is a gentle S that adds contrast, and `0:255/255:0` is a negative. The curve passes smoothly through every point without overshooting. `channel` limits it to one colour.
 
-Version: 1.
+Version: 2.
 
 An adjustment: a photo tool rather than a glitch. It works on whole RGB pixels, so the encoding and channels do not apply; masks, opacity and placement do, as for any step.
 
@@ -449,7 +449,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `channel` | `rgb` | which colours it changes: all three, or one |
-| `points` | `0:0/64:52/192:204/255:255` | IN:OUT pairs, 0 to 255, inputs rising, joined by / |
+| `points` | `0:0/255:255` | IN:OUT pairs, 0 to 255, inputs rising, joined by / |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
 | `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
 | `len` | `10%` | length of each window (%, rows, px or bytes); unused when hits=0 |
@@ -466,7 +466,7 @@ Turn the hues, and change saturation and lightness.
 
 `range` limits it to one family of colours (`reds`, `yellows`, ...), fading softly into the neighbouring ones; greys are left alone. `hue` turns every colour round the colour wheel, in degrees (120 makes red green, green blue and blue red). `saturation` from -100 (grey) to 100 (twice as vivid, clipping at full). `lightness` from -100 (black) to 100 (white). Greys stay grey under hue and saturation.
 
-Version: 1.
+Version: 2.
 
 An adjustment: a photo tool rather than a glitch. It works on whole RGB pixels, so the encoding and channels do not apply; masks, opacity and placement do, as for any step.
 
@@ -476,7 +476,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 | --- | --- | --- |
 | `range` | `all` | which colours change: all, or families joined by + (reds+blues) |
 | `hue` | `0` | turn the colours round the wheel, in degrees |
-| `saturation` | `30` | -100 grey, 0 unchanged, 100 twice as vivid |
+| `saturation` | `0` | -100 grey, 0 unchanged, 100 twice as vivid |
 | `lightness` | `0` | -100 black, 0 unchanged, 100 white |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
 | `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
@@ -494,7 +494,7 @@ Tint the shadows, midtones or highlights.
 
 Pick the `tones`, then push them towards red or cyan, green or magenta, blue or yellow (-100 to 100; at 100 a full-weight pixel moves by about 100 of 255). Add a step for each range you want to tint: warm highlights and cool shadows are two steps. `luminosity=keep` restores each pixel's brightness so only the colour changes.
 
-Version: 1.
+Version: 2.
 
 An adjustment: a photo tool rather than a glitch. It works on whole RGB pixels, so the encoding and channels do not apply; masks, opacity and placement do, as for any step.
 
@@ -503,9 +503,9 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `tones` | `midtones` | which tones are tinted |
-| `red` | `12` | towards red; below 0 towards cyan |
+| `red` | `0` | towards red; below 0 towards cyan |
 | `green` | `0` | towards green; below 0 towards magenta |
-| `blue` | `-12` | towards blue; below 0 towards yellow |
+| `blue` | `0` | towards blue; below 0 towards yellow |
 | `luminosity` | `keep` | keep each pixel's brightness, so only the colour changes |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
 | `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |

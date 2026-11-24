@@ -1,7 +1,7 @@
 //! `levels`: black point, white point and gamma, as in Photoshop's Levels.
 
 use super::adjust::{CHANNEL, apply_table, channels, table};
-use super::{Effect, EffectInfo, Group, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Group, PlacementDefaults, Upgrade, Window};
 use crate::dsp::pow;
 use crate::error::{Error, Result};
 use crate::params::{Kind, ParamSpec, Params};
@@ -10,8 +10,13 @@ use crate::rng::Rng;
 pub static INFO: EffectInfo = EffectInfo {
     id: "levels",
     group: Group::Adjust,
-    version: 1,
-    upgrades: &[],
+    version: 2,
+    // Version 1 started with a visible change; adjustments now start
+    // neutral (D-58).
+    upgrades: &[Upgrade {
+        to: 2,
+        fill: &[("black", "12"), ("white", "240")],
+    }],
     audacity: "none (an adjustment)",
     summary: "Set the black point, white point and midtone gamma.",
     details: "Input values at or below `black` become `out_black`, at or above `white` \
@@ -23,13 +28,13 @@ pub static INFO: EffectInfo = EffectInfo {
         ParamSpec {
             name: "black",
             kind: Kind::Int { min: 0, max: 254 },
-            default: "12",
+            default: "0",
             help: "input black point: this value and below become out_black",
         },
         ParamSpec {
             name: "white",
             kind: Kind::Int { min: 1, max: 255 },
-            default: "240",
+            default: "255",
             help: "input white point: this value and above become out_white",
         },
         ParamSpec {
@@ -59,8 +64,6 @@ pub static INFO: EffectInfo = EffectInfo {
         hits: "0",
         len: "10%",
     },
-    // Defaults that do something visible (a gentle contrast stretch), as
-    // every effect's do; set black 0 and white 255 for none.
     random_within: false,
     exact_preview: false,
     example: "glitchrx --levels black=20,white=230,gamma=1.2 photo.jpg",
