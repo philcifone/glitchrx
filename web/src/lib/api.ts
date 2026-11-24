@@ -231,8 +231,8 @@ export async function saveTo(
 }
 
 /** The next free -glitch name for this photo in a folder (no extension). */
-export async function suggestName(docId: string, folder: string, format: ExportFormat): Promise<string> {
-  const res = await postJson(`/api/docs/${docId}/suggest`, { folder, format });
+export async function suggestName(docId: string, folder: string, format: ExportFormat, project = false): Promise<string> {
+  const res = await postJson(`/api/docs/${docId}/suggest`, { folder, format, project });
   return (await json<{ name: string }>(res)).name;
 }
 

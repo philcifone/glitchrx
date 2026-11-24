@@ -427,14 +427,19 @@ export class App {
     this.working = `Opening ${label}`;
     try {
       const doc = await load();
-      this.doc = doc;
+      const { recipe: brought, ...info } = doc;
+      this.doc = info;
       this.continueFrom = doc.recipes ?? [];
       storageSet(DOC_KEY, doc.id);
       this.view = FIT;
       this.dropCrops();
-      // Steps from the last photo: keep them, clear them, or ask.
       const carried = this.recipe.steps.length;
-      if (carried && this.newPhoto === 'fresh') this.startFresh();
+      if (brought) {
+        // A project (D-63) brings its own steps; undo goes back to the last ones.
+        this.askNewPhoto = 0;
+        this.loadRecipe(brought);
+      } else if (carried && this.newPhoto === 'fresh') this.startFresh();
+      // Steps from the last photo: keep them, clear them, or ask.
       else if (carried && this.newPhoto === 'ask') this.askNewPhoto = carried;
       this.setImage(null);
       this.setOriginal(null, '');
@@ -1636,6 +1641,7 @@ export class App {
 
   /** What the status bar says while an export renders and encodes. */
   private exporting(opts: ExportOptions): string {
+    if (opts.project) return 'Rendering and packing the project';
     return opts.format === 'avif' ? 'Rendering and encoding AVIF (slow)' : 'Rendering full resolution';
   }
 

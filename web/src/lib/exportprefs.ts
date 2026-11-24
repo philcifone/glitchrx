@@ -4,7 +4,11 @@
 
 import type { ExportFormat, ExportOptions } from './types';
 
+/** What Export saves: the finished picture, or a project (.glrx, D-63). */
+export type ExportKind = 'picture' | 'project';
+
 export interface ExportPrefs {
+  kind: ExportKind;
   format: ExportFormat;
   jpegQuality: number;
   webpQuality: number;
@@ -15,6 +19,7 @@ export interface ExportPrefs {
 
 /** The server's own defaults (core EncodeSettings). */
 export const DEFAULT_PREFS: ExportPrefs = {
+  kind: 'picture',
   format: 'tiff',
   jpegQuality: 95,
   webpQuality: 90,
@@ -33,6 +38,7 @@ export function cleanPrefs(saved: unknown): ExportPrefs {
   const s = (saved && typeof saved === 'object' ? saved : {}) as Partial<Record<keyof ExportPrefs, unknown>>;
   const d = DEFAULT_PREFS;
   return {
+    kind: s.kind === 'project' ? 'project' : d.kind,
     format: FORMATS.includes(s.format as ExportFormat) ? (s.format as ExportFormat) : d.format,
     jpegQuality: whole(s.jpegQuality, 1, 100, d.jpegQuality),
     webpQuality: whole(s.webpQuality, 1, 100, d.webpQuality),
@@ -44,6 +50,8 @@ export function cleanPrefs(saved: unknown): ExportPrefs {
 
 /** What to send for an export. */
 export function optionsOf(p: ExportPrefs): ExportOptions {
+  // A project has no encoder settings; the format only keeps the request whole.
+  if (p.kind === 'project') return { format: p.format, project: true };
   switch (p.format) {
     case 'jpeg':
       return { format: 'jpeg', quality: p.jpegQuality };
@@ -58,7 +66,8 @@ export function optionsOf(p: ExportPrefs): ExportOptions {
 
 /** Whether the export throws detail away (and so smooths fine glitch texture). */
 export const isLossy = (p: ExportPrefs) =>
-  p.format === 'jpeg' || p.format === 'avif' || (p.format === 'webp' && !p.webpLossless);
+  p.kind === 'picture' &&
+  (p.format === 'jpeg' || p.format === 'avif' || (p.format === 'webp' && !p.webpLossless));
 
 /** The WebP format's limit on each side. */
 export const WEBP_MAX_SIDE = 16383;

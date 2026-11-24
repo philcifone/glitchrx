@@ -1,7 +1,8 @@
 <script lang="ts">
-  // Open a photo: upload from this device, or browse the server's library
-  // (the folder chosen in Settings, or --root).
+  // Open a photo or a project: upload from this device, or browse the
+  // server's library (the folder chosen in Settings, or --root).
   import Upload from '@lucide/svelte/icons/upload';
+  import FileArchive from '@lucide/svelte/icons/file-archive';
   import DirList from './DirList.svelte';
   import { app } from '../lib/app.svelte';
   import * as api from '../lib/api';
@@ -9,6 +10,7 @@
 
   let dialog: HTMLDialogElement;
   let fileInput: HTMLInputElement;
+  let projectInput: HTMLInputElement;
   let listing = $state<Listing | null>(null);
   let browseError = $state<string | null>(null);
 
@@ -33,13 +35,15 @@
     }
   }
 
-  function pickFile() {
-    const f = fileInput.files?.[0];
+  function pickFile(input: HTMLInputElement) {
+    const f = input.files?.[0];
     if (!f) return;
     dialog.close();
     void app.openFile(f);
-    fileInput.value = '';
+    input.value = '';
   }
+
+  const isProject = (name: string) => /\.glrx$/i.test(name);
 
   function openPath(path: string) {
     dialog.close();
@@ -57,17 +61,27 @@
 
 <dialog bind:this={dialog} aria-labelledby="open-title">
   <div class="head">
-    <h2 id="open-title">Open a photo</h2>
+    <h2 id="open-title">Open</h2>
     <button class="plain" onclick={() => dialog.close()}>Cancel</button>
   </div>
 
   <div class="body">
     <section>
-      <input bind:this={fileInput} type="file" accept="image/jpeg,image/png,image/tiff,.jpg,.jpeg,.png,.tif,.tiff" class="visually-hidden" onchange={pickFile} tabindex="-1" />
-      <button class="primary wide" onclick={() => fileInput.click()}>
-        <Upload size={18} strokeWidth={2} /> From this device
-      </button>
-      <p class="dim small">The photo is sent to this glitchrx server only. JPEG, PNG or TIFF.</p>
+      <input bind:this={fileInput} type="file" accept="image/jpeg,image/png,image/tiff,.jpg,.jpeg,.png,.tif,.tiff" class="visually-hidden" onchange={() => pickFile(fileInput)} tabindex="-1" />
+      <!-- No accept filter: iOS knows no file type for .glrx and would grey
+           projects out. The photo button keeps its filter, which is what
+           makes iOS hand over a JPEG for a HEIC photo. The server checks
+           what is picked. -->
+      <input bind:this={projectInput} type="file" class="visually-hidden" onchange={() => pickFile(projectInput)} tabindex="-1" />
+      <div class="pick">
+        <button class="primary" onclick={() => fileInput.click()}>
+          <Upload size={18} strokeWidth={2} /> From this device
+        </button>
+        <button onclick={() => projectInput.click()} title="A .glrx project: the original, its steps and a preview">
+          <FileArchive size={18} strokeWidth={1.75} /> A project
+        </button>
+      </div>
+      <p class="dim small">Sent to this glitchrx server only. A photo (JPEG, PNG or TIFF), or a .glrx project to carry on with.</p>
     </section>
 
     {#if app.config?.browse}
@@ -89,13 +103,14 @@
                 <li>
                   <button onclick={() => openPath(f.path)} title="{f.name}, {mb(f.size)}">
                     <img src={api.thumbUrl(f.path)} alt="" loading="lazy" decoding="async" />
+                    {#if isProject(f.name)}<span class="badge">Project</span>{/if}
                     <span>{f.name}</span>
                   </button>
                 </li>
               {/each}
             </ul>
           {:else}
-            <p class="dim">No photos in this folder.</p>
+            <p class="dim">No photos or projects in this folder.</p>
           {/if}
         {/if}
       </section>
@@ -129,9 +144,18 @@
     max-height: calc(100dvh - 120px);
   }
 
-  .wide {
-    width: 100%;
+  /* The photo button takes the room; the project button its own width. */
+  .pick {
+    display: flex;
+    gap: 8px;
+  }
+
+  .pick button {
     min-height: 44px;
+  }
+
+  .pick .primary {
+    flex: 1;
   }
 
   .small {
@@ -174,6 +198,7 @@
   }
 
   .files button {
+    position: relative;
     width: 100%;
     flex-direction: column;
     align-items: stretch;
@@ -207,6 +232,20 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     text-align: center;
+  }
+
+  /* A project's tag, on its thumbnail's corner. */
+  .files .badge {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    background: var(--glass);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: var(--accent);
   }
 
   .err {

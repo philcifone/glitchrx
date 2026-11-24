@@ -3,6 +3,10 @@
   // save or load the recipe. The format and its settings are remembered
   // on this device. Save As writes into a folder on the server, under its
   // home folder, with a name of your choosing (SPEC 4c, 4d).
+  //
+  // Or a project (.glrx, D-63) instead of the picture: the original, the
+  // steps and a preview in one file, to open again on any device. A photo
+  // opened from a project can be saved back over it.
   import Download from '@lucide/svelte/icons/download';
   import Save from '@lucide/svelte/icons/save';
   import Folder from '@lucide/svelte/icons/folder';
@@ -37,7 +41,7 @@
   function set(patch: Partial<ExportPrefs>) {
     prefs = { ...prefs, ...patch };
     storageSet(PREFS_KEY, JSON.stringify(prefs));
-    if (patch.format) void suggest();
+    if (patch.format || patch.kind) void suggest();
   }
 
   /** Save As is available: a browser on a server with settings. */
@@ -57,7 +61,7 @@
     const doc = app.doc;
     if (!doc || folder === null || !saveAsHere) return;
     try {
-      name = await api.suggestName(doc.id, folder, prefs.format);
+      name = await api.suggestName(doc.id, folder, prefs.format, project);
     } catch {
       // The folder may have gone; leave the name as it was.
     }
@@ -79,13 +83,25 @@
   ];
 
   const doc = $derived(app.doc);
+  const project = $derived(prefs.kind === 'project');
+  const opts = $derived(optionsOf(prefs));
+  /** The extension Save As adds. */
+  const ext = $derived(project ? 'glrx' : prefs.format === 'jpeg' ? 'jpg' : prefs.format === 'tiff' ? 'tif' : prefs.format);
+  /** Recipe files go beside pictures; a project holds its own. */
+  const recipeBeside = $derived(withRecipe && !project);
+
+  /** Save over the project the photo was opened from, once asked. */
+  function replaceProject() {
+    if (!doc?.project || !confirm(`Replace ${doc.project} with these steps?`)) return;
+    void run(() => app.saveOnServer({ ...opts, replace: true }, false));
+  }
   const out = $derived(app.outputSize);
   const tooBigForWebp = $derived(!!out && Math.max(out.w, out.h) > WEBP_MAX_SIDE);
   const canvas = $derived(app.canvasSize);
   const cropped = $derived(app.croppedSize);
   // Shrunk to a work size: the crop (or photo) and the canvas differ.
   const shrunk = $derived(!!cropped && !!canvas && canvas.w !== cropped.w);
-  const blocked = $derived(prefs.format === 'webp' && tooBigForWebp);
+  const blocked = $derived(!project && prefs.format === 'webp' && tooBigForWebp);
 
   async function run(action: () => Promise<void>) {
     dialog.close();
@@ -125,7 +141,42 @@
   </div>
 
   <div class="body">
-    <h3 class="section-label">Image</h3>
+    <div class="segmented kind" role="radiogroup" aria-label="What to save">
+      <button role="radio" aria-checked={!project} class:on={!project} onclick={() => set({ kind: 'picture' })}>Picture</button>
+      <button role="radio" aria-checked={project} class:on={project} onclick={() => set({ kind: 'project' })}>Project</button>
+    </div>
+
+    {#if project}
+    <section class="group">
+      <p class="small">
+        The original photo, every step and a preview, in one .glrx file: open it again on any device and carry on, as with a .psd.
+      </p>
+      <p class="dim small">The photo goes in as it is, except for where it was taken, which is left out.</p>
+      <div class="buttons">
+        {#if app.desktop}
+          <button class="primary" onclick={() => run(() => app.saveAs(opts, false))} disabled={!doc}>
+            <Save size={18} strokeWidth={2} /> Save as...
+          </button>
+        {:else}
+          <button class="primary" onclick={() => run(() => app.download(opts))} disabled={!doc}>
+            <Download size={18} strokeWidth={2} /> Download
+          </button>
+        {/if}
+        {#if doc?.path && !app.desktop}
+          {#if doc.project}
+            <button onclick={replaceProject}>
+              <Save size={18} strokeWidth={1.75} /> Save over {doc.project}
+            </button>
+            <button onclick={() => run(() => app.saveOnServer(opts, false))}>Save as new</button>
+          {:else}
+            <button onclick={() => run(() => app.saveOnServer(opts, false))}>
+              <Save size={18} strokeWidth={1.75} /> Save next to original
+            </button>
+          {/if}
+        {/if}
+      </div>
+    </section>
+    {:else}
     <section class="group">
       <div class="segmented" role="radiogroup" aria-label="Format">
         {#each FORMATS as f (f.id)}
@@ -179,16 +230,16 @@
 
       <div class="buttons">
         {#if app.desktop}
-          <button class="primary" onclick={() => run(() => app.saveAs(optionsOf(prefs), withRecipe))} disabled={!doc || blocked}>
+          <button class="primary" onclick={() => run(() => app.saveAs(opts, withRecipe))} disabled={!doc || blocked}>
             <Save size={18} strokeWidth={2} /> Save as...
           </button>
         {:else}
-          <button class="primary" onclick={() => run(() => app.download(optionsOf(prefs)))} disabled={!doc || blocked}>
+          <button class="primary" onclick={() => run(() => app.download(opts))} disabled={!doc || blocked}>
             <Download size={18} strokeWidth={2} /> Download
           </button>
         {/if}
         {#if doc?.path && !app.desktop}
-          <button onclick={() => run(() => app.saveOnServer(optionsOf(prefs), withRecipe))} disabled={blocked}>
+          <button onclick={() => run(() => app.saveOnServer(opts, withRecipe))} disabled={blocked}>
             <Save size={18} strokeWidth={1.75} /> Save next to original
           </button>
         {/if}
@@ -199,6 +250,7 @@
         <p class="dim small">Next to the original as {doc.name.replace(/\.[^.]*$/, '')}-glitch, -glitch-1, ... Nothing is overwritten.</p>
       {/if}
     </section>
+    {/if}
 
     {#if saveAsHere}
       <h3 class="section-label">Save as</h3>
@@ -213,12 +265,12 @@
         <label class="row">
           <span class="lbl">Name</span>
           <input type="text" bind:value={name} autocapitalize="off" autocomplete="off" spellcheck="false" aria-label="File name" />
-          <span class="dim ext">.{prefs.format === 'jpeg' ? 'jpg' : prefs.format === 'tiff' ? 'tif' : prefs.format}</span>
+          <span class="dim ext">.{ext}</span>
         </label>
         <div class="buttons">
           <button
             class="primary"
-            onclick={() => run(() => app.saveTo(optionsOf(prefs), folder ?? '', name.trim(), withRecipe))}
+            onclick={() => run(() => app.saveTo(opts, folder ?? '', name.trim(), recipeBeside))}
             disabled={!doc || blocked || !name.trim() || folder === null}
           >
             <Save size={18} strokeWidth={2} /> Save
@@ -228,7 +280,7 @@
       </section>
     {/if}
 
-    {#if app.desktop || doc?.path || saveAsHere}
+    {#if !project && (app.desktop || doc?.path || saveAsHere)}
       <label class="opt">
         <span>Also save the recipe beside it</span>
         <input class="switch" type="checkbox" bind:checked={withRecipe} />
@@ -283,6 +335,15 @@
 
   .section-label {
     margin: 10px 4px 0;
+  }
+
+  .kind {
+    align-self: stretch;
+    margin-top: 6px;
+  }
+
+  .kind button {
+    flex: 1;
   }
 
   .group {

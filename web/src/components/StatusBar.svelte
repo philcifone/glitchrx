@@ -20,7 +20,8 @@
   {:else if app.notice}
     <span class="ok" role="status">{app.notice}</span>
   {:else if app.doc}
-    <span class="name" title={app.doc.path ?? app.doc.name}>{app.doc.name}</span>
+    <!-- A project shows its own name; its original is in the tooltip. -->
+    <span class="name" title={app.doc.project ? `${app.doc.project}: ${app.doc.name}` : (app.doc.path ?? app.doc.name)}>{app.doc.project ?? app.doc.name}</span>
     <span title={app.recipe.work_size || app.recipe.crop ? 'The photo, and the canvas the steps run on (cropped, at the work size)' : undefined}>
       {app.doc.width}x{app.doc.height}{#if app.canvasSize && (app.canvasSize.w !== app.doc.width || app.canvasSize.h !== app.doc.height)}<span class="dim">{` at ${app.canvasSize.w}x${app.canvasSize.h}`}</span>{/if}
     </span>

@@ -55,6 +55,10 @@ export interface DocInfo {
   raw_len: number;
   /** Recipes on the server made on this photo, newest first. */
   recipes?: SavedRecipe[];
+  /** Opened from a project (.glrx): its file name; `name` is the original's. */
+  project?: string | null;
+  /** The project's recipe, when one was just opened. */
+  recipe?: RecipeDto;
 }
 
 /** A recipe file in the library or export folder on the server. */
@@ -250,6 +254,10 @@ export interface ExportOptions {
   lossless?: boolean;
   /** AVIF: 1 (slowest, smallest) to 10 (fastest). */
   speed?: number;
+  /** A project file (.glrx: the original, the recipe and a preview) instead of the picture. */
+  project?: boolean;
+  /** Save next to the original only: over the project the photo was opened from. */
+  replace?: boolean;
 }
 
 /** The Settings sheet's folders, relative to the server's home folder. */

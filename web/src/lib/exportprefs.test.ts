@@ -27,3 +27,13 @@ describe('export settings', () => {
     expect(isLossy({ ...DEFAULT_PREFS, format: 'avif' })).toBe(true);
   });
 });
+
+describe('project exports', () => {
+  it('send no encoder settings, and are remembered', () => {
+    const p = { ...DEFAULT_PREFS, kind: 'project' as const, format: 'jpeg' as const, jpegQuality: 50 };
+    expect(optionsOf(p)).toEqual({ format: 'jpeg', project: true });
+    expect(isLossy(p)).toBe(false);
+    expect(cleanPrefs({ kind: 'project' }).kind).toBe('project');
+    expect(cleanPrefs({ kind: 'zip' }).kind).toBe('picture');
+  });
+});
