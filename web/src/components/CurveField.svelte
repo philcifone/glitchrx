@@ -221,15 +221,17 @@
     fill: var(--fill);
   }
 
+  /* The dim text colour, not the hairline one: hairlines are tuned to
+     barely show against a card, and the curve's fill is close to it. */
   .grid {
-    stroke: var(--line);
-    stroke-width: 0.5;
-    opacity: 0.6;
+    stroke: var(--fg-dim);
+    stroke-width: 0.6;
+    opacity: 0.3;
   }
 
   .grid.major {
-    stroke-width: 1;
-    opacity: 1;
+    stroke-width: 0.9;
+    opacity: 0.5;
   }
 
   .hist {
