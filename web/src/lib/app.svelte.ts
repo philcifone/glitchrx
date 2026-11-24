@@ -303,6 +303,9 @@ export class App {
   private maskQueue = new LatestOnly();
   private maskKey = '';
   private box = $state<Box>({ w: 0, h: 0, dpr: 1 });
+  /** The stage's size when the picture on screen was asked for. */
+  private renderedBox: Box = { w: 0, h: 0, dpr: 1 };
+  private resizeTimer: ReturnType<typeof setTimeout> | undefined;
   private idleTimer: ReturnType<typeof setTimeout> | undefined;
   private viewTimer: ReturnType<typeof setTimeout> | undefined;
   private originalKey = '';
@@ -1220,11 +1223,17 @@ export class App {
 
   /** The preview area's size in CSS pixels, and the device pixel ratio. */
   setViewport(w: number, h: number, dpr: number): void {
-    const old = this.box;
     this.box = { w, h, dpr };
-    const grew = w * dpr > old.w * old.dpr * 1.1 || h * dpr > old.h * old.dpr * 1.1;
     if (this.zoomed) this.setView(this.view); // keep it valid; a new patch follows
-    else if (this.doc && grew) this.render('full');
+    // The panel animates (or follows a finger), so the stage resizes every
+    // frame: the photo scales with it, and a sharper render waits until it
+    // holds still, if it grew enough to need one.
+    clearTimeout(this.resizeTimer);
+    this.resizeTimer = setTimeout(() => {
+      const old = this.renderedBox;
+      const grew = w * dpr > old.w * old.dpr * 1.1 || h * dpr > old.h * old.dpr * 1.1;
+      if (!this.zoomed && this.doc && grew) this.render('full');
+    }, 150);
   }
 
   // -------------------------------------------------------------------------
@@ -1494,6 +1503,7 @@ export class App {
     // Zoomed in, settling means a sharp exact patch of what is on screen.
     if (quality === 'exact' && this.zoomed) return this.requestCrop();
     const recipe = this.dto();
+    this.renderedBox = this.box;
     // A picture seen before (a step switched off and on again) is shown
     // at once, already exact: nothing to render.
     if (!this.zoomed && this.needsExact && this.showRemembered(doc.id, recipe)) return;

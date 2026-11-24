@@ -30,27 +30,82 @@
   /** The photo fills the screen (not while masking or cropping). */
   const full = $derived(app.fullView && !app.masking && !app.cropping);
 
-  // The grabber: a tap expands or shrinks the panel, a swipe moves it a
-  // step: up expands it, down shrinks it, and down again hides it, leaving
-  // the photo on the whole screen (as dragging a sheet away does on iOS).
+  // The bars' own heights, so the layout can animate them away in full
+  // view: grid rows animate between lengths, not from `auto`.
+  let topH = $state(0);
+  let statusH = $state(0);
+
+  // The grabber (phone). The panel follows the finger, and the photo grows
+  // or shrinks with it; on release it eases to the nearest of three places:
+  // expanded, normal, or gone (full view), as an iOS sheet does. A tap
+  // expands or shrinks it.
+  //
+  // Places are the stage's share of the stage and panel together, in fr
+  // out of 100, which is also how the rows are written below.
+  type Place = 'expanded' | 'normal' | 'full';
+  const SHARE: Record<Place, number> = { expanded: 22, normal: 52, full: 100 };
+  const ORDER: Place[] = ['expanded', 'normal', 'full'];
   const SWIPE = 36;
-  let grab: { y: number } | null = null;
+  const TAP = 6;
+  let grab: { y: number; from: Place; share: number; span: number } | null = null;
+  /** The stage's share while a finger drags the panel. */
+  let dragShare = $state<number | null>(null);
+
+  const place = $derived<Place>(full ? 'full' : sheetExpanded ? 'expanded' : 'normal');
 
   function grabDown(e: PointerEvent) {
-    grab = { y: e.clientY };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    const handle = e.currentTarget as HTMLElement;
+    const stage = document.querySelector('.stage')?.getBoundingClientRect();
+    const sheet = handle.closest('.sheet')?.getBoundingClientRect();
+    if (!stage || !sheet) return;
+    const span = stage.height + sheet.height;
+    grab = { y: e.clientY, from: place, share: (stage.height / span) * 100, span };
+    handle.setPointerCapture(e.pointerId);
+  }
+
+  function grabMove(e: PointerEvent) {
+    if (!grab) return;
+    const dy = e.clientY - grab.y;
+    if (dragShare === null && Math.abs(dy) < TAP) return;
+    dragShare = Math.min(100, Math.max(12, grab.share + (dy / grab.span) * 100));
   }
 
   function grabUp(e: PointerEvent) {
     if (!grab) return;
     const dy = e.clientY - grab.y;
+    const from = grab.from;
+    const at = dragShare;
     grab = null;
-    if (dy > SWIPE) {
-      if (sheetExpanded) sheetExpanded = false;
-      else app.fullView = true;
-    } else if (dy < -SWIPE) sheetExpanded = true;
-    else sheetExpanded = !sheetExpanded;
+    dragShare = null;
+    if (at === null) {
+      sheetExpanded = !sheetExpanded; // a tap
+      return;
+    }
+    // The nearest place; a real swipe that would land back where it
+    // started goes one place on, in its direction.
+    let to = ORDER.reduce((a, b) => (Math.abs(SHARE[b] - at) < Math.abs(SHARE[a] - at) ? b : a));
+    if (to === from && Math.abs(dy) > SWIPE) {
+      const i = ORDER.indexOf(from) + Math.sign(dy);
+      to = ORDER[Math.min(ORDER.length - 1, Math.max(0, i))];
+    }
+    goTo(to);
   }
+
+  function goTo(p: Place) {
+    if (p === 'full') {
+      app.fullView = true;
+      return;
+    }
+    app.fullView = false;
+    sheetExpanded = p === 'expanded';
+  }
+
+  /** Rows while dragging; otherwise the classes below decide. */
+  const dragRows = $derived(
+    dragShare === null
+      ? undefined
+      : `var(--top-h, auto) minmax(0, ${dragShare}fr) minmax(0, ${100 - dragShare}fr) var(--status-h, auto)`,
+  );
 
   onMount(() => {
     applySavedTheme();
@@ -128,6 +183,10 @@
   class="app"
   class:expanded={sheetExpanded}
   class:full
+  class:grabbing={dragShare !== null}
+  style:--top-h={topH ? `${topH}px` : undefined}
+  style:--status-h={statusH ? `${statusH}px` : undefined}
+  style:grid-template-rows={dragRows}
   class:dragging
   role="application"
   ondragover={(e) => {
@@ -139,7 +198,13 @@
   }}
   ondrop={onDrop}
 >
-  <TopBar onopen={open} onexport={() => exportDialog.show()} onpresets={() => presetsDialog.show()} onsettings={() => settingsDialog.show()} />
+  <!-- The bars sit in clipping wrappers, so their rows can shrink to
+       nothing and slide them off the screen. -->
+  <div class="bar top">
+    <div class="bar-in" bind:offsetHeight={topH}>
+      <TopBar onopen={open} onexport={() => exportDialog.show()} onpresets={() => presetsDialog.show()} onsettings={() => settingsDialog.show()} />
+    </div>
+  </div>
   <main class="stage">
     <Preview onopen={open} />
   </main>
@@ -149,8 +214,12 @@
       aria-label={sheetExpanded ? 'Shrink the step panel' : 'Expand the step panel'}
       aria-expanded={sheetExpanded}
       onpointerdown={grabDown}
+      onpointermove={grabMove}
       onpointerup={grabUp}
-      onpointercancel={() => (grab = null)}
+      onpointercancel={() => {
+        grab = null;
+        dragShare = null;
+      }}
       onclick={(e) => {
         // Pointer taps are handled on pointerup; this is the keyboard.
         if (e.detail === 0) sheetExpanded = !sheetExpanded;
@@ -160,7 +229,11 @@
     </button>
     <StepStack />
   </aside>
-  <StatusBar />
+  <div class="bar status">
+    <div class="bar-in" bind:offsetHeight={statusH}>
+      <StatusBar />
+    </div>
+  </div>
 </div>
 
 <OpenDialog bind:this={openDialog} />
@@ -170,20 +243,64 @@
 <SettingsDialog bind:this={settingsDialog} />
 
 <style>
+  /* The layout is one grid whose rows (and, on a desktop, the panel's
+     column) animate between places: the bars' rows between their height
+     and 0, the stage and panel between shares of what is left, in fr out
+     of 100. Rows interpolate only when every track has the same kind of
+     size on both sides, which is why the bars are measured rather than
+     left at auto. */
   .app {
+    --ease: cubic-bezier(0.32, 0.72, 0, 1); /* an iOS sheet's settle */
     display: grid;
     height: 100dvh;
     grid-template-columns: minmax(0, 1fr) 380px;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-rows: var(--top-h, auto) minmax(0, 1fr) var(--status-h, auto);
     grid-template-areas:
       'top top'
       'stage sheet'
       'status status';
+    transition:
+      grid-template-rows 0.38s var(--ease),
+      grid-template-columns 0.38s var(--ease);
+  }
+
+  /* The finger leads while dragging. */
+  .app.grabbing {
+    transition: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .app {
+      transition: none;
+    }
   }
 
   .app.dragging {
     outline: 3px dashed var(--accent);
     outline-offset: -6px;
+  }
+
+  .bar {
+    overflow: hidden;
+    min-height: 0;
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .bar.top {
+    grid-area: top;
+    /* Shrinking slides it up, off the top. */
+    justify-content: flex-end;
+  }
+
+  .bar.status {
+    grid-area: status;
+  }
+
+  .bar-in {
+    flex: none;
   }
 
   .stage {
@@ -196,6 +313,8 @@
   .sheet {
     grid-area: sheet;
     min-height: 0;
+    min-width: 0;
+    overflow: hidden;
     border-left: var(--hairline);
     background: var(--bg);
     display: flex;
@@ -206,31 +325,31 @@
     display: none;
   }
 
-  /* Full view: only the stage, on the whole screen. */
+  /* Full view: the bars and the panel shrink away; only the stage stays. */
   .app.full {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr);
-    grid-template-areas: 'stage';
+    grid-template-columns: minmax(0, 1fr) 0px;
+    grid-template-rows: 0px minmax(0, 1fr) 0px;
   }
 
-  .app.full > :global(:not(.stage)) {
-    display: none;
+  .app.full .sheet {
+    border-left: none;
   }
 
   /* Phone: the stack becomes a bottom sheet under the stage. */
   @media (max-width: 760px) {
     .app {
       grid-template-columns: minmax(0, 1fr);
-      grid-template-rows: auto minmax(0, 52fr) minmax(0, 48fr) auto;
+      grid-template-rows: var(--top-h, auto) minmax(0, 52fr) minmax(0, 48fr) var(--status-h, auto);
       grid-template-areas: 'top' 'stage' 'sheet' 'status';
     }
 
     .app.expanded {
-      grid-template-rows: auto minmax(0, 22fr) minmax(0, 78fr) auto;
+      grid-template-rows: var(--top-h, auto) minmax(0, 22fr) minmax(0, 78fr) var(--status-h, auto);
     }
 
     .app.full {
-      grid-template-rows: minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: 0px minmax(0, 100fr) minmax(0, 0fr) 0px;
     }
 
     /* A bottom sheet: rounded top corners over the stage, with a grabber. */
@@ -241,6 +360,15 @@
       box-shadow: 0 -4px 20px rgb(0 0 0 / 0.12);
       position: relative;
       z-index: 1;
+      transition:
+        margin-top 0.38s var(--ease),
+        box-shadow 0.38s var(--ease);
+    }
+
+    /* Gone, it does not overlap the photo's bottom edge. */
+    .app.full .sheet {
+      margin-top: 0;
+      box-shadow: none;
     }
 
     .handle {
@@ -251,8 +379,9 @@
       background: none;
       width: 100%;
       flex: none;
-      /* The swipe is ours, not a scroll. */
+      /* The drag is ours, not a scroll. */
       touch-action: none;
+      cursor: grab;
     }
 
     .handle:hover:not(:disabled) {
