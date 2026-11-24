@@ -50,6 +50,7 @@ pub static INFO: EffectInfo = EffectInfo {
     },
     random_within: false,
     exact_preview: false,
+    strokes: false,
     example: "glitchrx --speed factor=1.1,hits=6 photo.jpg",
     build,
 };

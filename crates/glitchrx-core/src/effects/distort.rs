@@ -48,6 +48,7 @@ pub static INFO: EffectInfo = EffectInfo {
     },
     random_within: false,
     exact_preview: false,
+    strokes: false,
     example: "glitchrx --distort curve=fold,drive=18 photo.jpg",
     build,
 };

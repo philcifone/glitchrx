@@ -81,6 +81,7 @@ pub static INFO: EffectInfo = EffectInfo {
     },
     random_within: false,
     exact_preview: false,
+    strokes: false,
     example: "glitchrx --balance tones=shadows,blue=30 --balance tones=highlights,red=20,blue=-20 photo.jpg",
     build,
 };

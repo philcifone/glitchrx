@@ -43,6 +43,7 @@ pub static INFO: EffectInfo = EffectInfo {
     },
     random_within: false,
     exact_preview: false,
+    strokes: false,
     example: "glitchrx --delay delay=2rows,taps=4 photo.jpg",
     build,
 };

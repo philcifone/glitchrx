@@ -99,7 +99,7 @@ async fn effects_and_config() {
     assert_eq!(s, StatusCode::OK);
     assert!(h.contains_key(header::CONTENT_SECURITY_POLICY));
     let effects = json_of(&b);
-    assert_eq!(effects.as_array().unwrap().len(), 19);
+    assert_eq!(effects.as_array().unwrap().len(), 20);
     assert_eq!(effects[0]["id"], "echo");
     // The curve kind reaches the GUI, which draws an editor for it.
     let curves = effects
@@ -745,7 +745,7 @@ async fn masks_travel_and_show() {
     assert_eq!(s, StatusCode::OK);
     let toml = String::from_utf8(toml).unwrap();
     assert!(
-        toml.contains("[[step.mask.op]]") && toml.contains("version = 4"),
+        toml.contains("[[step.mask.op]]") && toml.contains("version = 5"),
         "{toml}"
     );
     let req = Request::post("/api/recipe/from-toml")
@@ -1516,4 +1516,42 @@ async fn new_folders_are_made_only_under_home_and_never_reused() {
     }
     assert!(!tmp.path().join("outside/x").exists());
     assert!(!tmp.path().join("x").exists());
+}
+
+#[tokio::test]
+async fn pull_strokes_travel_through_json_and_toml() {
+    let app = app_without_presets();
+    let recipe = json!({
+        "encoding": "u8",
+        "channels": 1,
+        "steps": [{
+            "effect": "pull",
+            "seed": "0",
+            "params": { "sampling": "smooth" },
+            "pull": [{ "size": 0.2, "strength": 0.7, "points": [0.3, 0.5, 0.6, 0.5] }]
+        }]
+    });
+    let (s, _, toml) = send(&app, post_json("/api/recipe/to-toml", recipe.clone())).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&toml));
+    let toml = String::from_utf8(toml).unwrap();
+    assert!(
+        toml.contains("[[step.pull]]") && toml.contains("version = 5"),
+        "{toml}"
+    );
+    let (s, _, back) = send(
+        &app,
+        Request::post("/api/recipe/from-toml")
+            .body(Body::from(toml))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let back = json_of(&back);
+    assert_eq!(back["steps"][0]["pull"], recipe["steps"][0]["pull"]);
+    // Strokes on another effect, or placement on a pull, are refused.
+    let mut bad = recipe.clone();
+    bad["steps"][0]["effect"] = json!("echo");
+    bad["steps"][0]["params"] = json!({});
+    let (s, _, _) = send(&app, post_json("/api/recipe/to-toml", bad)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
 }

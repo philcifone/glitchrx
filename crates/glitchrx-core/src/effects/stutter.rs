@@ -33,6 +33,7 @@ pub static INFO: EffectInfo = EffectInfo {
     },
     random_within: false,
     exact_preview: false,
+    strokes: false,
     example: "glitchrx --stutter chunk=0.9rows,hits=5 photo.jpg",
     build,
 };

@@ -19,6 +19,7 @@ pub mod meta;
 pub mod params;
 pub mod placement;
 pub mod project;
+pub mod pull;
 pub mod raster;
 pub mod recipe;
 pub mod rng;

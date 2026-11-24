@@ -44,6 +44,7 @@ pub static INFO: EffectInfo = EffectInfo {
     },
     random_within: false,
     exact_preview: false,
+    strokes: false,
     example: "glitchrx --curves points=0:20/128:150/255:235,channel=blue photo.jpg",
     build,
 };

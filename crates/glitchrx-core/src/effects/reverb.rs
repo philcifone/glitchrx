@@ -56,6 +56,7 @@ pub static INFO: EffectInfo = EffectInfo {
     },
     random_within: false,
     exact_preview: false,
+    strokes: false,
     example: "glitchrx --reverb room=0.9,wet=0.5 photo.jpg",
     build,
 };

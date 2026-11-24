@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use glitchrx_core::codec::{self, Format};
 use glitchrx_core::effects::{Group, REGISTRY};
 use glitchrx_core::mask::{Mask, MaskOp, Mode, Shape, Stroke};
+use glitchrx_core::pull::Stroke as PullStroke;
 use glitchrx_core::{Encoding, Raster, Recipe, Step, Units};
 
 fn fixture_dir() -> PathBuf {
@@ -276,7 +277,8 @@ fn damaged_files_never_panic() {
 fn every_effect_keeps_dimensions_and_stays_in_its_windows() {
     let base = decode("baseline-444.jpg").raster;
     let units = Units::full(base.width, base.height);
-    for e in REGISTRY {
+    // A pull has no windows: its strokes say where it goes (tested below).
+    for e in REGISTRY.iter().filter(|e| !e.strokes) {
         // Masked runs too: a mask and opacity only soften a step's own
         // change, so they never write outside its windows either.
         for (enc, masked) in [
@@ -352,7 +354,8 @@ fn seeds_matter_exactly_when_something_is_random() {
             .unwrap();
         out
     };
-    for e in REGISTRY {
+    // A pull has no seed and no placement (tested below).
+    for e in REGISTRY.iter().filter(|e| !e.strokes) {
         for params in ["hits=0", "hits=4,len=5%"] {
             let random = e.random_within || params != "hits=0";
             let differs = render(e.id, params, 1) != render(e.id, params, 2);
@@ -372,7 +375,8 @@ fn golden_hashes() {
         "decoded".to_string(),
         blake3::hash(&base.bytes).to_hex().to_string(),
     );
-    for e in REGISTRY {
+    // A pull without strokes is the picture itself; its strokes are below.
+    for e in REGISTRY.iter().filter(|e| !e.strokes) {
         for enc in Encoding::ALL {
             let mut out = base.clone();
             recipe(e.id, "", 0xC0FFEE, enc).apply(&mut out).unwrap();
@@ -398,6 +402,29 @@ fn golden_hashes() {
             blake3::hash(&out.bytes).to_hex().to_string(),
         );
     }
+    // Pull strokes, both samplings, and on a crop.
+    for sampling in ["pixels", "smooth"] {
+        let mut out = base.clone();
+        let r = pulled(&format!("sampling={sampling}"));
+        r.apply(&mut out).unwrap();
+        hashes.insert(
+            format!("pull-strokes/{sampling}"),
+            blake3::hash(&out.bytes).to_hex().to_string(),
+        );
+    }
+    let mut r = pulled("");
+    r.crop = Some(glitchrx_core::recipe::Crop {
+        x: 0.2,
+        y: 0.1,
+        w: 0.6,
+        h: 0.7,
+    });
+    hashes.insert(
+        "pull-strokes/cropped".to_string(),
+        blake3::hash(&r.render(&base).unwrap().bytes)
+            .to_hex()
+            .to_string(),
+    );
     // Masks and opacity are part of the determinism contract too.
     let mut out = base.clone();
     let mut r = recipe("bitcrush", "opacity=0.7", 0xC0FFEE, Encoding::U8);
@@ -518,6 +545,96 @@ fn previews_resemble_the_export() {
             error < 12.0,
             "{}: preview error {error:.2} vs strength {strength:.2}",
             e.id
+        );
+    }
+}
+
+/// A recipe with one pull step: three strokes, one curving, one large and
+/// gentle, one running off the picture.
+fn pulled(params: &str) -> Recipe {
+    let mut step = Step::new("pull", params, 0).unwrap();
+    step.pull = vec![
+        PullStroke {
+            size: 0.15,
+            strength: 0.8,
+            points: vec![0.3, 0.4, 0.38, 0.42, 0.45, 0.5, 0.5, 0.6],
+        },
+        PullStroke {
+            size: 0.5,
+            strength: 0.3,
+            points: vec![0.6, 0.3, 0.7, 0.32],
+        },
+        PullStroke {
+            size: 0.1,
+            strength: 1.0,
+            points: vec![0.9, 0.8, 1.05, 0.85],
+        },
+    ];
+    Recipe {
+        steps: vec![step],
+        ..Recipe::default()
+    }
+}
+
+/// A pull moves pixels, keeps the size, leaves what is far from every
+/// stroke alone, and with `pixels` only ever copies pixels of its input.
+/// It has no seed.
+#[test]
+fn pulls_move_pixels_only_near_their_strokes() {
+    let base = decode("baseline-444.jpg").raster;
+    let r = pulled("");
+    let mut out = base.clone();
+    r.apply(&mut out).unwrap();
+    assert_eq!(out.bytes.len(), base.bytes.len());
+    assert_ne!(out, base);
+    // The top left corner is far from every stroke.
+    let (w, h) = (base.width, base.height);
+    for y in 0..h / 8 {
+        for x in 0..w / 8 {
+            let i = (y * w + x) * 3;
+            assert_eq!(out.bytes[i..i + 3], base.bytes[i..i + 3], "({x}, {y})");
+        }
+    }
+    let pixels: std::collections::HashSet<_> = base.bytes.chunks(3).collect();
+    assert!(out.bytes.chunks(3).all(|p| pixels.contains(p)));
+    let mut other = pulled("");
+    other.steps[0].seed = 99;
+    let mut again = base.clone();
+    other.apply(&mut again).unwrap();
+    assert_eq!(again, out);
+}
+
+/// The map has the same size for a preview and an export (SPEC 8.2), so
+/// a quarter-size preview of a pull is close to the export scaled down.
+#[test]
+fn pull_previews_resemble_the_export() {
+    let full = decode("baseline-444.jpg").raster;
+    let (pw, ph) = (full.width / 4, full.height / 4);
+    let small = full.downscale(pw, ph);
+    let units = Units {
+        full_width: full.width,
+        full_height: full.height,
+        width: small.width,
+        height: small.height,
+    };
+    for sampling in ["pixels", "smooth"] {
+        let r = pulled(&format!("sampling={sampling}"));
+        let mut export = full.clone();
+        r.apply(&mut export).unwrap();
+        let export = export.downscale(pw, ph);
+        let mut preview = small.clone();
+        r.apply_with(&mut preview.bytes, &units, glitchrx_core::recipe::NEVER)
+            .unwrap();
+        let strength = mean_diff(&small, &export);
+        let error = mean_diff(&preview, &export);
+        println!("pull ({sampling}): strength {strength:6.2}  preview error {error:6.2}");
+        assert!(
+            strength > 1.0,
+            "the pull moved too little to test: {strength:.2}"
+        );
+        assert!(
+            error < strength / 3.0,
+            "preview error {error:.2} vs strength {strength:.2}"
         );
     }
 }
