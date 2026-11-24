@@ -36,8 +36,19 @@
 //! in order. Unlike a stroke a pin is meant to be moved again: the GUI
 //! changes its `to`, and the map is built afresh.
 //!
+//! **Speed** (8c). Building the map is most of the cost (about 8 ms a
+//! stroke on a laptop), and while a stroke is drawn the step is rendered
+//! every frame with all the earlier strokes too. So maps are kept at a few
+//! checkpoints ([`Checkpoints`]): before the last stroke (the one being
+//! drawn), after the strokes (where pins start), where this build first
+//! differs from the last (the pin being moved), and whole. A build starts from the longest checkpoint its strokes begin
+//! with. A map built from a checkpoint is the very same map, since the
+//! strokes run in the same order on the same values.
+//!
 //! Determinism (D-25): basic f64 operations only (and `sqrt`, which IEEE
 //! specifies exactly), no randomness, so no seed matters.
+
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -229,6 +240,8 @@ pub fn validate(strokes: &[Stroke]) -> Result<()> {
 pub struct Pull {
     /// The strokes, then the pins as the strokes they are built as.
     strokes: Vec<Stroke>,
+    /// How many of `strokes` were drawn (the rest are pins).
+    drawn: usize,
     smooth: bool,
 }
 
@@ -242,6 +255,7 @@ impl Pull {
                 .cloned()
                 .chain(pins.iter().map(Pin::as_stroke))
                 .collect(),
+            drawn: strokes.len(),
             smooth: params.choice("sampling") == "smooth",
         }
     }
@@ -262,13 +276,7 @@ impl Pull {
         if self.strokes.is_empty() || units.width == 0 || units.height == 0 {
             return Ok(());
         }
-        let mut map = Map::new(units.full_width, units.full_height);
-        for s in &self.strokes {
-            if cancel() {
-                return Err(Error::Cancelled);
-            }
-            map.stroke(s);
-        }
+        let map = self.map(units.full_width, units.full_height, cancel)?;
         if map.is_still() {
             return Ok(());
         }
@@ -284,9 +292,148 @@ impl Pull {
     }
 }
 
+impl Pull {
+    /// The map for a canvas of `cw` x `ch` at full size, from the longest
+    /// checkpoint these strokes begin with, leaving checkpoints behind.
+    fn map(&self, cw: usize, ch: usize, cancel: &(dyn Fn() -> bool + Sync)) -> Result<Arc<Map>> {
+        let all = &self.strokes;
+        let n = all.len();
+        let (map, from) = CHECKPOINTS
+            .start(cw, ch, all)
+            .unwrap_or_else(|| (Arc::new(Map::new(cw, ch)), 0));
+        if from == n {
+            return Ok(map); // the very map: nothing to add, nothing copied
+        }
+        let mut map = Arc::unwrap_or_clone(map);
+        // Where this build first differs from one kept: in the middle of a
+        // drag, where the moving stroke or pin is, so the next frame starts
+        // there.
+        let differs = CHECKPOINTS.shared(cw, ch, all);
+        // Where a later build is likely to pick up (see the module notes).
+        // A map already kept is not copied again, so the fixed points cost
+        // a copy only now and then; a pin being moved (the last one
+        // included) is covered by `differs`.
+        let keep = |k: usize| {
+            (k == differs && k > from)
+                || (self.drawn > 0 && k == self.drawn - 1)
+                || (n > self.drawn && k == self.drawn)
+        };
+        for (k, s) in all.iter().enumerate().skip(from) {
+            if cancel() {
+                return Err(Error::Cancelled);
+            }
+            if keep(k) {
+                CHECKPOINTS.keep(cw, ch, &all[..k], &map);
+            }
+            map.stroke(s);
+        }
+        let map = Arc::new(map);
+        CHECKPOINTS.keep_arc(cw, ch, all, map.clone());
+        Ok(map)
+    }
+}
+
+/// Maps kept at checkpoints, newest first (see the module notes). Each is
+/// up to 1024 x 1024 points of two f64s (16 MB), so only a few are kept.
+struct Checkpoints {
+    items: Mutex<Vec<Checkpoint>>,
+}
+
+struct Checkpoint {
+    /// The canvas at full size, which decides the map's size.
+    canvas: (usize, usize),
+    /// The strokes the map holds, in order.
+    strokes: Vec<Stroke>,
+    map: Arc<Map>,
+}
+
+const KEPT: usize = 6;
+
+static CHECKPOINTS: Checkpoints = Checkpoints {
+    items: Mutex::new(Vec::new()),
+};
+
+impl Checkpoints {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Checkpoint>> {
+        self.items.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The longest kept map that `strokes` begin with, and how many strokes
+    /// it holds. Every kept map they begin with moves to the front, the
+    /// longest first: the shorter ones (the strokes before the pins, say)
+    /// are where the next change may pick up, so the stream of whole maps
+    /// a drag leaves must not push them out.
+    fn start(&self, cw: usize, ch: usize, strokes: &[Stroke]) -> Option<(Arc<Map>, usize)> {
+        let mut items = self.lock();
+        let (mut ancestors, rest): (Vec<Checkpoint>, Vec<Checkpoint>) =
+            items.drain(..).partition(|c| {
+                c.canvas == (cw, ch)
+                    && c.strokes.len() <= strokes.len()
+                    && c.strokes[..] == strokes[..c.strokes.len()]
+            });
+        ancestors.sort_by_key(|c| std::cmp::Reverse(c.strokes.len()));
+        let found = ancestors.first().map(|c| (c.map.clone(), c.strokes.len()));
+        items.extend(ancestors);
+        items.extend(rest);
+        found
+    }
+
+    /// Keep a copy of `map`, holding `strokes`.
+    fn keep(&self, cw: usize, ch: usize, strokes: &[Stroke], map: &Map) {
+        if self.has(cw, ch, strokes) {
+            return;
+        }
+        self.keep_arc(cw, ch, strokes, Arc::new(map.clone()));
+    }
+
+    /// The most strokes `strokes` has in common, from the start, with any
+    /// kept map's strokes.
+    fn shared(&self, cw: usize, ch: usize, strokes: &[Stroke]) -> usize {
+        self.lock()
+            .iter()
+            .filter(|c| c.canvas == (cw, ch))
+            .map(|c| {
+                c.strokes
+                    .iter()
+                    .zip(strokes)
+                    .take_while(|(a, b)| a == b)
+                    .count()
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn has(&self, cw: usize, ch: usize, strokes: &[Stroke]) -> bool {
+        self.lock()
+            .iter()
+            .any(|c| c.canvas == (cw, ch) && c.strokes[..] == strokes[..])
+    }
+
+    /// Drop every map (timings that must start cold).
+    #[cfg(test)]
+    fn forget(&self) {
+        self.lock().clear();
+    }
+
+    fn keep_arc(&self, cw: usize, ch: usize, strokes: &[Stroke], map: Arc<Map>) {
+        let mut items = self.lock();
+        items.retain(|c| !(c.canvas == (cw, ch) && c.strokes[..] == strokes[..]));
+        items.insert(
+            0,
+            Checkpoint {
+                canvas: (cw, ch),
+                strokes: strokes.to_vec(),
+                map,
+            },
+        );
+        items.truncate(KEPT);
+    }
+}
+
 /// The displacement map: for each point, where to read, as an offset in
 /// map cells. Point `(i, j)` sits at the centre of its cell, `(i + 0.5,
 /// j + 0.5)` in map coordinates.
+#[derive(Clone)]
 struct Map {
     w: usize,
     h: usize,
@@ -470,7 +617,11 @@ mod tests {
     use crate::recipe::NEVER;
 
     fn pull(strokes: Vec<Stroke>, smooth: bool) -> Pull {
-        Pull { strokes, smooth }
+        Pull {
+            drawn: strokes.len(),
+            strokes,
+            smooth,
+        }
     }
 
     /// A picture whose every pixel says where it came from.
@@ -656,6 +807,205 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+
+    /// A map built from a checkpoint is the map built from nothing: drawing
+    /// stroke by stroke, then moving a pin, gives the same bytes as a pull
+    /// that never saw the earlier ones. (Other tests share the checkpoints;
+    /// they can only ever hold true maps, so that does not matter.)
+    #[test]
+    fn checkpoints_give_the_same_picture() {
+        let (w, h) = (97, 61); // a canvas no other test uses
+        let base = crate::effects::testutil::noise(w * h * 3, 9);
+        let units = Units::full(w, h);
+        let params = Params::new("pull", INFO.params, &Default::default()).unwrap();
+        let strokes = vec![
+            drag((0.2, 0.3), (0.5, 0.4), 0.3, 0.7),
+            drag((0.6, 0.6), (0.4, 0.2), 0.2, 1.0),
+            drag((0.1, 0.8), (0.9, 0.7), 0.4, 0.5),
+        ];
+        let pin = |x: f64| Pin {
+            size: 0.25,
+            from: [0.5, 0.5],
+            to: [x, 0.45],
+        };
+        let run = |s: &[Stroke], p: &[Pin]| {
+            let mut b = base.clone();
+            Pull::new(&params, s, p)
+                .apply(&mut b, &units, NEVER)
+                .unwrap();
+            b
+        };
+        // Build up as the GUI would, leaving checkpoints.
+        for k in 1..=3 {
+            run(&strokes[..k], &[]);
+        }
+        run(&strokes, &[pin(0.6)]);
+        let cached = run(&strokes, &[pin(0.7)]);
+        // The same, built from nothing: a map made by hand, step by step.
+        let mut map = Map::new(w, h);
+        for s in strokes.iter().chain([&pin(0.7).as_stroke()]) {
+            map.stroke(s);
+        }
+        let mut fresh = base.clone();
+        let input = fresh.clone();
+        map.render(&input, &mut fresh, w, h, false, NEVER).unwrap();
+        assert_eq!(cached, fresh);
+    }
+
+    /// How the pull's cost grows with strokes and pins (8c). Not part of
+    /// the gate: `cargo test --release -p glitchrx-core speed -- --ignored
+    /// --nocapture`. A 12 MP canvas; finger-like strokes (40 points across
+    /// a third of the photo) and pins moved a tenth of it, all 12% wide.
+    #[test]
+    #[ignore]
+    fn speed() {
+        use std::time::Instant;
+        // A small, fixed pseudo-random walk, so runs compare.
+        let mut x = 7u64;
+        let mut rnd = move || {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            (x % 10_000) as f64 / 10_000.0
+        };
+        let mut strokes = Vec::new();
+        for _ in 0..200 {
+            let (sx, sy) = (0.1 + 0.5 * rnd(), 0.1 + 0.5 * rnd());
+            let (dx, dy) = (0.33 * (rnd() - 0.3), 0.33 * (rnd() - 0.3));
+            let points = (0..40)
+                .flat_map(|k| {
+                    let f = k as f64 / 39.0;
+                    [sx + dx * f, sy + dy * f]
+                })
+                .collect();
+            strokes.push(Stroke {
+                size: 0.12,
+                strength: 0.6,
+                points,
+            });
+        }
+        let pins: Vec<Pin> = (0..100)
+            .map(|_| {
+                let (fx, fy) = (0.1 + 0.8 * rnd(), 0.1 + 0.8 * rnd());
+                Pin {
+                    size: 0.12,
+                    from: [fx, fy],
+                    to: [fx + 0.1 * (rnd() - 0.5), fy + 0.1 * (rnd() - 0.5)],
+                }
+            })
+            .collect();
+        let params = Params::new("pull", INFO.params, &Default::default()).unwrap();
+        let (fw, fh) = (4000, 3000);
+        let time = |s: &[Stroke], p: &[Pin], w: usize, h: usize| {
+            let units = Units {
+                full_width: fw,
+                full_height: fh,
+                width: w,
+                height: h,
+            };
+            let mut bytes = coords(w, h);
+            let pull = Pull::new(&params, s, p);
+            CHECKPOINTS.forget();
+            let t = Instant::now();
+            pull.apply(&mut bytes, &units, NEVER).unwrap();
+            t.elapsed().as_secs_f64() * 1000.0
+        };
+        println!("map only (8 x 6 raster), then 1024 x 768 preview, then 4000 x 3000 export, ms:");
+        for n in [1, 10, 50, 100, 200] {
+            println!(
+                "{n:>4} strokes: {:>8.1} {:>8.1} {:>8.1}",
+                time(&strokes[..n], &[], 8, 6),
+                time(&strokes[..n], &[], 1024, 768),
+                time(&strokes[..n], &[], fw, fh)
+            );
+        }
+        for n in [1, 10, 50, 100] {
+            println!(
+                "{n:>4} pins:    {:>8.1} {:>8.1}",
+                time(&[], &pins[..n], 8, 6),
+                time(&[], &pins[..n], 1024, 768)
+            );
+        }
+
+        // Live, as the GUI renders it: 50 strokes down, then one drawn a
+        // few points a frame on the 1024 x 768 preview (checkpoints warm).
+        let preview = Units {
+            full_width: fw,
+            full_height: fh,
+            width: 1024,
+            height: 768,
+        };
+        let frame = |s: &[Stroke], p: &[Pin]| {
+            let mut bytes = coords(1024, 768);
+            let t = Instant::now();
+            Pull::new(&params, s, p)
+                .apply(&mut bytes, &preview, NEVER)
+                .unwrap();
+            t.elapsed().as_secs_f64() * 1000.0
+        };
+        CHECKPOINTS.forget();
+        let down = &strokes[..50];
+        frame(down, &[]);
+        let live = &strokes[50];
+        let mut worst: f64 = 0.0;
+        let mut total = 0.0;
+        let frames = 20;
+        for f in 1..=frames {
+            let mut s = down.to_vec();
+            s.push(Stroke {
+                points: live.points[..(f * 2).max(4)].to_vec(),
+                ..live.clone()
+            });
+            let ms = frame(&s, &[]);
+            worst = worst.max(ms);
+            total += ms;
+        }
+        println!(
+            "drawing over 50 strokes: {:.1} ms a frame on average, {:.1} at worst",
+            total / frames as f64,
+            worst
+        );
+        // A pin moved over 50 strokes and 20 pins: the last, then the first.
+        let some = &pins[..20];
+        frame(down, some);
+        let moved = |i: usize, dx: f64| {
+            let mut p = some.to_vec();
+            p[i].to[0] += dx;
+            p
+        };
+        let last: f64 = (1..=10)
+            .map(|k| frame(down, &moved(19, k as f64 * 0.002)))
+            .sum::<f64>()
+            / 10.0;
+        let firsts: Vec<f64> = (1..=10)
+            .map(|k| frame(down, &moved(0, k as f64 * 0.002)))
+            .collect();
+        println!("  first pin, frame by frame: {firsts:.0?}");
+        let first = firsts.iter().sum::<f64>() / 10.0;
+        println!(
+            "moving a pin over 50 strokes and 20 pins: last {last:.1} ms, first {first:.1} ms a frame"
+        );
+        // The map alone for the first pin's moves (8 x 6 raster, no render).
+        let tiny = Units {
+            full_width: fw,
+            full_height: fh,
+            width: 8,
+            height: 6,
+        };
+        let map_only: f64 = (11..=20)
+            .map(|k| {
+                let mut bytes = coords(8, 6);
+                let p = moved(0, k as f64 * 0.002);
+                let t = Instant::now();
+                Pull::new(&params, down, &p)
+                    .apply(&mut bytes, &tiny, NEVER)
+                    .unwrap();
+                t.elapsed().as_secs_f64() * 1000.0
+            })
+            .sum::<f64>()
+            / 10.0;
+        println!("  of which the map: {map_only:.1} ms");
     }
 
     #[test]
