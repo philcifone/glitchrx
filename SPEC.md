@@ -504,7 +504,7 @@ Effort: about Phase 5's size; most of it is 7c.
 Section 8.2. Each part ends green and usable:
 
 - **8a The effect in the core (done).** The displacement map, both samplings, the strokes in the recipe (version 5), mapping onto a cropped or shrunk canvas, golden hashes, a test that a preview and an export agree closely, a contact sheet at a few sizes and strengths.
-- **8b Pull mode in the GUI.** The edit bar and tool bar, pulling with a live preview, undo per stroke, the step card's count and Clear, `[` and `]` on a desktop.
+- **8b Pull mode in the GUI** (done; first cut, waiting for Phil to try it). The edit bar and tool bar, pulling with a live preview, undo per stroke, the step card's count and Clear, `[` and `]` on a desktop. The brush settings (size, strength) are per device, like the mask brush, and sit in the pull step's card, under the photo on a phone. While a stroke is drawn it is in the recipe uncommitted (sent at most once a frame), so the preview follows the finger; a tap that does not move adds nothing.
 - **8c Speed.** A check on the slow test photo (target: the preview keeps up with a finger on a 12 MP photo), and caching the map while only later steps change.
 - **8d New folder (done, D-65).** `POST /api/folders` making one folder inside a home-relative path, with the name checks and tests for escapes (`..`, slashes, symlinks out of home) and a taken name; the button in the folder browser (Save As and Settings); the new folder opens at once.
 

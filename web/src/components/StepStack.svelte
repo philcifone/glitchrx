@@ -159,7 +159,7 @@
 <!-- Hidden while painting a mask: it would sit on the painting tools. -->
 <button
   class="primary fab"
-  class:away={!!app.masking || editing}
+  class:away={app.drawing || editing}
   onclick={() => sheet.showModal()}
   disabled={!app.config}
   aria-label="Add an effect"

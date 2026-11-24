@@ -27,6 +27,7 @@ import {
   type ToolState,
 } from './mask';
 import { usesSamples } from './palette';
+import { cleanPullTool, moves, type PullTool } from './pull';
 import { usesSeed } from './seed';
 import { shakeParams } from './shake';
 import { storageGet, storageSet } from './storage';
@@ -51,6 +52,7 @@ import type {
   Stroke,
   PresetGroup,
   PresetInfo,
+  PullStroke,
   RecipeDto,
   RecipeState,
   ServerConfig,
@@ -82,6 +84,7 @@ const RECIPE_KEY = 'glitchrx.recipe';
  * often) can pick the same photo up again while the server still has it. */
 const DOC_KEY = 'glitchrx.doc';
 const TOOL_KEY = 'glitchrx.maskTool';
+const PULL_TOOL_KEY = 'glitchrx.pullTool';
 const NEW_PHOTO_KEY = 'glitchrx.newPhoto';
 
 /** What opening another photo does with the steps already there. */
@@ -90,6 +93,14 @@ export type NewPhotoChoice = 'ask' | 'keep' | 'fresh';
 function loadNewPhoto(): NewPhotoChoice {
   const v = storageGet(NEW_PHOTO_KEY);
   return v === 'keep' || v === 'fresh' ? v : 'ask';
+}
+
+function loadPullTool(): PullTool {
+  try {
+    return cleanPullTool(JSON.parse(storageGet(PULL_TOOL_KEY) ?? 'null'));
+  } catch {
+    return cleanPullTool(null);
+  }
 }
 
 function loadTool(): ToolState {
@@ -230,6 +241,10 @@ export class App {
 
   /** The step whose mask is being edited on the preview, by uid. */
   masking = $state<string | null>(null);
+  /** The pull step being drawn on the preview, by uid (SPEC 8.2). */
+  pulling = $state<string | null>(null);
+  /** The pull brush (per device, not in the recipe). */
+  pullTool = $state<PullTool>(loadPullTool());
 
   /**
    * Histograms of the picture as it reaches a step, for the curves editor
@@ -498,12 +513,13 @@ export class App {
       ...(r.crop ? { crop: { ...r.crop } } : {}),
       steps: r.steps
         .filter((s) => s.enabled)
-        .map(({ effect, effect_version, seed, params, mask }) => ({
+        .map(({ effect, effect_version, seed, params, mask, pull }) => ({
           effect,
           ...(effect_version === undefined ? {} : { effect_version }),
           seed,
           params,
           ...(mask ? { mask } : {}),
+          ...(pull?.length ? { pull } : {}),
         })),
     };
   }
@@ -580,8 +596,11 @@ export class App {
   }
 
   addStep(effect: string): void {
-    this.recipe.steps.push({ uid: newUid(), effect, seed: randomSeed(), params: {}, enabled: true });
+    const uid = newUid();
+    this.recipe.steps.push({ uid, effect, seed: randomSeed(), params: {}, enabled: true });
     this.changed();
+    // A pull does nothing until drawn: straight into pull mode.
+    if (this.effect(effect)?.strokes && this.doc) this.startPulling(uid);
   }
 
   removeStep(uid: string): void {
@@ -943,6 +962,7 @@ export class App {
    */
   startMasking(uid: string, index?: number): void {
     const n = this.step(uid)?.mask?.op?.length ?? 0;
+    this.pulling = null;
     this.masking = uid;
     this.activeOp = index ?? (n ? n - 1 : null);
     this.selected = this.activeOp === null ? [] : [this.activeOp];
@@ -1016,6 +1036,76 @@ export class App {
   private setMaskUrl(url: string | null): void {
     if (this.maskUrl) URL.revokeObjectURL(this.maskUrl);
     this.maskUrl = url;
+  }
+
+  // -------------------------------------------------------------------------
+  // Pull (SPEC 8.2, D-64). Strokes are drawn on the preview; each one is a
+  // single history entry. While a stroke is being drawn it is already in
+  // the recipe, uncommitted, so the preview follows the finger.
+
+  /** The pull step being drawn and its number in the stack (from 1). */
+  get pullTarget(): { n: number; step: StepState } | null {
+    if (!this.pulling) return null;
+    const i = this.recipe.steps.findIndex((s) => s.uid === this.pulling);
+    return i < 0 ? null : { n: i + 1, step: this.recipe.steps[i] };
+  }
+
+  /** Something is being drawn on the photo: a mask or a pull. */
+  get drawing(): boolean {
+    return !!this.maskTarget || !!this.pullTarget;
+  }
+
+  startPulling(uid: string): void {
+    if (!this.step(uid)) return;
+    this.stopMasking();
+    this.fullView = false;
+    this.pulling = uid;
+  }
+
+  stopPulling(): void {
+    this.pulling = null;
+  }
+
+  /** Strokes committed so far, kept aside while one is drawn. */
+  private pullBefore: PullStroke[] | null = null;
+
+  /** The stroke being drawn changed: show it, without a history entry. */
+  livePull(stroke: PullStroke): void {
+    const s = this.pullTarget?.step;
+    if (!s) return;
+    this.pullBefore ??= $state.snapshot(s.pull ?? []) as PullStroke[];
+    if (!moves(stroke)) return;
+    s.pull = [...this.pullBefore, stroke];
+    this.changed(false);
+  }
+
+  /** The stroke is finished: keep it (one undo step), or drop a tap that moved nothing. */
+  endPull(stroke: PullStroke | null): void {
+    const s = this.pullTarget?.step;
+    const before = this.pullBefore;
+    this.pullBefore = null;
+    if (!s || before === null) return;
+    if (stroke && moves(stroke)) {
+      s.pull = [...before, stroke];
+      this.changed();
+    } else if ((s.pull?.length ?? 0) !== before.length) {
+      // Cancelled after it had started to show: put the step back.
+      s.pull = before;
+      this.changed(false);
+    }
+  }
+
+  /** Remove every stroke from a pull step. Undoable. */
+  clearPull(uid: string): void {
+    const s = this.step(uid);
+    if (!s?.pull?.length) return;
+    delete s.pull;
+    this.changed();
+  }
+
+  setPullTool(patch: Partial<PullTool>): void {
+    this.pullTool = cleanPullTool({ ...$state.snapshot(this.pullTool), ...patch });
+    storageSet(PULL_TOOL_KEY, JSON.stringify(this.pullTool));
   }
 
   /** Draw a region band on the preview while it is being dragged. */
@@ -1303,6 +1393,7 @@ export class App {
     const doc = this.doc;
     if (!doc || this.cropping) return;
     if (this.masking) this.stopMasking();
+    this.pulling = null;
     if (this.zoomed) this.toggleZoom();
     this.cropping = { rect: { ...(this.recipe.crop ?? { x: 0, y: 0, w: 1, h: 1 }) }, url: null };
     // The whole photo, unbent: the steps run on the crop, so they cannot

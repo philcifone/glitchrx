@@ -29,6 +29,8 @@ export interface EffectInfo {
   random_within: boolean;
   /** A scaled preview cannot match the export; render exactly when idle. */
   exact_preview: boolean;
+  /** Drawn by hand (pull): strokes instead of placement and seed (D-64). */
+  strokes?: boolean;
   params: ParamInfo[];
   /** How steps from older versions become current (D-56), oldest first. */
   upgrades?: { to: number; fill: Record<string, string> }[];
@@ -158,6 +160,18 @@ export interface StepDto {
   /** Effect parameters, plus the step keys encoding, channels and opacity. */
   params: Record<string, string>;
   mask?: Mask;
+  /** A pull step's strokes, in the order drawn (D-64). */
+  pull?: PullStroke[];
+}
+
+/** One pull stroke (see crates/glitchrx-core/src/pull.rs). */
+export interface PullStroke {
+  /** Brush diameter, as a share of the photo's longer side. */
+  size: number;
+  /** 0 to 1: how far the pixels at the centre follow the finger. */
+  strength: number;
+  /** Flat x, y list, as shares of the whole photo (like masks, D-52). */
+  points: number[];
 }
 
 export interface RecipeDto {

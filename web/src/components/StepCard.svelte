@@ -18,6 +18,7 @@
   import ParamField from './ParamField.svelte';
   import LevelsField from './LevelsField.svelte';
   import BlendSection from './BlendSection.svelte';
+  import PullSection from './PullSection.svelte';
 
   let { step, index }: { step: StepState; index: number } = $props();
 
@@ -29,6 +30,8 @@
   const levels = $derived(step.effect === 'levels' ? own.filter((p) => LEVEL_POINTS.includes(p.name)) : []);
   const fields = $derived(levels.length ? own.filter((p) => !LEVEL_POINTS.includes(p.name)) : own);
   const placement = $derived(info?.params.filter((p) => p.placement) ?? []);
+  /** Drawn by hand (pull): strokes take the place of placement and seed. */
+  const drawn = $derived(!!info?.strokes);
   const seeded = $derived(app.seeded(step));
   const banded = $derived(app.banded(step));
   // Hits and length only mean something with bands on (D-56).
@@ -78,7 +81,7 @@
           <!-- Inside the card, not on its header, where it was easy to bump. -->
           {#if own.length}<div class="shake-row">
             <h3 class="section-label">Settings</h3>
-            {#if shakes(info)}
+            {#if shakes(info) && !drawn}
               <button class="plain" onclick={() => app.shake(step.uid)} title="Random settings for this step (placement stays)" aria-label="Shake settings">
                 <Shuffle size={16} strokeWidth={1.75} /> Shake
               </button>
@@ -119,6 +122,9 @@
           </label>
         </div>
         {/if}
+        {#if drawn}
+        <PullSection {step} />
+        {:else}
         <section class="group" aria-label="Placement">
           <h3 class="section-label">Placement</h3>
           <!-- Off: the step covers its whole region. On: it lands in seeded
@@ -158,6 +164,7 @@
             </button>
           </div>{/if}
         </section>
+        {/if}
         <BlendSection {step} />
       {:else}
         <p class="err">Unknown effect `{step.effect}`.</p>

@@ -14,8 +14,9 @@
   //   zooms too
   // - zoomed in, one finger (or the middle mouse button) pans, so does the
   //   wheel
-  // While masking, one finger works the mask tool instead, and the zoom
-  // stays put between strokes; two fingers still pinch and pan.
+  // While masking or pulling, one finger works the mask tool or the pull
+  // brush instead, and the zoom stays put between strokes; two fingers
+  // still pinch and pan.
   //
   // Zoomed in, the picture underneath is the whole-photo preview enlarged
   // (soft), with a sharp patch on top: the visible part cut from the
@@ -29,10 +30,22 @@
   import { photoRect } from '../lib/mask';
   import { pan, pinch, placement, spread, wheelZoom, type Point, type Spread, type View } from '../lib/view';
   import MaskPainter from './MaskPainter.svelte';
+  import PullPainter from './PullPainter.svelte';
 
   let { onopen }: { onopen: () => void } = $props();
   let box: HTMLDivElement;
-  let painter = $state<ReturnType<typeof MaskPainter>>();
+  /** What one finger does on the photo while a mask or a pull is drawn. */
+  interface Painter {
+    down(e: PointerEvent): void;
+    move(e: PointerEvent): void;
+    up(e: PointerEvent): void;
+    cancel(): void;
+    leave(): void;
+  }
+  let maskPainter = $state<ReturnType<typeof MaskPainter>>();
+  let pullPainter = $state<ReturnType<typeof PullPainter>>();
+  const painter = $derived<Painter | undefined>(app.pullTarget ? pullPainter : maskPainter);
+  const drawing = $derived(app.drawing);
   /** The cursor the painter asks for while masking. */
   let paintCursor = $state('default');
 
@@ -129,7 +142,7 @@
       e.preventDefault(); // no autoscroll
       gesture = { kind: 'pan', last: p };
       panning = true;
-    } else if (app.masking) {
+    } else if (drawing) {
       gesture = painter ? { kind: 'paint' } : { kind: 'spent' };
       painter?.down(e);
     } else {
@@ -146,7 +159,7 @@
     const p = onStage(e);
     if (!points.has(e.pointerId)) {
       // The mouse moving with no button down: the brush outline, the cursor.
-      if (app.masking) painter?.move(e);
+      if (drawing) painter?.move(e);
       return;
     }
     points.set(e.pointerId, p);
@@ -219,7 +232,7 @@
     } else {
       singleTimer = window.setTimeout(() => {
         lastTap = null;
-        if (!app.masking && !app.cropping) app.fullView = !app.fullView;
+        if (!drawing && !app.cropping) app.fullView = !app.fullView;
       }, DOUBLE_TAP_MS);
     }
   }
@@ -240,7 +253,7 @@
   let recipes: RecipePicker;
 
   const cursor = $derived(
-    app.masking ? paintCursor : panning ? 'grabbing' : app.zoomed ? 'grab' : 'default',
+    drawing ? paintCursor : panning ? 'grabbing' : app.zoomed ? 'grab' : 'default',
   );
 </script>
 
@@ -305,7 +318,10 @@
            nothing floats over the photo while painting. -->
       <!-- The painter measures against the whole photo, which reaches past
            a crop: masks are shares of the photo (D-52). -->
-      <MaskPainter bind:this={painter} bind:cursor={paintCursor} rect={maskRect} canvas={rect} stage={g.box} />
+      <MaskPainter bind:this={maskPainter} bind:cursor={paintCursor} rect={maskRect} canvas={rect} stage={g.box} />
+    {:else if app.pullTarget && !app.comparing && g}
+      <!-- Strokes are shares of the whole photo too (D-64). -->
+      <PullPainter bind:this={pullPainter} bind:cursor={paintCursor} rect={maskRect} />
     {/if}
   {:else if !app.doc}
     <div class="empty">
@@ -320,7 +336,7 @@
   {#if app.busy || app.working}
     <div class="progress" aria-hidden="true"></div>
   {/if}
-  {#if app.working && !app.masking}
+  {#if app.working && !drawing}
     <div class="working" role="status">{app.working}</div>
   {:else if app.heavy}
     <div class="working heavy" role="status">
@@ -329,7 +345,7 @@
     </div>
   {/if}
 
-  {#if app.continueFrom.length && app.doc && !app.cropping && !app.masking && !app.working && !app.fullView}
+  {#if app.continueFrom.length && app.doc && !app.cropping && !drawing && !app.working && !app.fullView}
     <!-- Picking up an old edit (5e): this photo has recipes saved on the
          server. The newest is one tap away; More lists them all. -->
     {@const r = app.continueFrom[0]}
