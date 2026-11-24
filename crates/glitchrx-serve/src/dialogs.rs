@@ -25,5 +25,6 @@ pub trait Dialogs: Send + Sync {
     fn save_as(&self, dir: Option<&Path>, name: &str) -> Option<PathBuf>;
 }
 
-/// File extensions offered in the Open dialog (the decoders' formats).
-pub const PHOTO_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "tif", "tiff"];
+/// File extensions offered in the Open dialog: the decoders' formats, and
+/// projects (`.glrx`).
+pub const PHOTO_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "tif", "tiff", "glrx"];

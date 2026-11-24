@@ -317,6 +317,12 @@ pub struct DocDto {
     /// Recipes on the server made on this photo, newest first (to offer
     /// "continue from"; see `recipes`).
     pub recipes: Vec<crate::recipes::Found>,
+    /// Opened from a project (`.glrx`): its file name. `name` is then the
+    /// original photo's.
+    pub project: Option<String>,
+    /// The project's recipe, when one was just opened.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<RecipeDto>,
 }
 
 impl DocDto {
@@ -338,6 +344,8 @@ impl DocDto {
             file_len,
             raw_len: img.raster.bytes.len(),
             recipes: Vec::new(),
+            project: None,
+            recipe: None,
         }
     }
 }

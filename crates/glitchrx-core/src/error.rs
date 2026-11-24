@@ -32,6 +32,10 @@ pub enum Error {
     #[error("recipe: {0}")]
     Recipe(String),
 
+    /// A project file (`.glrx`) that cannot be read or written.
+    #[error("project: {0}")]
+    Project(String),
+
     /// A newer request superseded this render (see [`crate::recipe::Cancel`]).
     #[error("cancelled")]
     Cancelled,

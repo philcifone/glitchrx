@@ -4,7 +4,9 @@
 //!
 //! 1. **The input is never written.** Even with `force`, an output path that
 //!    resolves to the input file (directly, through a symlink, or as a hard
-//!    link) is refused.
+//!    link) is refused. The one exception is a project file (`.glrx`), a
+//!    working file that may be saved over with `force` (D-63); see
+//!    [`write_project`].
 //! 2. **Nothing is overwritten by accident.** The output is written to a
 //!    temporary file in the target directory and then moved into place with a
 //!    no-clobber rename, which fails atomically if the target exists, even
@@ -126,6 +128,40 @@ pub fn write_output(
     if same_file(input, output) {
         return Err(WriteError::SameAsInput(output.to_path_buf()));
     }
+    write_file(input, output, bytes, force)
+}
+
+/// Write a project file (`.glrx`) made from `input`. As [`write_output`],
+/// except that it may replace `input` itself, with `force`, when `input`
+/// is a project: a project is a working file, like a `.psd`, and the photo
+/// inside it is carried over unchanged (D-63). A photo is still never
+/// written.
+pub fn write_project(
+    input: &Path,
+    output: &Path,
+    bytes: &[u8],
+    force: bool,
+) -> Result<(), WriteError> {
+    if same_file(input, output) && !is_project_file(input) {
+        return Err(WriteError::SameAsInput(output.to_path_buf()));
+    }
+    write_file(input, output, bytes, force)
+}
+
+/// Whether the file at `path` is a project, by its first bytes.
+pub fn is_project_file(path: &Path) -> bool {
+    use std::io::Read;
+    let mut head = Vec::with_capacity(256);
+    fs::File::open(path)
+        .and_then(|f| f.take(256).read_to_end(&mut head))
+        .is_ok()
+        && crate::project::is_project(&head)
+}
+
+/// Write through a temporary file and a rename; `like` lends its
+/// permission bits.
+fn write_file(like: &Path, output: &Path, bytes: &[u8], force: bool) -> Result<(), WriteError> {
+    let input = like;
     if !force && fs::symlink_metadata(output).is_ok() {
         return Err(WriteError::Exists(output.to_path_buf()));
     }

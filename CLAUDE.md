@@ -17,7 +17,7 @@ Report the real output. Never assume success.
 
 ## Git
 
-- `main` holds the phases Phil has reviewed (1 to 3 so far). Work happens on the phase branch (`phase-4-tools`, ...) cut from `main`, and on feature branches cut from that.
+- `main` holds the phases Phil has reviewed (1 to 6 so far). Work happens on the phase branch (`phase-4-tools`, ...) cut from `main`, and on feature branches cut from that.
 - Merge feature branches back into the phase branch once the gate is green.
 - Never push (there is no remote yet). Never merge into `main` unless Phil asks; he reviews first.
 - Commit small and often. Use Conventional Commits (`feat:`, `fix:`, `test:`, `docs:`, `chore:`, `refactor:`). No AI attribution lines.
@@ -25,7 +25,7 @@ Report the real output. Never assume success.
 
 ## Invariants (tests enforce these)
 
-- **Inputs are never written,** even with `--force`. Outputs are never overwritten without `--force`.
+- **Inputs are never written,** even with `--force`. Outputs are never overwritten without `--force`. The one exception: a project file (`.glrx`) may be saved over after a confirmation or with `--force` (D-63); the photo inside it never changes but for its removed location.
 - **Dimensions are preserved.** Effects never change the raster's length, and write only inside their windows.
 - **Determinism** (same input, recipe and seed give the same bytes everywhere; SPEC D-25):
   - effect math in f64 with basic operations only; no platform `exp`/`sin`/`pow` in sample loops (use `dsp.rs`)

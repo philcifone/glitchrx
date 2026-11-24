@@ -231,8 +231,8 @@ export async function saveTo(
 }
 
 /** The next free -glitch name for this photo in a folder (no extension). */
-export async function suggestName(docId: string, folder: string, format: ExportFormat): Promise<string> {
-  const res = await postJson(`/api/docs/${docId}/suggest`, { folder, format });
+export async function suggestName(docId: string, folder: string, format: ExportFormat, project = false): Promise<string> {
+  const res = await postJson(`/api/docs/${docId}/suggest`, { folder, format, project });
   return (await json<{ name: string }>(res)).name;
 }
 
@@ -259,6 +259,13 @@ export interface SavedAs {
 /** Desktop app: the native Open dialog. `null` if the user cancelled. */
 export async function desktopOpen(): Promise<DocInfo | null> {
   const res = await postJson('/api/desktop/open', {});
+  if (res.status === 204) return null;
+  return json<DocInfo>(res);
+}
+
+/** Desktop app: the file it was started with (a double-clicked project), once; else null. */
+export async function desktopLaunch(): Promise<DocInfo | null> {
+  const res = await postJson('/api/desktop/launch', {});
   if (res.status === 204) return null;
   return json<DocInfo>(res);
 }

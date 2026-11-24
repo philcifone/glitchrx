@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Tells Linux desktops (shared-mime-info) what a .glrx file is: by its
+     name, and by its first bytes, where every project spells out its type
+     (SPEC 8.1). Installed by scripts/install-desktop.sh and the .deb. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/vnd.glitcharaxia.project">
+    <comment>glitcharaxia project</comment>
+    <sub-class-of type="application/zip"/>
+    <generic-icon name="image-x-generic"/>
+    <glob pattern="*.glrx"/>
+    <magic priority="70">
+      <match type="string" offset="30" value="mimetypeapplication/vnd.glitcharaxia.project"/>
+    </magic>
+  </mime-type>
+</mime-info>

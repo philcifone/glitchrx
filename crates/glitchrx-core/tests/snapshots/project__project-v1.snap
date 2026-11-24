@@ -1,0 +1,6 @@
+---
+source: crates/glitchrx-core/tests/project.rs
+expression: "(blake3::hash(&p.original).to_hex().to_string(),\nblake3::hash(&picture.bytes).to_hex().to_string())"
+---
+- e3ca483961ed3f4eba065511ed378032be37071e8767c027a3c6c5ead1da7b00
+- d640bc96abe9f34083b0bc50ff1c592699d5fceed51c17d3446a6fe9803fe59b

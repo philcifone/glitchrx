@@ -414,3 +414,99 @@ fn crop_keeps_part_of_the_photo_and_is_saved_in_the_recipe() {
     assert_ne!(code(&o), 0);
     assert!(stderr(&o).contains("crop"), "{}", stderr(&o));
 }
+
+#[test]
+fn a_project_replays_to_the_same_picture_and_carries_the_original() {
+    let d = workdir();
+    let o = run(
+        d.path(),
+        &[
+            "--echo",
+            "--bitcrush",
+            "--seed",
+            "9",
+            "--project",
+            "photo.jpg",
+            "-o",
+            "a.png",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert!(stdout(&o).contains("project a.glrx"), "{}", stdout(&o));
+    let o = run(d.path(), &["a.glrx", "b.png"]);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert_eq!(
+        fs::read(d.path().join("a.png")).unwrap(),
+        fs::read(d.path().join("b.png")).unwrap(),
+        "the project's own recipe, on its own original"
+    );
+    let o = run(d.path(), &["--info", "a.glrx"]);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    let info = stdout(&o);
+    assert!(info.contains("original     photo.jpg"), "{info}");
+    assert!(info.contains("2 steps: echo, bitcrush"), "{info}");
+    assert!(info.contains("preview"), "{info}");
+}
+
+#[test]
+fn a_project_takes_no_other_recipe() {
+    let d = workdir();
+    let o = run(d.path(), &["--echo", "--project", "photo.jpg"]);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    let o = run(d.path(), &["--echo", "photo-glitch.glrx"]);
+    assert_eq!(code(&o), 2);
+    assert!(stderr(&o).contains("its own recipe"), "{}", stderr(&o));
+    // Named like a project but not one.
+    fs::write(d.path().join("fake.glrx"), b"hello").unwrap();
+    let o = run(d.path(), &["fake.glrx"]);
+    assert_eq!(code(&o), 1);
+    assert!(
+        stderr(&o).contains("not a glitcharaxia project"),
+        "{}",
+        stderr(&o)
+    );
+}
+
+#[test]
+fn a_project_may_be_saved_over_with_force_but_a_photo_never() {
+    let d = workdir();
+    let o = run(d.path(), &["--echo", "--project=edit.glrx", "photo.jpg"]);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    // Over itself: refused without --force, done with it.
+    let o = run(
+        d.path(),
+        &["edit.glrx", "--project=edit.glrx", "-o", "x.png"],
+    );
+    assert_eq!(code(&o), 3, "{}", stderr(&o));
+    assert!(stderr(&o).contains("already exists"), "{}", stderr(&o));
+    let o = run(
+        d.path(),
+        &[
+            "edit.glrx",
+            "--project=edit.glrx",
+            "-o",
+            "y.png",
+            "--force",
+            "--work-size",
+            "120",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    let o = run(d.path(), &["--info", "edit.glrx"]);
+    assert!(stdout(&o).contains("work size 120"), "{}", stdout(&o));
+    // A photo stays protected, even with --force.
+    let before = fs::read(d.path().join("photo.jpg")).unwrap();
+    let o = run(
+        d.path(),
+        &[
+            "--echo",
+            "--project=photo.jpg",
+            "--force",
+            "photo.jpg",
+            "-o",
+            "z.png",
+        ],
+    );
+    assert_eq!(code(&o), 3, "{}", stderr(&o));
+    assert_eq!(fs::read(d.path().join("photo.jpg")).unwrap(), before);
+}
