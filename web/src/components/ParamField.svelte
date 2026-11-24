@@ -23,6 +23,9 @@
   const overridden = $derived(value !== undefined);
   const id = $derived(`${uid}-${spec.name}`);
 
+  /** The help line shows in full after a tap; one line (cut short) otherwise. */
+  let helpOpen = $state(false);
+
   const numeric = $derived(spec.kind === 'int' || spec.kind === 'float');
   const scale = $derived(numeric ? sliderScale(spec.min ?? 0, spec.max ?? 1, spec.kind === 'int') : null);
 
@@ -102,7 +105,18 @@
 <div class="field">
   <div class="top">
     <label for={id} title={spec.help}>{spec.name}</label>
-    <span class="help dim" title={spec.help}>{spec.help}</span>
+    <!-- Cut to one line to keep the card short; a tap shows all of it
+         (phones have no hover for the title). -->
+    <button
+      type="button"
+      class="help dim"
+      class:open={helpOpen}
+      onclick={() => (helpOpen = !helpOpen)}
+      aria-expanded={helpOpen}
+      title={spec.help}
+    >
+      {spec.help}
+    </button>
     <!-- Sliders reset with a double tap (D-55), so only fields without
          one get a reset button. It stays when at the default (dimmed), so
          the row never changes height. -->
@@ -231,10 +245,34 @@
   .help {
     flex: 1;
     min-width: 0;
+    /* Plain text, not a button look; a block, since the ellipsis does not
+       work in the flex box buttons get by default. */
+    display: block;
+    min-height: 0;
+    appearance: none;
+    background: none;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    margin: 0;
+    font-weight: 400;
+    font: inherit;
     font-size: 0.75rem;
+    color: var(--fg-dim);
+    text-align: left;
+    cursor: pointer;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .help:hover {
+    background: none;
+  }
+
+  .help.open {
+    white-space: normal;
+    overflow: visible;
   }
 
   .reset:disabled {
