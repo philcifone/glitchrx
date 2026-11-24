@@ -9,6 +9,14 @@ describe('sliderScale', () => {
     expect(s.fromSlider(s.toSlider(5))).toBe(5);
   });
 
+  it('is linear for tone values and degrees', () => {
+    // levels out_black: a quarter of the track is a quarter of the range.
+    const tones = sliderScale(0, 255, true);
+    expect(tones.fromSlider(SLIDER_STEPS / 4)).toBe(64);
+    const hue = sliderScale(-180, 180, true);
+    expect(hue.fromSlider(SLIDER_STEPS / 4)).toBe(-90);
+  });
+
   it('is logarithmic for wide ranges, hitting both ends', () => {
     const s = sliderScale(1, 1 << 24, true);
     expect(s.fromSlider(0)).toBe(1);
