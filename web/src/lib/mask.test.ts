@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  photoFrame,
+  photoRect,
+  toPhoto,
   addPoint,
   afterRemoval,
   brushScale,
@@ -198,10 +201,10 @@ describe('dragEnds', () => {
 describe('addPoint', () => {
   it('skips points closer than the minimum and rounds the rest', () => {
     const pts: number[] = [];
-    expect(addPoint(pts, 0.123456, 0.5, 4, 1000, 1000)).toBe(true);
+    expect(addPoint(pts, 0.1234567, 0.5, 4, 1000, 1000)).toBe(true);
     expect(addPoint(pts, 0.125, 0.5, 4, 1000, 1000)).toBe(false); // 1.5 px away
     expect(addPoint(pts, 0.13, 0.5, 4, 1000, 1000)).toBe(true);
-    expect(pts).toEqual([0.1235, 0.5, 0.13, 0.5]);
+    expect(pts).toEqual([0.12346, 0.5, 0.13, 0.5]);
   });
 });
 
@@ -215,5 +218,27 @@ describe('scales', () => {
   it('format percentages', () => {
     expect(percent(0.0125)).toBe('1.3%');
     expect(percent(0.25)).toBe('25%');
+  });
+});
+
+describe('masks and the crop (D-52)', () => {
+  // The right half of a 256 x 128 photo, as in the core's test.
+  const f = photoFrame({ x: 128, y: 0, w: 128, h: 128 }, 256, 128);
+
+  it('matches the core frame', () => {
+    expect(f).toEqual({ x: 0.5, y: 0, sx: 2, sy: 1, sl: 2 });
+  });
+
+  it('places the whole photo around the canvas on screen', () => {
+    // The canvas shown 200 px wide at x 50: the photo is twice as wide,
+    // starting a canvas-width to the left.
+    expect(photoRect({ x: 50, y: 10, w: 200, h: 200 }, f)).toEqual({ x: -150, y: 10, w: 400, h: 200 });
+  });
+
+  it('moves a new component from the canvas onto the photo', () => {
+    const r = toPhoto({ shape: 'radial', mode: 'add', from: [0.5, 0.5], to: [0.7, 0.5], hardness: 1 }, f);
+    expect(r).toMatchObject({ from: [0.75, 0.5], to: [0.85, 0.5] });
+    const q = toPhoto({ shape: 'rect', mode: 'add', center: [0.5, 0.5], size: [0.5, 0.5] }, f);
+    expect(q).toMatchObject({ center: [0.75, 0.5], size: [0.25, 0.25] });
   });
 });

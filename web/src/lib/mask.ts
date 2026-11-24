@@ -2,7 +2,7 @@
 // card, kept here so they can be tested.
 //
 // A mask is a stack of components (brushes, linear gradients, radials,
-// brightness ranges), each added, subtracted or intersected with the mask
+// rectangles, pen paths, brightness ranges), each added, subtracted or intersected with the mask
 // so far. Every component stays editable: a radial keeps its centre and
 // edge, so it can be dragged and resized later; a brush keeps its strokes,
 // and its eraser only takes back its own paint.
@@ -54,6 +54,8 @@ export const SHAPE_LABEL: Record<MaskShape, string> = {
   brush: 'Brush',
   linear: 'Linear',
   radial: 'Radial',
+  rect: 'Rectangle',
+  path: 'Pen',
   brightness: 'Brightness',
 };
 
@@ -68,6 +70,12 @@ export function opDetail(op: MaskOp): string {
     }
     case 'brightness':
       return `${Math.round(op.low * 100)}-${Math.round(op.high * 100)}`;
+    case 'path': {
+      const n = op.points.length;
+      return n === 0 ? 'no points yet' : `${n} ${n === 1 ? 'point' : 'points'}`;
+    }
+    case 'rect':
+      return op.angle ? `turned ${Math.round(op.angle)}\u00b0` : '';
     default:
       return '';
   }
@@ -90,6 +98,16 @@ export function newComponent(shape: MaskShape, aspect: number, others: number): 
       const r = 0.2 * Math.max(1, 1 / aspect);
       return { shape, mode: 'add', from: [0.5, 0.5], to: [roundCoord(0.5 + r), 0.5], hardness: 1 };
     }
+    case 'rect':
+      // Half the picture each way, centred.
+      return {
+        shape,
+        mode: 'add',
+        center: [0.5, 0.5],
+        size: [roundCoord(0.5 * Math.min(1, aspect)), roundCoord(0.5 * Math.min(1, 1 / aspect))],
+      };
+    case 'path':
+      return { shape, mode: 'add', points: [] };
     case 'brightness':
       // With other components, a brightness range is most useful as a limit.
       return { shape, mode: others > 0 ? 'intersect' : 'add', low: 0.5, high: 1, soft: 0.1 };
@@ -178,8 +196,11 @@ function migrateStrokes(mask: Mask): Mask {
   return { ...mask, op: out };
 }
 
-/** Positions in a recipe: a ten-thousandth of the side (0.6 px at 6000 px). */
-export const roundCoord = (v: number) => Math.round(v * 10000) / 10000;
+/**
+ * Positions in a recipe: a hundred-thousandth of the side (0.06 px at
+ * 6000 px), fine enough for strokes painted at 800% zoom.
+ */
+export const roundCoord = (v: number) => Math.round(v * 100000) / 100000;
 
 /**
  * Add a point to a stroke (flat x, y list in picture fractions) if it is at
@@ -318,4 +339,66 @@ function clamp(v: number, lo: number, hi: number): number {
 function roundTo(v: number, digits: number): number {
   const f = 10 ** digits;
   return Math.round(v * f) / f;
+}
+
+// ---------------------------------------------------------------------------
+// Masks and the crop (D-52)
+//
+// Masks are kept as shares of the whole, uncropped photo, so they stay on
+// the same part of it whatever the crop. The server moves them onto the
+// cropped canvas to render (the core's mask::Frame); the editor instead
+// draws on the rectangle where the whole photo would sit on screen, which
+// reaches past the visible crop, so every share it measures is already a
+// share of the photo.
+
+/** The crop as the core's mask::Frame sees it. */
+export interface PhotoFrame {
+  /** The crop's corner, as shares of the photo. */
+  x: number;
+  y: number;
+  /** Photo width over crop width, and the same for heights. */
+  sx: number;
+  sy: number;
+  /** The photo's longer side over the crop's. */
+  sl: number;
+}
+
+/** The frame for a crop of whole pixels out of a `pw` x `ph` photo. */
+export function photoFrame(crop: { x: number; y: number; w: number; h: number }, pw: number, ph: number): PhotoFrame {
+  return {
+    x: crop.x / pw,
+    y: crop.y / ph,
+    sx: pw / crop.w,
+    sy: ph / crop.h,
+    sl: Math.max(pw, ph) / Math.max(crop.w, crop.h),
+  };
+}
+
+/** Where the whole photo sits on screen, given where the cropped canvas sits. */
+export function photoRect(
+  canvas: { x: number; y: number; w: number; h: number },
+  f: PhotoFrame,
+): { x: number; y: number; w: number; h: number } {
+  return {
+    x: canvas.x - f.x * f.sx * canvas.w,
+    y: canvas.y - f.y * f.sy * canvas.h,
+    w: canvas.w * f.sx,
+    h: canvas.h * f.sy,
+  };
+}
+
+/** A component laid out on the canvas (a new one), moved to shares of the photo. */
+export function toPhoto(op: MaskOp, f: PhotoFrame): MaskOp {
+  const pt = (p: [number, number]): [number, number] => [roundCoord(p[0] / f.sx + f.x), roundCoord(p[1] / f.sy + f.y)];
+  switch (op.shape) {
+    case 'linear':
+      return { ...op, from: pt(op.from), to: pt(op.to) };
+    case 'radial':
+      return { ...op, from: pt(op.from), to: pt(op.to) };
+    case 'rect':
+      return { ...op, center: pt(op.center), size: [roundCoord(op.size[0] / f.sl), roundCoord(op.size[1] / f.sl)] };
+    default:
+      // Brushes and paths start empty; brightness has no place.
+      return op;
+  }
 }

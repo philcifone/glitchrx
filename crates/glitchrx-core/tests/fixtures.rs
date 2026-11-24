@@ -122,6 +122,38 @@ fn busy_mask() -> Mask {
     }
 }
 
+/// A turned rectangle and a pen path with corners, curves, and a point past
+/// the edge, one feathered.
+fn shapes_mask() -> Mask {
+    Mask {
+        invert: false,
+        ops: vec![
+            MaskOp::new(
+                Shape::Rect {
+                    center: [0.35, 0.4],
+                    size: [0.4, 0.25],
+                    angle: 27.5,
+                },
+                Mode::Add,
+            ),
+            MaskOp {
+                feather: 0.01,
+                ..MaskOp::new(
+                    Shape::Path {
+                        points: vec![
+                            vec![0.55, 0.2],
+                            vec![1.1, 0.35, 1.15, 0.6],
+                            vec![0.8, 0.9],
+                            vec![0.5, 0.7, 0.4, 0.6],
+                        ],
+                    },
+                    Mode::Add,
+                )
+            },
+        ],
+    }
+}
+
 fn recipe(effect: &str, params: &str, seed: u64, encoding: Encoding) -> Recipe {
     Recipe {
         encoding,
@@ -339,6 +371,15 @@ fn golden_hashes() {
         "mask/bitcrush".to_string(),
         blake3::hash(&out.bytes).to_hex().to_string(),
     );
+    // Rectangles and pen paths: turned, curved, and partly off the picture.
+    let mut out = base.clone();
+    let mut r = recipe("bitcrush", "", 0xC0FFEE, Encoding::U8);
+    r.steps[0].mask = Some(shapes_mask());
+    r.apply(&mut out).unwrap();
+    hashes.insert(
+        "mask-shapes/bitcrush".to_string(),
+        blake3::hash(&out.bytes).to_hex().to_string(),
+    );
     insta::assert_yaml_snapshot!(hashes);
 }
 
@@ -400,7 +441,18 @@ fn previews_resemble_the_export() {
         height: small.height,
     };
     for e in REGISTRY {
-        let r = recipe(e.id, "", 11, Encoding::U8);
+        // Two effects cannot be previewed at scale over the whole picture,
+        // so they are measured with the bands they used to start with
+        // (D-56); their live previews settle to the exact render once the
+        // user pauses (D-40). Shuffle permutes blocks the preview has fewer
+        // of (see above). Stutter copies the first row down the picture,
+        // and a preview's first row is the average of several.
+        let params = match e.id {
+            "shuffle" => "hits=4",
+            "stutter" => "hits=3",
+            _ => "",
+        };
+        let r = recipe(e.id, params, 11, Encoding::U8);
         let mut export = full.clone();
         r.apply(&mut export).unwrap();
         let export = export.downscale(pw, ph);

@@ -2,7 +2,7 @@
   // Opening another photo while the stack has steps: keep them, or start
   // fresh? Presets are the way to reuse a look on purpose; this only asks
   // about the steps left over. Starting fresh can be undone, and the
-  // choice can be remembered (it can be changed in Presets).
+  // choice can be remembered (it can be changed in Settings).
   import { app } from '../lib/app.svelte';
 
   let dialog: HTMLDialogElement;
@@ -37,7 +37,7 @@
       <input class="switch" type="checkbox" bind:checked={remember} />
     </label>
     {#if remember}
-      <p class="dim small">You can change this later in Presets.</p>
+      <p class="dim small">You can change this later in Settings.</p>
     {/if}
     <div class="buttons">
       <button onclick={() => choose(false)}>Keep {n === 1 ? 'step' : 'steps'}</button>

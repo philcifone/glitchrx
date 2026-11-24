@@ -99,8 +99,23 @@ async fn effects_and_config() {
     assert_eq!(s, StatusCode::OK);
     assert!(h.contains_key(header::CONTENT_SECURITY_POLICY));
     let effects = json_of(&b);
-    assert_eq!(effects.as_array().unwrap().len(), 15);
+    assert_eq!(effects.as_array().unwrap().len(), 19);
     assert_eq!(effects[0]["id"], "echo");
+    // The curve kind reaches the GUI, which draws an editor for it.
+    let curves = effects
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "curves")
+        .unwrap();
+    assert_eq!(curves["group"], "adjust");
+    assert!(
+        curves["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["kind"] == "curve")
+    );
 
     let (_, _, b) = send(
         &app,
@@ -187,6 +202,76 @@ async fn upload_preview_export() {
         );
         assert_eq!(b, cli_output(&bytes, f), "{format}");
     }
+}
+
+/// A zoomed view asks for part of the picture: cut from the full-resolution
+/// render (or the original), shrunk only if it is bigger than the box, with
+/// its pixel rectangle in `X-Crop`.
+#[tokio::test]
+async fn zoomed_crops() {
+    let bytes = fixture("baseline-420.jpg"); // 480 x 320
+    let app = app(None, None);
+    let id = upload(&app, "a.jpg", bytes.clone()).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let crop = json!({"x": 0.25, "y": 0.5, "w": 0.5, "h": 0.25});
+    let mut want = codec::decode(&bytes).unwrap().raster;
+    let original = want.crop(120, 160, 240, 80);
+    core_recipe().apply(&mut want).unwrap();
+    let bent = want.crop(120, 160, 240, 80);
+    let mean_error = |got: &[u8], want: &[u8]| {
+        got.iter()
+            .zip(want)
+            .map(|(a, b)| a.abs_diff(*b) as u64)
+            .sum::<u64>()
+            / got.len() as u64
+    };
+    for (body, want) in [
+        (
+            json!({"recipe": sample_recipe(), "max_w": 4096, "max_h": 4096, "crop": crop}),
+            &bent,
+        ),
+        (
+            json!({"original": true, "max_w": 4096, "max_h": 4096, "crop": crop}),
+            &original,
+        ),
+    ] {
+        let (s, h, b) = send(&app, post_json(&format!("/api/docs/{id}/preview"), body)).await;
+        assert_eq!(s, StatusCode::OK);
+        assert_eq!(h["x-crop"], "120,160,240,80");
+        assert_eq!(
+            (&h["x-width"], &h["x-height"]),
+            (&"240".parse().unwrap(), &"80".parse().unwrap())
+        );
+        let got = codec::decode(&b).unwrap().raster;
+        // After the preview's own JPEG encoding, so only roughly. A busy patch suffers more from JPEG than a whole picture: the
+        // right crop measures about 5, one 2 px off about 31.
+        let err = mean_error(&got.bytes, &want.bytes);
+        assert!(err < 8, "mean error {err}");
+    }
+
+    // Bigger than the box: shrunk to fit, same rectangle.
+    let small = json!({"recipe": sample_recipe(), "max_w": 60, "max_h": 60, "crop": crop});
+    let (s, h, _) = send(&app, post_json(&format!("/api/docs/{id}/preview"), small)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        (
+            h["x-width"].to_str().unwrap(),
+            h["x-height"].to_str().unwrap()
+        ),
+        ("60", "20")
+    );
+    assert_eq!(h["x-crop"], "120,160,240,80");
+
+    // Partial pixels round outward; nonsense is refused.
+    let edge = json!({"original": true, "max_w": 4096, "max_h": 4096,
+        "crop": {"x": 0.001, "y": 0.0, "w": 0.002, "h": 2.0}});
+    let (_, h, _) = send(&app, post_json(&format!("/api/docs/{id}/preview"), edge)).await;
+    assert_eq!(h["x-crop"], "0,0,2,320");
+    let bad = json!({"original": true, "max_w": 99, "max_h": 99, "crop": {"x": 0, "y": 0, "w": 0, "h": 1}});
+    let (s, _, _) = send(&app, post_json(&format!("/api/docs/{id}/preview"), bad)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]
@@ -660,7 +745,7 @@ async fn masks_travel_and_show() {
     assert_eq!(s, StatusCode::OK);
     let toml = String::from_utf8(toml).unwrap();
     assert!(
-        toml.contains("[[step.mask.op]]") && toml.contains("version = 3"),
+        toml.contains("[[step.mask.op]]") && toml.contains("version = 4"),
         "{toml}"
     );
     let req = Request::post("/api/recipe/from-toml")
@@ -782,4 +867,446 @@ async fn presets_save_list_replace_delete() {
 
 fn app_without_presets() -> Router {
     app(None, None)
+}
+
+/// A server with settings kept in a temporary home, never the real one.
+fn app_with_settings(home: &Path, root: Option<PathBuf>) -> Router {
+    let store = glitchrx_serve::settings::SettingsStore::open(
+        home.join(".config/glitchrx/config.toml"),
+        home,
+    )
+    .unwrap();
+    router(AppState::new(root, None).with_settings(store))
+}
+
+fn get(uri: &str) -> Request<Body> {
+    Request::get(uri).body(Body::empty()).unwrap()
+}
+
+#[tokio::test]
+async fn settings_choose_the_library_and_export_folders() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join("Pictures/trips")).unwrap();
+    fs::create_dir_all(home.join("Pictures/glitched")).unwrap();
+    fs::create_dir_all(home.join(".hidden")).unwrap();
+    fs::create_dir_all(tmp.path().join("outside")).unwrap();
+    fs::write(
+        home.join("Pictures/trips/a.jpg"),
+        fixture("baseline-444.jpg"),
+    )
+    .unwrap();
+    let app = app_with_settings(&home, None);
+
+    // Nothing chosen yet: no browsing.
+    let (_, _, b) = send(&app, get("/api/config")).await;
+    assert_eq!(json_of(&b)["browse"], false);
+    assert_eq!(json_of(&b)["settings"], true);
+    let (_, _, b) = send(&app, get("/api/settings")).await;
+    assert_eq!(
+        json_of(&b),
+        json!({"library": null, "export": null, "fixed_root": null})
+    );
+
+    // The folder picker lists folders under home, no hidden ones, and
+    // never leaves home.
+    let (s, _, b) = send(&app, get("/api/folders?path=")).await;
+    assert_eq!(s, StatusCode::OK);
+    let names: Vec<_> = json_of(&b)["dirs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["name"].clone())
+        .collect();
+    assert_eq!(names, vec![json!("Pictures")]);
+    let (_, _, b) = send(&app, get("/api/folders?path=Pictures")).await;
+    assert_eq!(json_of(&b)["dirs"].as_array().unwrap().len(), 2);
+    let (s, _, _) = send(&app, get("/api/folders?path=../outside")).await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // Choose the folders: Open now browses the library.
+    let (s, _, b) = send(
+        &app,
+        put_json(
+            "/api/settings",
+            json!({"library": "Pictures", "export": "Pictures/glitched"}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(json_of(&b)["library"], "Pictures");
+    let (_, _, b) = send(&app, get("/api/browse?path=trips")).await;
+    assert_eq!(json_of(&b)["files"][0]["path"], "trips/a.jpg");
+    let file = fs::read_to_string(home.join(".config/glitchrx/config.toml")).unwrap();
+    assert!(file.contains("glitched"), "{file}");
+
+    // Outside home, or not a folder: refused, nothing changed.
+    for bad in ["../outside", "Pictures/trips/a.jpg", "missing"] {
+        let (s, _, _) = send(
+            &app,
+            put_json("/api/settings", json!({"library": bad, "export": null})),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{bad}");
+    }
+    let (_, _, b) = send(&app, get("/api/settings")).await;
+    assert_eq!(json_of(&b)["export"], "Pictures/glitched");
+
+    // --root wins over the library.
+    let fixed = tmp.path().join("fixed");
+    fs::create_dir_all(&fixed).unwrap();
+    let app = app_with_settings(&home, Some(fixed.canonicalize().unwrap()));
+    let (_, _, b) = send(&app, get("/api/settings")).await;
+    assert!(
+        json_of(&b)["fixed_root"]
+            .as_str()
+            .unwrap()
+            .ends_with("fixed")
+    );
+    send(
+        &app,
+        put_json(
+            "/api/settings",
+            json!({"library": "Pictures", "export": null}),
+        ),
+    )
+    .await;
+    let (_, _, b) = send(&app, get("/api/browse?path=")).await;
+    assert_eq!(
+        json_of(&b)["dirs"].as_array().unwrap().len(),
+        0,
+        "still the fixed root"
+    );
+}
+
+#[tokio::test]
+async fn save_as_into_a_folder_never_overwrites() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join("out")).unwrap();
+    let app = app_with_settings(&home, None);
+    let original = fixture("baseline-444.jpg");
+    let doc = upload(&app, "photo.jpg", original.clone()).await;
+    let id = doc["id"].as_str().unwrap();
+
+    let (_, _, b) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/suggest"),
+            json!({"folder": "out", "format": "webp"}),
+        ),
+    )
+    .await;
+    assert_eq!(json_of(&b)["name"], "photo-glitch");
+
+    let req = |name: &str| {
+        json!({"recipe": sample_recipe(), "format": "webp", "lossless": true,
+               "folder": "out", "name": name, "with_recipe": true})
+    };
+    let (s, _, b) = send(
+        &app,
+        post_json(&format!("/api/docs/{id}/save-to"), req("mine")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(
+        json_of(&b)["saved"],
+        json!(["~/out/mine.webp", "~/out/mine.recipe.toml"])
+    );
+    let written = fs::read(home.join("out/mine.webp")).unwrap();
+    assert_eq!(&written[8..12], b"WEBP");
+    // Lossless: exactly the CLI's result, decoded.
+    let mut expect = codec::decode(&original).unwrap();
+    core_recipe().apply(&mut expect.raster).unwrap();
+    let settings = codec::EncodeSettings {
+        lossless: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        written,
+        codec::encode_with(
+            &expect.raster,
+            Format::Webp,
+            expect.icc.as_deref(),
+            &settings
+        )
+        .unwrap()
+    );
+
+    // The same name again: refused, file unchanged; the suggestion moves on.
+    let (s, _, b) = send(
+        &app,
+        post_json(&format!("/api/docs/{id}/save-to"), req("mine.webp")),
+    )
+    .await;
+    assert_eq!(s, StatusCode::CONFLICT, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(fs::read(home.join("out/mine.webp")).unwrap(), written);
+
+    // Names cannot reach other folders or hide.
+    for bad in ["../escape", "sub/x", ".hidden", ""] {
+        let (s, _, _) = send(
+            &app,
+            post_json(&format!("/api/docs/{id}/save-to"), req(bad)),
+        )
+        .await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{bad:?}");
+    }
+    let (s, _, _) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/save-to"),
+            json!({"recipe": sample_recipe(), "format": "png", "folder": "..", "name": "x"}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(!tmp.path().join("x.png").exists());
+}
+
+#[tokio::test]
+async fn webp_and_avif_exports_take_their_settings() {
+    let app = app(None, None);
+    let doc = upload(&app, "photo.jpg", fixture("baseline-444.jpg")).await;
+    let id = doc["id"].as_str().unwrap();
+    assert_eq!(doc["avif_keeps_profile"], true);
+    let export = |v: Value| post_json(&format!("/api/docs/{id}/export"), v);
+    let size = |q: u8| export(json!({"recipe": sample_recipe(), "format": "webp", "quality": q}));
+    let (s, h, small) = send(&app, size(10)).await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(h[header::CONTENT_TYPE], "image/webp");
+    let (_, _, big) = send(&app, size(95)).await;
+    assert!(small.len() < big.len());
+    let (s, h, avif) = send(
+        &app,
+        export(json!({"recipe": sample_recipe(), "format": "avif", "quality": 60, "speed": 10})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(h[header::CONTENT_TYPE], "image/avif");
+    assert!(
+        h[header::CONTENT_DISPOSITION]
+            .to_str()
+            .unwrap()
+            .contains("photo-glitch.avif")
+    );
+    assert_eq!(&avif[4..12], b"ftypavif");
+    let (s, _, _) = send(
+        &app,
+        export(json!({"recipe": sample_recipe(), "format": "avif", "speed": 11})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    let (s, _, _) = send(
+        &app,
+        export(json!({"recipe": sample_recipe(), "format": "jpeg", "quality": 0})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn work_size_runs_the_steps_on_a_smaller_canvas() {
+    let app = app(None, None);
+    let original = fixture("baseline-444.jpg");
+    let doc = upload(&app, "photo.jpg", original.clone()).await;
+    let id = doc["id"].as_str().unwrap();
+    let mut recipe = sample_recipe();
+    recipe["work_size"] = json!(200);
+    let export = |r: Value| {
+        post_json(
+            &format!("/api/docs/{id}/export"),
+            json!({"recipe": r, "format": "png"}),
+        )
+    };
+
+    // Exactly the CLI's run: shrink, bend, write at the work size.
+    let (s, _, b) = send(&app, export(recipe.clone())).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let img = codec::decode(&original).unwrap();
+    let core = Recipe {
+        work_size: Some(200),
+        ..core_recipe()
+    };
+    let want = core.render(&img.raster).unwrap();
+    let got = codec::decode(&b).unwrap().raster;
+    assert_eq!((got.width, got.height), (want.width, want.height));
+    assert_eq!(got.bytes, want.bytes);
+    assert_eq!(want.width.max(want.height), 200);
+
+    // Scaled back: the full size again, in blocks.
+    recipe["scale_back"] = json!(true);
+    let (_, _, b) = send(&app, export(recipe.clone())).await;
+    let big = codec::decode(&b).unwrap().raster;
+    assert_eq!(
+        (big.width, big.height),
+        (img.raster.width, img.raster.height)
+    );
+
+    // The original view shows the canvas too, so before and after match.
+    let (s, h, _) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/preview"),
+            json!({"original": true, "recipe": recipe, "max_w": 4000, "max_h": 4000}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(h["x-width"].to_str().unwrap(), want.width.to_string());
+
+    // Too small is refused with a message.
+    recipe["work_size"] = json!(8);
+    let (s, _, b) = send(&app, export(recipe)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(String::from_utf8_lossy(&b).contains("work_size"));
+}
+
+#[tokio::test]
+async fn crop_comes_before_the_steps() {
+    let app = app(None, None);
+    let original = fixture("baseline-444.jpg");
+    let doc = upload(&app, "photo.jpg", original.clone()).await;
+    let id = doc["id"].as_str().unwrap();
+    let mut recipe = sample_recipe();
+    recipe["crop"] = json!({"x": 0.25, "y": 0.0, "w": 0.5, "h": 0.75});
+    let export = |r: Value| {
+        post_json(
+            &format!("/api/docs/{id}/export"),
+            json!({"recipe": r, "format": "png"}),
+        )
+    };
+
+    // The same bytes as the CLI's run.
+    let (s, _, b) = send(&app, export(recipe.clone())).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let img = codec::decode(&original).unwrap();
+    let core = Recipe {
+        crop: Some(glitchrx_core::recipe::Crop {
+            x: 0.25,
+            y: 0.0,
+            w: 0.5,
+            h: 0.75,
+        }),
+        ..core_recipe()
+    };
+    let want = core.render(&img.raster).unwrap();
+    let got = codec::decode(&b).unwrap().raster;
+    assert_eq!(
+        (got.width, got.height),
+        (img.raster.width / 2, img.raster.height * 3 / 4)
+    );
+    assert_eq!(got.bytes, want.bytes);
+
+    // A crop outside the photo is refused with a message.
+    recipe["crop"] = json!({"x": 0.75, "y": 0.0, "w": 0.5, "h": 1.0});
+    let (s, _, b) = send(&app, export(recipe)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
+    assert!(String::from_utf8_lossy(&b).contains("crop"));
+}
+
+#[tokio::test]
+async fn saved_recipes_are_listed_read_and_offered_for_their_photo() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join("out")).unwrap();
+    let app = app_with_settings(&home, None);
+    let (s, _, _) = send(
+        &app,
+        put_json("/api/settings", json!({"library": null, "export": "out"})),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let original = fixture("baseline-444.jpg");
+    let doc = upload(&app, "IMG_7.jpg", original.clone()).await;
+    assert_eq!(doc["recipes"], json!([]));
+    let id = doc["id"].as_str().unwrap();
+
+    // Saved under a name of its own: the recipe names the photo.
+    let mut recipe = sample_recipe();
+    recipe["source"] = json!("../../somewhere/IMG_7.jpg");
+    let (s, _, b) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/save-to"),
+            json!({"recipe": recipe, "format": "png", "folder": "out",
+                   "name": "beach", "with_recipe": true}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let text = fs::read_to_string(home.join("out/beach.recipe.toml")).unwrap();
+    assert!(text.contains("source = \"IMG_7.jpg\""), "{text}");
+    // An older recipe, matched by its export name; and one for another photo.
+    fs::write(
+        home.join("out/IMG_7-glitch-2.recipe.toml"),
+        text.replace("source = \"IMG_7.jpg\"\n", ""),
+    )
+    .unwrap();
+    fs::write(
+        home.join("out/other.recipe.toml"),
+        text.replace("IMG_7.jpg", "IMG_8.jpg"),
+    )
+    .unwrap();
+
+    // The same photo opened again: both of its recipes are offered.
+    let again = upload(&app, "IMG_7.jpg", original).await;
+    let mut names: Vec<_> = again["recipes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["name"].as_str().unwrap().to_string())
+        .collect();
+    names.sort();
+    assert_eq!(names, ["IMG_7-glitch-2.recipe.toml", "beach.recipe.toml"]);
+
+    // All three are listed, and one reads back as the GUI's recipe.
+    let (_, _, b) = send(&app, get("/api/recipes")).await;
+    assert_eq!(json_of(&b).as_array().unwrap().len(), 3);
+    let (s, _, b) = send(&app, get("/api/recipe?place=export&path=beach.recipe.toml")).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(json_of(&b)["steps"][1]["effect"], "shift");
+    assert_eq!(json_of(&b)["steps"][1]["seed"], "42");
+    assert_eq!(json_of(&b)["source"], "IMG_7.jpg");
+
+    // Nothing else is read: other files, other folders, unset folders.
+    fs::write(home.join("out/notes.txt"), "secret").unwrap();
+    for bad in [
+        "place=export&path=notes.txt",
+        "place=export&path=../.config/glitchrx/config.toml",
+        "place=library&path=beach.recipe.toml",
+    ] {
+        let (s, _, _) = send(&app, get(&format!("/api/recipe?{bad}"))).await;
+        assert_eq!(s, StatusCode::NOT_FOUND, "{bad}");
+    }
+}
+
+#[tokio::test]
+async fn histogram_of_the_picture_reaching_a_step() {
+    let app = app(None, None);
+    let doc = upload(&app, "photo.jpg", fixture("baseline-444.jpg")).await;
+    let id = doc["id"].as_str().unwrap();
+    let ask = |step: usize| {
+        post_json(
+            &format!("/api/docs/{id}/histogram"),
+            json!({"recipe": sample_recipe(), "step": step, "max_w": 120, "max_h": 120}),
+        )
+    };
+    let (s, _, b) = send(&app, ask(0)).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let h0 = json_of(&b);
+    // 480 x 320 fitted into 120 x 120.
+    let pixels = 120 * 80;
+    for ch in ["red", "green", "blue", "luma"] {
+        let counts = h0[ch].as_array().unwrap();
+        assert_eq!(counts.len(), 256);
+        assert_eq!(
+            counts.iter().map(|v| v.as_u64().unwrap()).sum::<u64>(),
+            pixels
+        );
+    }
+    // After the first step the picture differs; past the last step is refused.
+    let (_, _, b) = send(&app, ask(2)).await;
+    assert_ne!(json_of(&b)["red"], h0["red"]);
+    let (s, _, _) = send(&app, ask(3)).await;
+    assert_eq!(s, StatusCode::BAD_REQUEST);
 }

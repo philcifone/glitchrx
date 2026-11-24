@@ -5,9 +5,13 @@ import type {
   DocInfo,
   EffectInfo,
   ExportFormat,
+  ExportOptions,
+  FolderListing,
+  FolderSettings,
   Listing,
   PresetInfo,
   RecipeDto,
+  SavedRecipe,
   ServerConfig,
 } from './types';
 
@@ -81,6 +85,8 @@ export interface PreviewResult {
   width: number;
   height: number;
   ms: number;
+  /** For a crop: the full-resolution pixels it shows (x, y, w, h). */
+  crop: { x: number; y: number; w: number; h: number } | null;
 }
 
 /**
@@ -88,17 +94,31 @@ export interface PreviewResult {
  * `exact`, the server bends the full-resolution photo and then shrinks it,
  * which is exactly the export but slower. Resolves to null when the server
  * dropped it for a newer request; throws TooHeavyError over the budget.
+ * With `crop` (fractions of the photo), only that part, cut from the
+ * full-resolution render (or the original): the zoomed view's patch.
  */
+function parseCrop(v: string | null): PreviewResult['crop'] {
+  const n = (v ?? '').split(',').map(Number);
+  return n.length === 4 && n.every(Number.isFinite) ? { x: n[0], y: n[1], w: n[2], h: n[3] } : null;
+}
+
 export async function preview(
   docId: string,
-  recipe: RecipeDto | null,
+  recipe: RecipeDto,
   maxW: number,
   maxH: number,
   exact = false,
+  crop?: { x: number; y: number; w: number; h: number },
+  original = false,
 ): Promise<PreviewResult | null> {
-  const body = recipe
-    ? { recipe, max_w: maxW, max_h: maxH, exact }
-    : { original: true, max_w: maxW, max_h: maxH };
+  // The original comes with the recipe too: its work size frames it.
+  const body = {
+    recipe,
+    ...(original ? { original: true } : { exact }),
+    max_w: maxW,
+    max_h: maxH,
+    ...(crop ? { crop } : {}),
+  };
   const res = await postJson(`/api/docs/${docId}/preview`, body);
   if (res.status === 204) return null;
   if (res.headers.get('x-too-heavy')) {
@@ -117,6 +137,7 @@ export async function preview(
     width: Number(h.get('x-width') ?? 0),
     height: Number(h.get('x-height') ?? 0),
     ms: Number(h.get('x-render-ms') ?? 0),
+    crop: parseCrop(h.get('x-crop')),
   };
 }
 
@@ -135,6 +156,18 @@ export async function maskView(
   const res = await postJson(`/api/docs/${docId}/mask`, { recipe, step, max_w: maxW, max_h: maxH, tint });
   if (!res.ok) await fail(res);
   return res.blob();
+}
+
+/** Counts per level (256 each) of the picture as it reaches a step. */
+export interface Histogram {
+  red: number[];
+  green: number[];
+  blue: number[];
+  luma: number[];
+}
+
+export async function histogram(docId: string, recipe: RecipeDto, step: number, maxW: number, maxH: number): Promise<Histogram> {
+  return json<Histogram>(await postJson(`/api/docs/${docId}/histogram`, { recipe, step, max_w: maxW, max_h: maxH }));
 }
 
 const presetUrl = (name: string) => `/api/presets/${encodeURIComponent(name)}`;
@@ -162,9 +195,9 @@ export async function deletePreset(name: string): Promise<void> {
 export async function exportFile(
   docId: string,
   recipe: RecipeDto,
-  format: ExportFormat,
+  opts: ExportOptions,
 ): Promise<{ blob: Blob; name: string }> {
-  const res = await postJson(`/api/docs/${docId}/export`, { recipe, format });
+  const res = await postJson(`/api/docs/${docId}/export`, { recipe, ...opts });
   if (!res.ok) await fail(res);
   return { blob: await res.blob(), name: filenameOf(res) ?? 'glitch' };
 }
@@ -173,16 +206,49 @@ export async function exportFile(
 export async function saveOnServer(
   docId: string,
   recipe: RecipeDto,
-  format: ExportFormat,
+  opts: ExportOptions,
   withRecipe: boolean,
 ): Promise<string[]> {
   const res = await postJson(`/api/docs/${docId}/save`, {
     recipe,
-    format,
+    ...opts,
     with_recipe: withRecipe,
   });
   return (await json<{ saved: string[] }>(res)).saved;
 }
+
+/** Save As into a folder under the server's home folder; refuses to overwrite (409). */
+export async function saveTo(
+  docId: string,
+  recipe: RecipeDto,
+  opts: ExportOptions,
+  folder: string,
+  name: string,
+  withRecipe: boolean,
+): Promise<string[]> {
+  const res = await postJson(`/api/docs/${docId}/save-to`, { recipe, ...opts, folder, name, with_recipe: withRecipe });
+  return (await json<{ saved: string[] }>(res)).saved;
+}
+
+/** The next free -glitch name for this photo in a folder (no extension). */
+export async function suggestName(docId: string, folder: string, format: ExportFormat): Promise<string> {
+  const res = await postJson(`/api/docs/${docId}/suggest`, { folder, format });
+  return (await json<{ name: string }>(res)).name;
+}
+
+export const getSettings = async () => json<FolderSettings>(await fetch('/api/settings'));
+
+export async function putSettings(s: FolderSettings): Promise<FolderSettings> {
+  const res = await fetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ library: s.library, export: s.export }),
+  });
+  return json<FolderSettings>(res);
+}
+
+export const folders = async (path: string) =>
+  json<FolderListing>(await fetch(`/api/folders?path=${encodeURIComponent(path)}`));
 
 /** Desktop app: what Save as wrote, or skipped (an existing recipe file). */
 export interface SavedAs {
@@ -201,10 +267,10 @@ export async function desktopOpen(): Promise<DocInfo | null> {
 export async function saveAs(
   docId: string,
   recipe: RecipeDto,
-  format: ExportFormat,
+  opts: ExportOptions,
   withRecipe: boolean,
 ): Promise<SavedAs | null> {
-  const res = await postJson(`/api/docs/${docId}/save-as`, { recipe, format, with_recipe: withRecipe });
+  const res = await postJson(`/api/docs/${docId}/save-as`, { recipe, ...opts, with_recipe: withRecipe });
   if (res.status === 204) return null;
   return json<SavedAs>(res);
 }
@@ -213,6 +279,17 @@ export async function recipeToToml(recipe: RecipeDto): Promise<string> {
   const res = await postJson('/api/recipe/to-toml', recipe);
   if (!res.ok) await fail(res);
   return res.text();
+}
+
+/** Recipes saved in the library and export folders, newest first. */
+export async function listRecipes(): Promise<SavedRecipe[]> {
+  return json<SavedRecipe[]>(await fetch('/api/recipes'));
+}
+
+/** Read one of them. */
+export async function readRecipe(r: SavedRecipe): Promise<RecipeDto> {
+  const q = new URLSearchParams({ place: r.place, path: r.path });
+  return json<RecipeDto>(await fetch(`/api/recipe?${q}`));
 }
 
 export async function recipeFromToml(text: string): Promise<RecipeDto> {

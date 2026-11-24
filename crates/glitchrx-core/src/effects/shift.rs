@@ -1,6 +1,6 @@
 //! `shift`: rotate each window, like cutting its end and pasting it first.
 
-use super::{Effect, EffectInfo, Group, PHASE, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Group, PHASE, PlacementDefaults, Upgrade, Window};
 use crate::error::Result;
 use crate::params::{Bound, Kind, ParamSpec, Params};
 use crate::rng::Rng;
@@ -8,7 +8,13 @@ use crate::rng::Rng;
 pub static INFO: EffectInfo = EffectInfo {
     id: "shift",
     group: Group::Data,
-    version: 1,
+    version: 2,
+    // Version 1 started with bands; now every effect starts on the whole
+    // picture (D-56).
+    upgrades: &[Upgrade {
+        to: 2,
+        fill: &[("hits", "6"), ("len", "3%")],
+    }],
     audacity: "cut and paste",
     summary: "Rotate each window forward by `by`; what falls off the end wraps to the start.",
     details: "A fraction of a row slides a band of the picture sideways. `phase` adds bytes \
@@ -26,7 +32,7 @@ pub static INFO: EffectInfo = EffectInfo {
     ],
     placement: PlacementDefaults {
         region: "0%:100%",
-        hits: "6",
+        hits: "0",
         len: "3%",
     },
     random_within: false,

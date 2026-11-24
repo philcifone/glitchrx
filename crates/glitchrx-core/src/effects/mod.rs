@@ -27,13 +27,18 @@ use crate::params::{Kind, ParamSpec, Params, Units};
 use crate::rng::Rng;
 use crate::samples::Encoding;
 
+mod adjust;
 mod amplify;
 mod backwards;
+mod balance;
 mod bitcrush;
+mod curves;
 mod delay;
 mod distort;
 mod echo;
+mod hsl;
 mod invert;
+mod levels;
 mod phaser;
 mod pixelsort;
 mod reverb;
@@ -130,6 +135,18 @@ pub struct PlacementDefaults {
     pub len: &'static str,
 }
 
+/// How a step saved with an older version of an effect becomes current,
+/// for changes that only move a default (D-56). Recipes do not write
+/// defaults out, so a step that relied on the old default gets it written
+/// in: the picture it makes stays the same.
+#[derive(Debug, Clone, Copy)]
+pub struct Upgrade {
+    /// The version this upgrade leads to; it applies to older steps.
+    pub to: u32,
+    /// Parameters to fill in when the step does not give them.
+    pub fill: &'static [(&'static str, &'static str)],
+}
+
 /// Which section of the effect picker an effect belongs to, and how it sees
 /// the raster.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +158,8 @@ pub enum Group {
     /// Works on whole RGB pixels in two dimensions (pixel sorting); the
     /// sample encoding and channels do not apply.
     Pixel,
+    /// Photo adjustments (levels, curves, ...): whole pixels, not glitches.
+    Adjust,
 }
 
 impl Group {
@@ -149,7 +168,14 @@ impl Group {
             Group::Audio => "audio",
             Group::Data => "data",
             Group::Pixel => "pixel",
+            Group::Adjust => "adjust",
         }
+    }
+
+    /// Effects that see whole RGB pixels, for which encoding and channels
+    /// do not apply.
+    pub fn on_pixels(self) -> bool {
+        matches!(self, Group::Pixel | Group::Adjust)
     }
 }
 
@@ -161,6 +187,9 @@ pub struct EffectInfo {
     /// seed changes, so old recipes are refused instead of silently
     /// replaying differently.
     pub version: u32,
+    /// How steps from older versions become current, oldest first. A
+    /// version not reachable this way is refused.
+    pub upgrades: &'static [Upgrade],
     /// The Audacity effect this one follows.
     pub audacity: &'static str,
     pub summary: &'static str,
@@ -225,6 +254,10 @@ pub static REGISTRY: &[&EffectInfo] = &[
     &distort::INFO,
     &speed::INFO,
     &pixelsort::INFO,
+    &levels::INFO,
+    &curves::INFO,
+    &hsl::INFO,
+    &balance::INFO,
 ];
 
 /// Find an effect by id.
@@ -290,7 +323,7 @@ pub fn markdown_reference() -> String {
             "## {}\n\n{}\n\n{}\n\n",
             e.id, e.summary, e.details
         ));
-        if e.group == Group::Pixel {
+        if e.group.on_pixels() {
             s.push_str(&format!("Version: {}.\n\n", e.version));
         } else {
             s.push_str(&format!(
@@ -302,6 +335,13 @@ pub fn markdown_reference() -> String {
             s.push_str(
                 "A pixel effect: it works on whole RGB pixels, so the encoding and channels \
                  do not apply.\n\n",
+            );
+        }
+        if e.group == Group::Adjust {
+            s.push_str(
+                "An adjustment: a photo tool rather than a glitch. It works on whole RGB \
+                 pixels, so the encoding and channels do not apply; masks, opacity and \
+                 placement do, as for any step.\n\n",
             );
         }
         if e.exact_preview {

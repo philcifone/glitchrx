@@ -1,7 +1,7 @@
 //! `shuffle`: cut blocks out of each window and paste them back in a
 //! random order.
 
-use super::{Effect, EffectInfo, Group, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Group, PlacementDefaults, Upgrade, Window};
 use crate::error::Result;
 use crate::params::{Bound, Kind, ParamSpec, Params};
 use crate::rng::Rng;
@@ -9,7 +9,13 @@ use crate::rng::Rng;
 pub static INFO: EffectInfo = EffectInfo {
     id: "shuffle",
     group: Group::Data,
-    version: 1,
+    version: 2,
+    // Version 1 started with bands; now every effect starts on the whole
+    // picture (D-56).
+    upgrades: &[Upgrade {
+        to: 2,
+        fill: &[("hits", "4"), ("len", "10%")],
+    }],
     audacity: "cut and paste",
     summary: "Split each window into blocks and swap a share of them at random.",
     details: "Blocks of whole rows rearrange bands of the picture; blocks of part of a row \
@@ -31,7 +37,7 @@ pub static INFO: EffectInfo = EffectInfo {
     ],
     placement: PlacementDefaults {
         region: "0%:100%",
-        hits: "4",
+        hits: "0",
         len: "10%",
     },
     random_within: true,

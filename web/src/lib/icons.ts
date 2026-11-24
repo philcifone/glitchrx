@@ -21,6 +21,10 @@ import Shell from '@lucide/svelte/icons/shell';
 import Rabbit from '@lucide/svelte/icons/rabbit';
 import ArrowDownWideNarrow from '@lucide/svelte/icons/arrow-down-wide-narrow';
 import Sparkles from '@lucide/svelte/icons/sparkles';
+import ChartColumn from '@lucide/svelte/icons/chart-column';
+import Spline from '@lucide/svelte/icons/spline';
+import Palette from '@lucide/svelte/icons/palette';
+import SunMoon from '@lucide/svelte/icons/sun-moon';
 
 export type IconComponent = typeof Mountain;
 
@@ -43,6 +47,13 @@ const ICONS: Record<string, IconComponent> = {
   speed: Rabbit,
   // Phase 3: the sort glyph, wide to narrow, as pixels settle by brightness.
   pixelsort: ArrowDownWideNarrow,
+  // Phase 5c adjustments: more literal, as photo tools are: a histogram for
+  // levels, a spline for curves, a palette for hue and saturation, and sun
+  // and moon for tinting highlights and shadows.
+  levels: ChartColumn,
+  curves: Spline,
+  hsl: Palette,
+  balance: SunMoon,
 };
 
 /** The effect's icon; effects added later fall back to sparkles. */

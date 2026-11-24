@@ -98,7 +98,28 @@ fn output_extension_decides_the_format() {
         )),
         2
     );
-    assert_eq!(code(&run(d.path(), &["--echo", "photo.jpg", "x.webp"])), 2);
+    assert_eq!(code(&run(d.path(), &["--echo", "photo.jpg", "x.gif"])), 2);
+
+    // WebP and AVIF are written (not read), with their settings.
+    let webp = |name: &str, extra: &[&str]| {
+        let mut args = vec!["--echo", "--seed", "7", "photo.jpg", name];
+        args.extend_from_slice(extra);
+        let o = run(d.path(), &args);
+        assert_eq!(code(&o), 0, "{name}: {}", stderr(&o));
+        fs::read(d.path().join(name)).unwrap()
+    };
+    let lossy = webp("d.webp", &["--quality", "20"]);
+    let lossless = webp("e.webp", &["--lossless"]);
+    assert_eq!(&lossy[8..12], b"WEBP");
+    assert!(lossy.len() < lossless.len());
+    assert_eq!(webp("f.webp", &["--lossless"]), lossless, "deterministic");
+    let avif = webp("g.avif", &["--avif-speed", "10"]);
+    assert_eq!(&avif[4..12], b"ftypavif");
+    // Out of range settings are usage errors.
+    for bad in [["--quality", "0"], ["--avif-speed", "11"]] {
+        let o = run(d.path(), &["--echo", "photo.jpg", "h.avif", bad[0], bad[1]]);
+        assert_eq!(code(&o), 2, "{bad:?}");
+    }
 }
 
 #[test]
@@ -155,7 +176,7 @@ fn recipe_save_and_replay_is_identical() {
         &[
             "--reverb",
             "--stutter",
-            "chunk=32,encoding=s16be",
+            "chunk=32,encoding=s16be,hits=3",
             "--encoding",
             "ulaw",
             "--save-recipe",
@@ -309,4 +330,87 @@ fn info_and_list() {
             "{e} missing from --list"
         );
     }
+}
+
+#[test]
+fn work_size_shrinks_or_scales_back_and_is_saved_in_the_recipe() {
+    let d = workdir();
+    let size = |name: &str| {
+        let img = codec::decode(&fs::read(d.path().join(name)).unwrap()).unwrap();
+        (img.raster.width, img.raster.height)
+    };
+    let o = run(
+        d.path(),
+        &[
+            "--invert",
+            "--work-size",
+            "120",
+            "--save-recipe",
+            "photo.jpg",
+            "small.png",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert_eq!(size("small.png"), (120, 80));
+    let recipe = fs::read_to_string(d.path().join("small.recipe.toml")).unwrap();
+    assert!(recipe.contains("work_size = 120"), "{recipe}");
+
+    let o = run(
+        d.path(),
+        &[
+            "--invert",
+            "--work-size",
+            "120",
+            "--scale-back",
+            "photo.jpg",
+            "big.png",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert_eq!(size("big.png"), (480, 320));
+
+    // Replaying the recipe gives the same file.
+    let o = run(
+        d.path(),
+        &["--recipe", "small.recipe.toml", "photo.jpg", "again.png"],
+    );
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    assert_eq!(
+        fs::read(d.path().join("again.png")).unwrap(),
+        fs::read(d.path().join("small.png")).unwrap()
+    );
+    assert_eq!(
+        code(&run(
+            d.path(),
+            &["--invert", "--work-size", "10", "photo.jpg"]
+        )),
+        2
+    );
+}
+
+#[test]
+fn crop_keeps_part_of_the_photo_and_is_saved_in_the_recipe() {
+    let d = workdir();
+    let o = run(
+        d.path(),
+        &[
+            "--invert",
+            "--crop",
+            "0.25,0,0.5,0.5",
+            "--save-recipe",
+            "photo.jpg",
+            "crop.png",
+        ],
+    );
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    let img = codec::decode(&fs::read(d.path().join("crop.png")).unwrap()).unwrap();
+    assert_eq!((img.raster.width, img.raster.height), (240, 160));
+    let recipe = fs::read_to_string(d.path().join("crop.recipe.toml")).unwrap();
+    assert!(recipe.contains("[crop]"), "{recipe}");
+    let o = run(
+        d.path(),
+        &["--invert", "--crop", "0.75,0,0.5,1", "photo.jpg", "bad.png"],
+    );
+    assert_ne!(code(&o), 0);
+    assert!(stderr(&o).contains("crop"), "{}", stderr(&o));
 }

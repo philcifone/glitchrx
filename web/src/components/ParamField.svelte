@@ -2,15 +2,20 @@
   // Editor for one effect parameter, chosen by its kind:
   //   int / float  slider (log scale for wide ranges) + exact number
   //   choice       dropdown
+  //   set          a row of toggles (colour dots for colour ranges)
   //   size         text (rows, px, % or bytes) + log slider for rows and %
   //   region       one two-handle slider while both ends are percents, + text;
   //                dragging draws the band on the preview
+  //   curve        a curve editor (CurveField) + text
   // Sliders update the preview live and record one history entry on release.
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
   import { app } from '../lib/app.svelte';
-  import { SLIDER_STEPS, percentScale, rowsScale, sliderScale } from '../lib/slider';
+  import { percentScale, rowsScale, sliderScale } from '../lib/slider';
   import type { ParamInfo } from '../lib/types';
   import DualRange from './DualRange.svelte';
+  import RangeInput from './RangeInput.svelte';
+  import CurveField from './CurveField.svelte';
+  import SetField from './SetField.svelte';
 
   let { uid, spec, value }: { uid: string; spec: ParamInfo; value: string | undefined } = $props();
 
@@ -52,11 +57,23 @@
   const sizeSlider = $derived.by(() => {
     if (spec.kind !== 'size') return null;
     const p = pct(text);
-    if (p !== null) return { scale: percentScale, value: p, unit: '%' };
+    // The default gets a tick only when it is in the same unit.
+    if (p !== null) {
+      const d = pct(spec.default);
+      return { scale: percentScale, value: p, unit: '%', dflt: d === null ? null : Math.round(percentScale.toSlider(d)) };
+    }
     const r = rows(text);
-    if (r !== null) return { scale: rowsScale, value: r, unit: 'rows' };
+    if (r !== null) {
+      const d = rows(spec.default);
+      return { scale: rowsScale, value: r, unit: 'rows', dflt: d === null ? null : Math.round(rowsScale.toSlider(d)) };
+    }
     return null;
   });
+
+  /** Live value from a slider position; the default exactly when on its tick. */
+  function slide(p: number, dflt: number | null, value: () => string) {
+    live(p === dflt ? spec.default : value());
+  }
 
   // Region: START:END with both ends in percent gets two sliders.
   const region = $derived.by(() => {
@@ -83,25 +100,29 @@
   <div class="top">
     <label for={id} title={spec.help}>{spec.name}</label>
     <span class="help dim" title={spec.help}>{spec.help}</span>
-    {#if overridden}
-      <button class="icon reset" onclick={() => set(null)} title="Back to the default ({spec.default})" aria-label="Reset {spec.name}">
-        <RotateCcw size={14} strokeWidth={2} />
-      </button>
-    {/if}
+    <!-- Always there, so the row never changes height under a finger that
+         is dragging; at the default it is simply dimmed. -->
+    <button
+      class="icon reset"
+      onclick={() => set(null)}
+      disabled={!overridden}
+      title="Back to the default ({spec.default})"
+      aria-label="Reset {spec.name}"
+    >
+      <RotateCcw size={14} strokeWidth={2} />
+    </button>
   </div>
 
   {#if numeric && scale}
+    {@const dflt = Math.round(scale.toSlider(Number(spec.default)))}
     <div class="ctl">
-      <input
-        type="range"
-        min="0"
-        max={SLIDER_STEPS}
-        step="1"
-        value={scale.toSlider(Number(text))}
-        style:--pct="{(scale.toSlider(Number(text)) / SLIDER_STEPS) * 100}%"
-        oninput={(e) => live(String(scale.fromSlider(Number(e.currentTarget.value))))}
+      <RangeInput
+        pos={scale.toSlider(Number(text))}
+        defaultPos={dflt}
+        label="{spec.name} slider"
+        oninput={(p) => slide(p, dflt, () => String(scale.fromSlider(p)))}
         onchange={() => app.commit()}
-        aria-label="{spec.name} slider"
+        onreset={() => set(null)}
       />
       <input
         {id}
@@ -118,20 +139,19 @@
     <select {id} value={text} onchange={(e) => set(e.currentTarget.value)}>
       {#each spec.choices ?? [] as c (c)}<option value={c}>{c}</option>{/each}
     </select>
+  {:else if spec.kind === 'set'}
+    <SetField {id} options={spec.choices ?? []} {text} onchange={(v) => set(v)} />
   {:else if spec.kind === 'size'}
     <div class="ctl">
       {#if sizeSlider}
         {@const sl = sizeSlider}
-        <input
-          type="range"
-          min="0"
-          max={SLIDER_STEPS}
-          step="1"
-          value={sl.scale.toSlider(sl.value)}
-          style:--pct="{(sl.scale.toSlider(sl.value) / SLIDER_STEPS) * 100}%"
-          oninput={(e) => live(`${sl.scale.fromSlider(Number(e.currentTarget.value))}${sl.unit}`)}
+        <RangeInput
+          pos={sl.scale.toSlider(sl.value)}
+          defaultPos={sl.dflt}
+          label="{spec.name} slider"
+          oninput={(p) => slide(p, sl.dflt, () => `${sl.scale.fromSlider(p)}${sl.unit}`)}
           onchange={() => app.commit()}
-          aria-label="{spec.name} slider"
+          onreset={() => set(null)}
         />
       {/if}
       <input
@@ -144,6 +164,18 @@
         autocomplete="off"
       />
     </div>
+  {:else if spec.kind === 'curve'}
+    <CurveField {uid} {text} oninput={live} onchange={(v) => set(v)} />
+    <input
+      {id}
+      class="num wide"
+      type="text"
+      value={text}
+      onchange={(e) => commitField(e.currentTarget)}
+      spellcheck="false"
+      autocomplete="off"
+      aria-label="{spec.name} as text"
+    />
   {:else if spec.kind === 'region'}
     <div class="ctl">
       {#if region}
@@ -199,6 +231,10 @@
     text-overflow: ellipsis;
   }
 
+  .reset:disabled {
+    opacity: 0.3;
+  }
+
   .reset {
     min-height: 24px;
     min-width: 24px;
@@ -216,6 +252,13 @@
     width: 8ch;
     flex: none;
     text-align: right;
+  }
+
+  /* A curve's text form, for exact or pasted values. */
+  .num.wide[type='text'] {
+    width: 100%;
+    text-align: left;
+    font-size: 0.8rem;
   }
 
   .num[type='text'] {

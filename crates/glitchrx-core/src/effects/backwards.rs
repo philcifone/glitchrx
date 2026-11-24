@@ -1,6 +1,6 @@
 //! `backwards`: Audacity's Reverse.
 
-use super::{Effect, EffectInfo, Group, PlacementDefaults, Window};
+use super::{Effect, EffectInfo, Group, PlacementDefaults, Upgrade, Window};
 use crate::error::Result;
 use crate::params::Params;
 use crate::rng::Rng;
@@ -8,7 +8,13 @@ use crate::rng::Rng;
 pub static INFO: EffectInfo = EffectInfo {
     id: "backwards",
     group: Group::Data,
-    version: 1,
+    version: 2,
+    // Version 1 started with bands; now every effect starts on the whole
+    // picture (D-56).
+    upgrades: &[Upgrade {
+        to: 2,
+        fill: &[("hits", "6"), ("len", "2%")],
+    }],
     audacity: "Reverse",
     summary: "Play each window backwards.",
     details: "Reverses the order of the samples (not the bytes inside a sample). A window \
@@ -17,7 +23,7 @@ pub static INFO: EffectInfo = EffectInfo {
     params: &[],
     placement: PlacementDefaults {
         region: "0%:100%",
-        hits: "6",
+        hits: "0",
         len: "2%",
     },
     random_within: false,

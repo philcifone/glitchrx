@@ -9,6 +9,7 @@ pub static INFO: EffectInfo = EffectInfo {
     id: "delay",
     group: Group::Audio,
     version: 1,
+    upgrades: &[],
     audacity: "Delay",
     summary: "A fixed number of repeats of the input, each `decay` times quieter than the last.",
     details: "`y[n] = x[n] + decay * x[n - d] + decay^2 * x[n - 2d] + ...` for `taps` repeats. \

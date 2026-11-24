@@ -1,6 +1,6 @@
 //! Audio building blocks shared by the effects: delay lines, Freeverb's comb
 //! and allpass filters, a slow sweep oscillator (LFO), and deterministic
-//! `exp` and sine.
+//! `exp`, `ln`, `pow` and sine.
 //!
 //! Everything here uses only `+ - * /` and comparisons on `f64` (SPEC D-25).
 //! The platform's `exp`, `sin` and `pow` may differ in the last bit between
@@ -28,6 +28,58 @@ pub fn exp(x: f64) -> f64 {
     let n = n as i64;
     let two_n = f64::from_bits(((n + 1023) as u64) << 52);
     sum * two_n
+}
+
+/// Natural logarithm from basic operations, for `x > 0` (0 and below give
+/// negative infinity). Split `x = m * 2^e` with `m` in [1, 2) by reading
+/// the float's bits, then `ln m = 2 atanh(z)` with `z = (m - 1) / (m + 1)`,
+/// at most 1/3, whose odd series `z + z^3/3 + z^5/5 + ...` is below f64
+/// precision after 30 terms.
+pub fn ln(x: f64) -> f64 {
+    const LN2: f64 = std::f64::consts::LN_2;
+    if x.is_nan() {
+        return x;
+    }
+    if x <= 0.0 {
+        return f64::NEG_INFINITY;
+    }
+    if x.is_infinite() {
+        return x;
+    }
+    // Subnormals: scale into the normal range first (exactly, by 2^54).
+    let (x, extra) = if x < f64::MIN_POSITIVE {
+        (x * 18014398509481984.0, -54i64)
+    } else {
+        (x, 0)
+    };
+    let bits = x.to_bits();
+    let e = ((bits >> 52) & 0x7ff) as i64 - 1023 + extra;
+    let m = f64::from_bits((bits & 0x000f_ffff_ffff_ffff) | (1023u64 << 52));
+    let z = (m - 1.0) / (m + 1.0);
+    let z2 = z * z;
+    let mut term = z;
+    let mut sum = 0.0;
+    for k in 0..30 {
+        sum += term / (2 * k + 1) as f64;
+        term *= z2;
+    }
+    e as f64 * LN2 + 2.0 * sum
+}
+
+/// `x^y` for `x >= 0`, as `exp(y ln x)`; `0^y` is 0 for `y > 0` and 1 for
+/// `y = 0`.
+pub fn pow(x: f64, y: f64) -> f64 {
+    if y == 0.0 {
+        return 1.0;
+    }
+    // Exact where it is easy to be: exp(ln x) is a hair off x.
+    if y == 1.0 {
+        return x;
+    }
+    if x <= 0.0 {
+        return 0.0;
+    }
+    exp(y * ln(x))
 }
 
 /// `sin(2 pi t)`, with `t` in turns (1.0 is a full circle), from basic
@@ -192,6 +244,36 @@ impl Allpass {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ln_and_pow_match_the_platform_closely() {
+        for &x in &[
+            1e-300, 1e-9, 0.001, 0.1, 0.5, 1.0, 1.5, 2.0, 3.0, 10.0, 255.0, 1e9, 1e300,
+        ] {
+            let (ours, std) = (ln(x), x.ln());
+            assert!(
+                (ours - std).abs() <= 1e-14 * std.abs().max(1.0),
+                "ln({x}): {ours} vs {std}"
+            );
+        }
+        assert_eq!(ln(1.0), 0.0);
+        assert_eq!(ln(0.0), f64::NEG_INFINITY);
+        for &(x, y) in &[
+            (0.5, 2.2),
+            (0.25, 0.5),
+            (0.9, 1.0 / 2.2),
+            (2.0, 10.0),
+            (0.01, 3.0),
+        ] {
+            let (ours, std) = (pow(x, y), x.powf(y));
+            assert!(
+                (ours - std).abs() <= 1e-13 * std.max(1e-300),
+                "pow({x}, {y}): {ours} vs {std}"
+            );
+        }
+        assert_eq!(pow(0.0, 2.0), 0.0);
+        assert_eq!(pow(0.0, 0.0), 1.0);
+    }
 
     #[test]
     fn exp_matches_std_closely() {

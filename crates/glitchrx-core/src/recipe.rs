@@ -8,9 +8,19 @@
 //!
 //! ```toml
 //! format = "glitcharaxia-recipe"
-//! version = 3
+//! version = 4
 //! encoding = "u8"     # how steps read bytes as samples; a step may override
 //! channels = 1
+//! work_size = 2048    # optional: steps run on a copy this long (see below)
+//! scale_back = true   # optional: and the result is enlarged to full size
+//!
+//! source = "IMG_1234.jpg"   # optional: the photo it was made on (a name only)
+//!
+//! [crop]              # optional: the part of the photo kept (see below)
+//! x = 0.1             # left edge, share of the width
+//! y = 0.0
+//! w = 0.8             # share of the width
+//! h = 1.0
 //!
 //! [[step]]
 //! effect = "echo"
@@ -31,14 +41,30 @@
 //! feather = 0.01
 //! ```
 //!
-//! Version 3 added `opacity` and `mask`; version 2 recipes load unchanged
-//! (they have neither) and are written back as version 3.
+//! Version 3 added `opacity` and `mask`; version 4 added the canvas the
+//! steps run on (`work_size`, `scale_back`). Older recipes load unchanged
+//! (they have none of it) and are written back as version 4. A build that
+//! only knows version 3 refuses version 4, rather than ignore the work
+//! size and quietly give a different picture.
+//!
+//! **The canvas.** Before the steps run, the picture can be shrunk so its
+//! longer side is `work_size` pixels (never enlarged). Steps then run on
+//! that copy: faster, and coarser glitch texture, since a pixel-level
+//! effect covers more of the picture. The file is written at that size,
+//! or with `scale_back`, enlarged to the original size with hard pixel
+//! edges (nearest neighbour), so the coarse texture stays crisp.
+//!
+//! **Crop** comes first: the canvas is made from the cropped photo, so
+//! the work size, the steps, their masks and positions, and `scale_back`
+//! all measure against the crop, and the file is the crop's size. The
+//! crop is kept as shares of the photo, which turn into whole pixels by
+//! rounding (`crop_rect`).
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::effects::{self, Effect, EffectInfo, Group, Window};
+use crate::effects::{self, Effect, EffectInfo, Window};
 use crate::error::{Error, Result};
 use crate::mask::{self, Mask};
 use crate::params::{Params, Units, parse_list};
@@ -50,7 +76,7 @@ use crate::samples::Encoding;
 /// Magic string identifying a recipe file.
 pub const FORMAT: &str = "glitcharaxia-recipe";
 /// Recipe file format version.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 
 /// Step keys that are not effect parameters: per-step overrides of the
 /// recipe's sample format, and how strongly the result is blended in.
@@ -163,6 +189,27 @@ impl Step {
         }
     }
 
+    /// Bring a step saved with an older effect version up to date, where
+    /// the effect knows how (D-56): parameters whose default moved are
+    /// written in with their old value, so the step makes the same
+    /// picture. Unknown effects and unreachable versions are left for
+    /// `prepare` to refuse.
+    pub fn upgrade(&mut self) {
+        let Ok(info) = effects::lookup(&self.effect) else {
+            return;
+        };
+        for up in info.upgrades {
+            if self.effect_version < up.to {
+                for (k, v) in up.fill {
+                    self.params
+                        .entry(k.to_string())
+                        .or_insert_with(|| v.to_string());
+                }
+                self.effect_version = up.to;
+            }
+        }
+    }
+
     /// Validate and construct the effect and its placement, with the
     /// recipe's `encoding` and `channels` unless the step overrides them.
     pub fn prepare(&self, encoding: Encoding, channels: usize) -> Result<Prepared> {
@@ -221,7 +268,7 @@ impl Prepared {
     /// whole pixels, so for them a frame is one pixel, and windows (which
     /// are whole frames from the start of the raster) cover whole pixels.
     pub fn frame(&self) -> usize {
-        if self.info.group == Group::Pixel {
+        if self.info.group.on_pixels() {
             3
         } else {
             self.encoding.width() * self.channels
@@ -289,9 +336,72 @@ pub struct Recipe {
     /// 1 (mono) or 2 (stereo), unless a step overrides it.
     #[serde(default = "default_channels")]
     pub channels: usize,
+    /// The longest side of the canvas the steps run on, in pixels; none
+    /// for the full size. See the module documentation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_size: Option<u32>,
+    /// Enlarge the result back to the full size (nearest neighbour).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub scale_back: bool,
+    /// The file name (no folders) of the photo the recipe was made on, so
+    /// the GUI can offer to continue from it when that photo is opened
+    /// again. Information only: it changes nothing in the output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// The part of the photo kept, before anything else. See the module
+    /// documentation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<Crop>,
     #[serde(rename = "step", default)]
     pub steps: Vec<Step>,
 }
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// A crop rectangle, as shares (0 to 1) of the photo's width and height.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Crop {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+impl Crop {
+    /// Whole pixels `(x, y, w, h)` in a `width` x `height` photo: each edge
+    /// rounded to the nearest pixel (basic operations only, D-25), at least
+    /// one pixel each way, inside the photo.
+    pub fn rect(&self, width: usize, height: usize) -> (usize, usize, usize, usize) {
+        let edge =
+            |share: f64, n: usize| ((share * n as f64 + 0.5).floor().max(0.0) as usize).min(n);
+        let span = |a: f64, len: f64, n: usize| {
+            let lo = edge(a, n).min(n - 1);
+            let hi = edge(a + len, n).clamp(lo + 1, n);
+            (lo, hi - lo)
+        };
+        let (x, w) = span(self.x, self.w, width);
+        let (y, h) = span(self.y, self.h, height);
+        (x, y, w, h)
+    }
+
+    fn check(&self) -> std::result::Result<(), String> {
+        let ok = |v: f64| v.is_finite() && (0.0..=1.0).contains(&v);
+        // A hair of slack for shares that add up to 1 with rounding.
+        let fits = |a: f64, l: f64| ok(a) && ok(l) && l > 0.0 && a + l <= 1.0 + 1e-9;
+        if fits(self.x, self.w) && fits(self.y, self.h) {
+            Ok(())
+        } else {
+            Err(format!(
+                "crop must lie inside the photo (shares 0 to 1, width and height above 0): {self:?}"
+            ))
+        }
+    }
+}
+
+/// The smallest work size accepted: below it there is too little picture.
+pub const MIN_WORK_SIZE: u32 = 64;
 
 impl Default for Recipe {
     fn default() -> Self {
@@ -300,6 +410,10 @@ impl Default for Recipe {
             version: VERSION,
             encoding: Encoding::default(),
             channels: 1,
+            work_size: None,
+            scale_back: false,
+            source: None,
+            crop: None,
             steps: Vec::new(),
         }
     }
@@ -329,7 +443,7 @@ impl Recipe {
             )));
         }
         match raw.get("version").and_then(|v| v.as_integer()) {
-            Some(2 | 3) => {}
+            Some(2..=4) => {}
             Some(1) => {
                 return Err(Error::Recipe(
                     "version 1 recipes are for the JPEG byte engine, which was retired; \
@@ -341,8 +455,9 @@ impl Recipe {
             None => return Err(Error::Recipe("missing `version`".into())),
         }
         let mut r: Recipe = toml::from_str(text).map_err(|e| Error::Recipe(e.to_string()))?;
-        // Version 2 is a subset of 3; from here on it is a version 3 recipe.
+        // Older versions are subsets of this one; from here on it is current.
         r.version = VERSION;
+        r.upgrade();
         r.validate()?;
         Ok(r)
     }
@@ -351,9 +466,85 @@ impl Recipe {
         toml::to_string(self).expect("recipe serialization cannot fail")
     }
 
-    /// Check every step (and the recipe-wide channel count).
+    /// Bring every step up to its effect's current version (D-56).
+    pub fn upgrade(&mut self) {
+        for s in &mut self.steps {
+            s.upgrade();
+        }
+    }
+
+    /// Check every step (and the recipe-wide settings).
     pub fn validate(&self) -> Result<()> {
+        if let Some(w) = self.work_size
+            && w < MIN_WORK_SIZE
+        {
+            return Err(Error::Recipe(format!(
+                "work_size must be at least {MIN_WORK_SIZE} pixels, not {w}"
+            )));
+        }
+        if let Some(c) = &self.crop {
+            c.check().map_err(Error::Recipe)?;
+        }
         self.prepare_all().map(|_| ())
+    }
+
+    /// Everything that decides the canvas, for telling when it changes.
+    pub fn framing(&self) -> (Option<u32>, Option<Crop>) {
+        (self.work_size, self.crop)
+    }
+
+    /// The crop in whole pixels of a `w` x `h` photo (all of it without one).
+    pub fn crop_rect(&self, w: usize, h: usize) -> (usize, usize, usize, usize) {
+        match &self.crop {
+            Some(c) => c.rect(w, h),
+            None => (0, 0, w, h),
+        }
+    }
+
+    /// The size of the crop of a `w` x `h` photo: the file's size with
+    /// `scale_back`.
+    pub fn cropped_size(&self, w: usize, h: usize) -> (usize, usize) {
+        let (_, _, cw, ch) = self.crop_rect(w, h);
+        (cw, ch)
+    }
+
+    /// The canvas size for a photo of `w` x `h`: cropped, then shrunk to
+    /// the work size if there is one and the crop is larger.
+    pub fn canvas_size(&self, w: usize, h: usize) -> (usize, usize) {
+        let (w, h) = self.cropped_size(w, h);
+        match self.work_size {
+            Some(n) => crate::raster::fit_size(w, h, n as usize, n as usize),
+            None => (w, h),
+        }
+    }
+
+    /// The raster the steps run on (see the module documentation).
+    pub fn canvas(&self, original: &Raster) -> Raster {
+        let (x, y, cw, ch) = self.crop_rect(original.width, original.height);
+        let (w, h) = self.canvas_size(original.width, original.height);
+        if (cw, ch) == (original.width, original.height) {
+            original.resize(w, h)
+        } else {
+            original.crop(x, y, cw, ch).resize(w, h)
+        }
+    }
+
+    /// What the bent canvas becomes in the file: itself, or with
+    /// `scale_back`, enlarged to the crop's size (the size before the
+    /// work size). `original` is the photo's size.
+    pub fn finish(&self, bent: Raster, original: (usize, usize)) -> Raster {
+        let full = self.cropped_size(original.0, original.1);
+        if self.scale_back && (bent.width, bent.height) != full {
+            bent.enlarge(full.0, full.1)
+        } else {
+            bent
+        }
+    }
+
+    /// The whole run, as the CLI and the exports do it: canvas, steps,
+    /// finish.
+    pub fn render(&self, original: &Raster) -> Result<Raster> {
+        self.run_on(original)
     }
 
     /// Validate and build every step.
@@ -365,7 +556,40 @@ impl Recipe {
             .collect()
     }
 
-    /// Bend a raster at full resolution.
+    /// How masks drawn on a `w` x `h` photo land on this recipe's canvas
+    /// (none without a crop: they already fit).
+    pub fn mask_frame(&self, photo: (usize, usize)) -> Option<crate::mask::Frame> {
+        self.crop
+            .as_ref()
+            .map(|_| crate::mask::Frame::new(self.crop_rect(photo.0, photo.1), photo.0, photo.1))
+    }
+
+    /// Every step built, with its mask moved onto the canvas cut from a
+    /// photo of `photo` pixels (see `mask::Frame`).
+    pub fn prepare_for(&self, photo: (usize, usize)) -> Result<Vec<Prepared>> {
+        let mut steps = self.prepare_all()?;
+        if let Some(f) = self.mask_frame(photo) {
+            for s in &mut steps {
+                if let Some(m) = &mut s.mask {
+                    *m = m.reframed(&f);
+                }
+            }
+        }
+        Ok(steps)
+    }
+
+    /// The whole run on a photo: canvas, steps, finish.
+    fn run_on(&self, original: &Raster) -> Result<Raster> {
+        let mut canvas = self.canvas(original);
+        let units = Units::full(canvas.width, canvas.height);
+        for s in self.prepare_for((original.width, original.height))? {
+            s.apply(&mut canvas.bytes, &units, NEVER)?;
+        }
+        Ok(self.finish(canvas, (original.width, original.height)))
+    }
+
+    /// Bend a raster at full resolution. The raster is the canvas itself
+    /// (no crop is taken here); use `render` to start from the photo.
     pub fn apply(&self, raster: &mut Raster) -> Result<()> {
         let units = Units::full(raster.width, raster.height);
         self.apply_with(&mut raster.bytes, &units, NEVER)
@@ -453,7 +677,7 @@ mod tests {
         r.steps
             .push(Step::new("backwards", "channels=1", 5).unwrap());
         let text = r.to_toml();
-        assert!(text.contains("version = 3"), "{text}");
+        assert!(text.contains("version = 4"), "{text}");
         assert!(text.contains("encoding = \"s16le\""), "{text}");
         assert!(text.contains("encoding = \"ulaw\""), "{text}");
         assert!(text.contains("decay = 0.7"), "{text}");
@@ -579,7 +803,163 @@ mod tests {
         let r = Recipe::from_toml(v2).unwrap();
         assert_eq!(r.version, VERSION);
         assert_eq!(r.steps[0].mask, None);
-        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 4")).is_err());
+        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 5")).is_err());
+    }
+
+    /// A 6 x 4 picture whose every pixel differs, so resizing shows.
+    fn ramp(w: usize, h: usize) -> Raster {
+        Raster::new(w, h, (0..w * h * 3).map(|i| (i * 7 % 251) as u8).collect())
+    }
+
+    /// D-52: a mask is drawn on the whole photo, so a crop shows exactly the
+    /// same masked pixels as cropping the uncropped result.
+    #[test]
+    fn masks_stay_on_the_photo_when_it_is_cropped() {
+        use crate::mask::{Mask, MaskOp, Mode, Shape, Stroke};
+        let (w, h) = (256, 128);
+        let photo = Raster::new(w, h, (0..w * h * 3).map(|i| (i * 7 % 253) as u8).collect());
+        let mut step = Step::new("invert", "hits=0", 1).unwrap();
+        step.mask = Some(Mask {
+            invert: false,
+            ops: vec![
+                MaskOp::new(
+                    Shape::Radial {
+                        from: [0.75, 0.5],
+                        to: [0.8125, 0.5],
+                        hardness: 1.0,
+                    },
+                    Mode::Add,
+                ),
+                MaskOp::new(
+                    Shape::Rect {
+                        center: [0.625, 0.25],
+                        size: [0.125, 0.0625],
+                        angle: 0.0,
+                    },
+                    Mode::Add,
+                ),
+                MaskOp::new(
+                    Shape::Brush {
+                        strokes: vec![Stroke {
+                            erase: false,
+                            size: 0.03125,
+                            hardness: 1.0,
+                            points: vec![0.5625, 0.75, 0.9375, 0.875],
+                        }],
+                    },
+                    Mode::Add,
+                ),
+            ],
+        });
+        let mut r = Recipe {
+            steps: vec![step],
+            ..Recipe::default()
+        };
+        let whole = r.render(&photo).unwrap();
+        // The right half: x from 128 px, the full height.
+        r.crop = Some(Crop {
+            x: 0.5,
+            y: 0.0,
+            w: 0.5,
+            h: 1.0,
+        });
+        let cropped = r.render(&photo).unwrap();
+        assert_eq!((cropped.width, cropped.height), (128, 128));
+        assert_eq!(cropped, whole.crop(128, 0, 128, 128));
+        // And the mask did something, inside and outside.
+        assert_ne!(cropped, photo.crop(128, 0, 128, 128));
+        let f = r.mask_frame((w, h)).unwrap();
+        assert_eq!((f.x, f.sx, f.sy, f.sl), (0.5, 2.0, 1.0, 2.0));
+    }
+
+    #[test]
+    fn crop_comes_first_and_rounds_to_whole_pixels() {
+        let c = Crop {
+            x: 0.1,
+            y: 0.25,
+            w: 0.5,
+            h: 0.5,
+        };
+        assert_eq!(c.rect(480, 320), (48, 80, 240, 160));
+        // Rounding each edge, never empty, never outside.
+        let tiny = Crop {
+            x: 0.999,
+            y: 0.0,
+            w: 0.0001,
+            h: 1.0,
+        };
+        assert_eq!(tiny.rect(100, 10), (99, 0, 1, 10));
+        let mut r = Recipe {
+            crop: Some(c),
+            work_size: Some(120),
+            ..Recipe::default()
+        };
+        let original = Raster::new(
+            480,
+            320,
+            (0..480 * 320 * 3).map(|i| (i % 251) as u8).collect(),
+        );
+        assert_eq!(r.canvas_size(480, 320), (120, 80));
+        assert_eq!(r.render(&original).unwrap().width, 120);
+        r.scale_back = true;
+        let out = r.render(&original).unwrap();
+        assert_eq!((out.width, out.height), (240, 160));
+        // Without a work size the canvas is exactly the cropped pixels.
+        r.work_size = None;
+        assert_eq!(r.canvas(&original), original.crop(48, 80, 240, 160));
+        // Kept in the file, refused when it leaves the photo.
+        let back = Recipe::from_toml(&r.to_toml()).unwrap();
+        assert_eq!(back.crop, Some(c));
+        r.crop = Some(Crop {
+            x: 0.6,
+            y: 0.0,
+            w: 0.5,
+            h: 1.0,
+        });
+        assert!(r.validate().unwrap_err().to_string().contains("crop"));
+        r.crop = Some(Crop {
+            x: 0.0,
+            y: 0.0,
+            w: 0.0,
+            h: 1.0,
+        });
+        assert!(r.validate().is_err());
+    }
+
+    #[test]
+    fn the_canvas_shrinks_to_the_work_size_and_can_scale_back() {
+        let original = ramp(600, 400);
+        let mut r = Recipe {
+            work_size: Some(150),
+            steps: vec![Step::new("invert", "hits=0", 1).unwrap()],
+            ..Recipe::default()
+        };
+        assert_eq!(r.canvas_size(600, 400), (150, 100));
+        // Never enlarged.
+        assert_eq!(r.canvas_size(100, 60), (100, 60));
+
+        // The run: shrink, bend, write at the work size...
+        let out = r.render(&original).unwrap();
+        let mut want = original.resize(150, 100);
+        r.apply(&mut want).unwrap();
+        assert_eq!(out, want);
+        // ...or enlarged back with hard edges: each canvas pixel becomes a
+        // 4 x 4 block.
+        r.scale_back = true;
+        let big = r.render(&original).unwrap();
+        assert_eq!((big.width, big.height), (600, 400));
+        assert_eq!(big, want.enlarge(600, 400));
+        assert_eq!(&big.bytes[..3], &big.bytes[9..12]);
+
+        // Written to the file, read back the same; too small is refused.
+        let back = Recipe::from_toml(&r.to_toml()).unwrap();
+        assert_eq!(back, r);
+        assert!(r.to_toml().contains("work_size = 150"), "{}", r.to_toml());
+        r.work_size = Some(10);
+        assert!(r.validate().unwrap_err().to_string().contains("work_size"));
+        // Without one, nothing about it is written.
+        assert!(!Recipe::default().to_toml().contains("work_size"));
+        assert!(!Recipe::default().to_toml().contains("scale_back"));
     }
 
     #[test]
@@ -607,5 +987,34 @@ mod tests {
         s.mask.as_mut().unwrap().ops[0].feather = -1.0;
         let err = s.prepare(Encoding::U8, 1).err().unwrap().to_string();
         assert!(err.contains("invert") && err.contains("feather"), "{err}");
+    }
+
+    #[test]
+    fn steps_from_before_the_whole_picture_default_keep_their_bands() {
+        // Invert version 1 started with 4 hits of 4%; a step that left them
+        // out still means that, and says so once upgraded.
+        let old = "format = \"glitcharaxia-recipe\"\nversion = 4\nencoding = \"u8\"\nchannels = 1\n\n\
+                   [[step]]\neffect = \"invert\"\neffect_version = 1\nseed = 7\n\n\
+                   [[step]]\neffect = \"invert\"\neffect_version = 1\nseed = 7\nhits = \"9\"\n";
+        let r = Recipe::from_toml(old).unwrap();
+        assert_eq!(r.steps[0].effect_version, 2);
+        assert_eq!(r.steps[0].params["hits"], "4");
+        assert_eq!(r.steps[0].params["len"], "4%");
+        // What the user gave stays.
+        assert_eq!(r.steps[1].params["hits"], "9");
+        // A new step starts on the whole picture.
+        let new = Step::new("invert", "", 7).unwrap();
+        assert!(!new.params.contains_key("hits"));
+        let mut img = Raster::new(10, 10, vec![0u8; 300]);
+        Recipe {
+            steps: vec![new],
+            ..Recipe::default()
+        }
+        .apply(&mut img)
+        .unwrap();
+        assert!(
+            img.bytes.iter().all(|&b| b == 255),
+            "the whole picture inverts"
+        );
     }
 }

@@ -203,6 +203,15 @@ fn build_recipe(cli: &Cli, effects: &[EffectArg]) -> Result<(Recipe, Option<u64>
     if let Some(c) = cli.channels {
         recipe.channels = c as usize;
     }
+    if let Some(n) = cli.work_size {
+        recipe.work_size = Some(n);
+    }
+    if cli.scale_back {
+        recipe.scale_back = true;
+    }
+    if let Some(c) = cli.crop {
+        recipe.crop = Some(c);
+    }
     recipe.validate()?;
     Ok((recipe, master))
 }
@@ -270,7 +279,7 @@ fn output_format(cli: &Cli, output: Option<&Path>) -> Result<Format, Fail> {
         .unwrap_or_default();
     let named = Format::parse(&ext).ok_or_else(|| {
         Fail::Usage(format!(
-            "{}: unknown output extension (use .tif, .png or .jpg)",
+            "{}: unknown output extension (use .tif, .png, .jpg, .webp or .avif)",
             out.display()
         ))
     })?;
@@ -288,8 +297,23 @@ fn process(cli: &Cli, recipe: &Recipe, master_seed: Option<u64>, job: &Job) -> R
     let format = output_format(cli, job.output.as_deref())?;
     let bytes = fs::read(input).map_err(|e| Fail::Runtime(format!("{}: {e}", input.display())))?;
     let mut image = codec::decode(&bytes)?;
-    recipe.apply(&mut image.raster)?;
-    let out_bytes = codec::encode(&image.raster, format, image.icc.as_deref())?;
+    // Canvas (work size), steps, then scale back if asked.
+    image.raster = recipe.render(&image.raster)?;
+    let settings = codec::EncodeSettings {
+        quality: cli.quality,
+        lossless: cli.lossless,
+        speed: cli.avif_speed,
+    };
+    let out_bytes = codec::encode_with(&image.raster, format, image.icc.as_deref(), &settings)?;
+    if format == Format::Avif
+        && !glitchrx_core::avif::keeps_profile(image.icc.as_deref())
+        && !cli.quiet
+    {
+        eprintln!(
+            "glitchrx: {}: AVIF cannot carry this photo's colour profile; colours may shift (TIFF, PNG, JPEG and WebP keep it)",
+            input.display()
+        );
+    }
 
     let output = match &job.output {
         Some(o) => o.clone(),
@@ -303,7 +327,12 @@ fn process(cli: &Cli, recipe: &Recipe, master_seed: Option<u64>, job: &Job) -> R
         let path = save
             .clone()
             .unwrap_or_else(|| output.with_extension("recipe.toml"));
-        write_output(input, &path, recipe.to_toml().as_bytes(), cli.force)?;
+        // Note the photo's name, so the GUI can offer to continue from it.
+        let named = glitchrx_core::Recipe {
+            source: input.file_name().map(|n| n.to_string_lossy().into_owned()),
+            ..recipe.clone()
+        };
+        write_output(input, &path, named.to_toml().as_bytes(), cli.force)?;
         extra.push(format!("recipe {}", path.display()));
     }
 

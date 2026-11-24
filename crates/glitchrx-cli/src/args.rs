@@ -77,8 +77,12 @@ pub enum FormatArg {
     Tiff,
     /// Lossless PNG.
     Png,
-    /// JPEG, quality 95, full chroma.
+    /// JPEG, full chroma (quality 95 unless --quality).
     Jpeg,
+    /// WebP: lossy (quality 90 unless --quality) or --lossless.
+    Webp,
+    /// AVIF (quality 80, speed 6 unless --quality, --avif-speed).
+    Avif,
 }
 
 impl From<FormatArg> for Format {
@@ -87,6 +91,8 @@ impl From<FormatArg> for Format {
             FormatArg::Tiff => Format::Tiff,
             FormatArg::Png => Format::Png,
             FormatArg::Jpeg => Format::Jpeg,
+            FormatArg::Webp => Format::Webp,
+            FormatArg::Avif => Format::Avif,
         }
     }
 }
@@ -130,6 +136,37 @@ pub struct Cli {
     /// A named output's extension decides its format.
     #[arg(long, value_enum, value_name = "FORMAT")]
     pub format: Option<FormatArg>,
+
+    /// Quality for JPEG, lossy WebP and AVIF, 1 to 100. Lossy formats
+    /// smooth fine glitch texture; TIFF, PNG and lossless WebP keep it.
+    #[arg(long, value_name = "1-100", value_parser = clap::value_parser!(u8).range(1..=100))]
+    pub quality: Option<u8>,
+
+    /// WebP: lossless instead of lossy.
+    #[arg(long)]
+    pub lossless: bool,
+
+    /// AVIF: 1 (slowest, smallest file) to 10 (fastest) [default: 6].
+    /// (Not `--speed`, which is the Change Speed effect.)
+    #[arg(long, value_name = "1-10", value_parser = clap::value_parser!(u8).range(1..=10))]
+    pub avif_speed: Option<u8>,
+
+    /// Run the steps on a copy whose longer side is N pixels (never larger
+    /// than the photo): faster, with coarser glitch texture. The output is
+    /// that size, unless --scale-back.
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(64..))]
+    pub work_size: Option<u32>,
+
+    /// With --work-size: enlarge the result back to the photo's size, with
+    /// hard pixel edges (nearest neighbour).
+    #[arg(long)]
+    pub scale_back: bool,
+
+    /// Keep only part of the photo, before anything else: X,Y,W,H as
+    /// shares of its width and height (0.1,0,0.8,1 trims a tenth off each
+    /// side). Saved in the recipe.
+    #[arg(long, value_name = "X,Y,W,H", value_parser = parse_crop)]
+    pub crop: Option<glitchrx_core::recipe::Crop>,
 
     /// How steps read the pixels as audio samples [default: u8]. A step can
     /// override it with encoding=... in its parameters.
@@ -217,6 +254,21 @@ pub fn list_text() -> String {
          Columns: parameter, default, meaning.\n",
     );
     s
+}
+
+/// `X,Y,W,H`, four shares of the photo; the recipe checks they fit.
+fn parse_crop(s: &str) -> Result<glitchrx_core::recipe::Crop, String> {
+    let v: Vec<f64> = s
+        .split(',')
+        .map(|p| p.trim().parse::<f64>())
+        .collect::<Result<_, _>>()
+        .map_err(|_| format!("`{s}` should be four numbers X,Y,W,H, e.g. 0.1,0,0.8,1"))?;
+    match v[..] {
+        [x, y, w, h] => Ok(glitchrx_core::recipe::Crop { x, y, w, h }),
+        _ => Err(format!(
+            "`{s}` should be four numbers X,Y,W,H, e.g. 0.1,0,0.8,1"
+        )),
+    }
 }
 
 #[cfg(test)]

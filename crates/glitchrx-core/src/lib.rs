@@ -5,13 +5,15 @@
 //! [`effects`], each run in seeded windows ([`placement`]) that read the
 //! bytes as audio samples in some encoding ([`samples`]), process them the
 //! way Audacity would, and clip them back to bytes. The raster is then
-//! encoded as TIFF, PNG or JPEG. This is "databending": what Phil used to do
+//! encoded as TIFF, PNG, JPEG, WebP or AVIF. This is "databending": what Phil used to do
 //! by importing TIFFs into Audacity as raw data.
 
+pub mod avif;
 pub mod codec;
 pub mod dsp;
 pub mod effects;
 pub mod error;
+pub mod fill;
 pub mod mask;
 pub mod params;
 pub mod placement;
@@ -20,11 +22,12 @@ pub mod recipe;
 pub mod rng;
 pub mod samples;
 pub mod turbo;
+pub mod webp;
 
 #[cfg(feature = "fs")]
 pub mod io;
 
-pub use codec::{Format, Image};
+pub use codec::{EncodeSettings, Format, Image};
 pub use error::{Error, Result};
 pub use params::Units;
 pub use raster::Raster;

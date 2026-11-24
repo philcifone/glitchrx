@@ -1,6 +1,6 @@
 // Shapes shared with the server (see crates/glitchrx-serve/src/dto.rs).
 
-export type ParamKind = 'int' | 'float' | 'size' | 'region' | 'choice';
+export type ParamKind = 'int' | 'float' | 'size' | 'region' | 'choice' | 'set' | 'curve';
 
 export interface ParamInfo {
   name: string;
@@ -15,7 +15,7 @@ export interface ParamInfo {
 }
 
 /** Picker section. Pixel effects work on whole pixels: no encoding or channels. */
-export type EffectGroup = 'audio' | 'data' | 'pixel';
+export type EffectGroup = 'audio' | 'data' | 'pixel' | 'adjust';
 
 export interface EffectInfo {
   id: string;
@@ -30,6 +30,8 @@ export interface EffectInfo {
   /** A scaled preview cannot match the export; render exactly when idle. */
   exact_preview: boolean;
   params: ParamInfo[];
+  /** How steps from older versions become current (D-56), oldest first. */
+  upgrades?: { to: number; fill: Record<string, string> }[];
 }
 
 export interface DocInfo {
@@ -44,9 +46,27 @@ export interface DocInfo {
   /** EXIF orientation that was applied (1 = none). */
   orientation: number;
   has_icc: boolean;
+  /** The colour profile's name, if it has one. */
+  profile: string | null;
+  /** An AVIF export keeps these colours (no profile, sRGB or Display P3). */
+  avif_keeps_profile: boolean;
   file_len: number;
   /** Raw RGB bytes the effects work on. */
   raw_len: number;
+  /** Recipes on the server made on this photo, newest first. */
+  recipes?: SavedRecipe[];
+}
+
+/** A recipe file in the library or export folder on the server. */
+export interface SavedRecipe {
+  place: 'library' | 'export';
+  /** Relative to that folder. */
+  path: string;
+  name: string;
+  /** Seconds since 1970. */
+  modified: number;
+  /** The photo it was made on, when the recipe says. */
+  source: string | null;
 }
 
 /** A sample encoding (Audacity's Import Raw Data choices). */
@@ -62,6 +82,8 @@ export interface ServerConfig {
   desktop: boolean;
   /** Saved presets are available on this server. */
   presets: boolean;
+  /** The Settings sheet can choose library and export folders. */
+  settings: boolean;
   version: string;
   browse: boolean;
   root_name: string | null;
@@ -100,6 +122,10 @@ export type MaskOp = MaskCommon &
     | { shape: 'linear'; from: [number, number]; to: [number, number] }
     /** A circle: centre `from`, edge through `to`. Hard-edged unless `hardness` < 1. */
     | { shape: 'radial'; from: [number, number]; to: [number, number]; hardness?: number }
+    /** A rectangle: centre (fractions), size (shares of the longer side), clockwise turn in degrees. */
+    | { shape: 'rect'; center: [number, number]; size: [number, number]; angle?: number }
+    /** A closed pen outline: [x, y] corners and [x, y, hx, hy] smooth points (see lib/shapes.ts). */
+    | { shape: 'path'; points: number[][] }
     | { shape: 'brightness'; low: number; high: number; soft: number }
   );
 
@@ -134,7 +160,23 @@ export interface RecipeDto {
   /** Recipe-wide encoding and channels; a step may override them in its params. */
   encoding: string;
   channels: Channels;
+  /** The longest side of the canvas the steps run on (none: full size). */
+  work_size?: number;
+  /** Enlarge the result back to full size, with hard pixel edges. */
+  scale_back?: boolean;
+  /** The part of the photo kept, before anything else. */
+  crop?: Crop;
+  /** The photo's file name, recorded in saved recipes. */
+  source?: string;
   steps: StepDto[];
+}
+
+/** A crop: shares (0 to 1) of the photo's width and height. */
+export interface Crop {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 /** A step in the editor: the DTO plus UI-only fields. */
@@ -143,12 +185,34 @@ export interface StepState extends StepDto {
   uid: string;
   /** Disabled steps stay in the stack but are left out of the render. */
   enabled: boolean;
+  /** The preset group this step came in with (see groups.ts). */
+  group?: string;
+  /** Its number among steps of the same effect (echo-0, echo-1; see stepnames.ts). */
+  n?: number;
+}
+
+/**
+ * Steps added from a preset, kept together under its name. `base` is the
+ * preset's steps as added, written for its own `encoding` and `channels`.
+ */
+export interface PresetGroup {
+  id: string;
+  preset: string;
+  encoding: string;
+  channels: Channels;
+  base: StepDto[];
 }
 
 export interface RecipeState {
   encoding: string;
   channels: Channels;
+  /** See RecipeDto. */
+  work_size?: number;
+  scale_back?: boolean;
+  crop?: Crop;
   steps: StepState[];
+  /** Preset groups; UI only, never sent to the server or saved in recipes. */
+  groups?: PresetGroup[];
 }
 
 /** A saved preset, as listed. */
@@ -175,4 +239,30 @@ export interface Listing {
   files: BrowseEntry[];
 }
 
-export type ExportFormat = 'tiff' | 'png' | 'jpeg';
+export type ExportFormat = 'tiff' | 'png' | 'jpeg' | 'webp' | 'avif';
+
+/** An export's format and, for the lossy ones, how to encode it. */
+export interface ExportOptions {
+  format: ExportFormat;
+  /** JPEG, lossy WebP and AVIF, 1 to 100. */
+  quality?: number;
+  /** WebP: lossless. */
+  lossless?: boolean;
+  /** AVIF: 1 (slowest, smallest) to 10 (fastest). */
+  speed?: number;
+}
+
+/** The Settings sheet's folders, relative to the server's home folder. */
+export interface FolderSettings {
+  library: string | null;
+  export: string | null;
+  /** Set when --root decides what Open browses (its path, for display). */
+  fixed_root?: string | null;
+}
+
+/** Folders inside a folder under home, for the folder picker. */
+export interface FolderListing {
+  path: string;
+  parent: string | null;
+  dirs: { name: string; path: string }[];
+}

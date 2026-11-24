@@ -10,6 +10,7 @@ pub static INFO: EffectInfo = EffectInfo {
     id: "phaser",
     group: Group::Audio,
     version: 1,
+    upgrades: &[],
     audacity: "Phaser",
     summary: "All-pass stages swept by a slow oscillator, mixed with the input: wavy, combed bands.",
     details: "Audacity's phaser: `stages` first-order all-pass filters in series, their \

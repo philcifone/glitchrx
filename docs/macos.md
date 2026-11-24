@@ -48,8 +48,8 @@ the 512 px tile, then add `icons/icon.icns` to `bundle.icon` in
 That command also rewrites the PNGs and adds Windows sizes; keep only
 `icon.icns` (`git checkout icons/*.png`, delete the rest). Apple's own
 icons sit inside a rounded square at about 80 % of the canvas with a soft
-shadow; ours is a plain rounded tile, which is fine for now (the icon is
-due another pass anyway).
+shadow; ours is a plain rounded tile, which Phil is happy with
+(2026-11-23).
 
 ## 4. Build the app
 
@@ -73,7 +73,10 @@ free "ad-hoc" one automatically. That is enough for your own Mac:
 
       xattr -dr com.apple.quarantine /Applications/glitchrx.app
 
-  or right-click the app, Open, then confirm.
+  or try to open it once, then go to System Settings, Privacy and
+  Security, and click **Open Anyway** beside the message about glitchrx.
+  (Before macOS 15, right-click and Open also worked; Sequoia removed
+  that.) `docs/roadmap.md` has the short version for a friend.
 
 Proper signing only matters for giving the app to other people:
 

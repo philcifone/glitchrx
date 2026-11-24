@@ -12,26 +12,30 @@
   import Trash2 from '@lucide/svelte/icons/trash-2';
   import { app, CHANNELS_KEY, ENCODING_KEY } from '../lib/app.svelte';
   import { iconFor } from '../lib/icons';
-  import { usesSamples } from '../lib/palette';
+  import { shakes, usesSamples } from '../lib/palette';
   import { CHANNEL_CHOICES, channelName } from '../lib/channels';
   import type { Channels, StepState } from '../lib/types';
   import ParamField from './ParamField.svelte';
   import BlendSection from './BlendSection.svelte';
 
-  let { step, index, count }: { step: StepState; index: number; count: number } = $props();
+  let { step, index }: { step: StepState; index: number } = $props();
 
   const info = $derived(app.effect(step.effect));
   const own = $derived(info?.params.filter((p) => !p.placement) ?? []);
   const placement = $derived(info?.params.filter((p) => p.placement) ?? []);
   const seeded = $derived(app.seeded(step));
+  const banded = $derived(app.banded(step));
+  // Hits and length only mean something with bands on (D-56).
+  const shownPlacement = $derived(placement.filter((p) => banded || (p.name !== 'hits' && p.name !== 'len')));
   const Icon = $derived(iconFor(step.effect));
   const encodings = $derived(app.config?.encodings ?? []);
   // Empty string = follow the recipe.
   const stepEncoding = $derived(step.params[ENCODING_KEY] ?? '');
   const stepChannels = $derived(step.params[CHANNELS_KEY] ?? '');
   const opacity = $derived(app.opacity(step));
-  // Open when first added; collapsing is per card and not part of history.
-  let open = $state(true);
+  // Open when first added. Collapsing is per card and not part of history;
+  // the app keeps it, so it survives the cards being rebuilt (Edit mode).
+  const open = $derived(!app.collapsed[step.uid]);
 
   // Seed field edits are applied on change; typing is not live.
   let seedText = $state('');
@@ -43,9 +47,10 @@
 <article class:off={!step.enabled}>
   <header>
     <span class="n">{index + 1}</span>
-    <button class="name" onclick={() => (open = !open)} aria-expanded={open} title={info?.summary}>
+    <button class="name" onclick={() => app.toggleCollapsed(step.uid)} aria-expanded={open} title={info?.summary}>
       <span class="glyph"><Icon size={18} strokeWidth={1.75} /></span>
-      <span class="label serif">{step.effect}</span>
+      <!-- The number in the system font: Young Serif's old-style 1 reads as "i". -->
+      <span class="label serif">{step.effect}{#if app.stepNumber(step)}<span class="num">-{app.stepNumber(step)}</span>{/if}</span>
       {#if stepEncoding}<span class="enc">{stepEncoding}</span>{/if}
       {#if step.mask}
         <span class="enc tag-icon" class:live={app.masking === step.uid} title="Masked" aria-label="Masked">
@@ -58,15 +63,21 @@
       <input class="switch" type="checkbox" checked={step.enabled} onchange={() => app.toggleStep(step.uid)} />
       <span class="visually-hidden">Enabled</span>
     </label>
-    <button class="icon" onclick={() => app.shake(step.uid)} disabled={!info} title="Shake: random settings for this step (placement stays)" aria-label="Shake settings">
-      <Shuffle size={18} strokeWidth={1.75} />
-    </button>
   </header>
 
   {#if open}
     <div class="body">
       {#if info}
         <section class="group">
+          <!-- Inside the card, not on its header, where it was easy to bump. -->
+          {#if own.length}<div class="shake-row">
+            <h3 class="section-label">Settings</h3>
+            {#if shakes(info)}
+              <button class="plain" onclick={() => app.shake(step.uid)} title="Random settings for this step (placement stays)" aria-label="Shake settings">
+                <Shuffle size={16} strokeWidth={1.75} /> Shake
+              </button>
+            {/if}
+          </div>{/if}
           {#each own as spec (spec.name)}
             <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
           {/each}
@@ -101,12 +112,20 @@
         {/if}
         <section class="group" aria-label="Placement">
           <h3 class="section-label">Placement</h3>
-          {#each placement as spec (spec.name)}
+          <!-- Off: the step covers its whole region. On: it lands in seeded
+               bands (hits), which the seed places. -->
+          <label class="bands">
+            <span>Bands</span>
+            <span class="dim note">{banded ? 'scattered in seeded bands' : 'the whole picture'}</span>
+            <input class="switch" type="checkbox" checked={banded} onchange={(e) => app.setBands(step.uid, e.currentTarget.checked)} />
+          </label>
+          {#each shownPlacement as spec (spec.name)}
             <ParamField uid={step.uid} {spec} value={step.params[spec.name]} />
           {/each}
           <!-- The seed decides where the hits land, so it lives here, with
-               the dice that re-rolls it. -->
-          <div class="seed">
+               the dice that re-rolls it. Without bands it only matters to
+               effects that draw inside their window (shuffle). -->
+          {#if seeded}<div class="seed">
             <label for="seed-{step.uid}">Seed</label>
             <input
               id="seed-{step.uid}"
@@ -128,7 +147,7 @@
             >
               <Dices size={18} strokeWidth={1.75} />
             </button>
-          </div>
+          </div>{/if}
         </section>
         <BlendSection {step} />
       {:else}
@@ -137,10 +156,10 @@
 
       <!-- What to do with the step itself, apart from its settings. -->
       <div class="foot" role="group" aria-label="Step">
-        <button class="plain" onclick={() => app.moveStep(step.uid, -1)} disabled={index === 0} title="Move up" aria-label="Move up">
+        <button class="plain" onclick={() => app.moveStep(step.uid, -1)} disabled={!app.canMoveStep(step.uid, -1)} title="Move up" aria-label="Move up">
           <ChevronUp size={18} strokeWidth={1.75} /> <span class="txt">Up</span>
         </button>
-        <button class="plain" onclick={() => app.moveStep(step.uid, 1)} disabled={index === count - 1} title="Move down" aria-label="Move down">
+        <button class="plain" onclick={() => app.moveStep(step.uid, 1)} disabled={!app.canMoveStep(step.uid, 1)} title="Move down" aria-label="Move down">
           <ChevronDown size={18} strokeWidth={1.75} /> <span class="txt">Down</span>
         </button>
         <button class="plain" onclick={() => app.duplicateStep(step.uid)} title="Duplicate (with a new seed)" aria-label="Duplicate">
@@ -156,6 +175,25 @@
 </article>
 
 <style>
+  .num {
+    font-family: var(--font);
+    font-variant-numeric: lining-nums tabular-nums;
+    font-size: 0.9em;
+  }
+
+  .shake-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: -4px 0 2px;
+  }
+
+  .shake-row .plain {
+    gap: 6px;
+    font-size: 0.9rem;
+    min-height: 34px;
+  }
+
   /* A grouped card, as in iOS Settings. */
   article {
     background: var(--card);
@@ -200,10 +238,6 @@
   .glyph {
     display: inline-flex;
     color: var(--accent);
-  }
-
-  .label {
-    text-transform: capitalize;
   }
 
   /* An encoding override, as a small tag. */
@@ -297,6 +331,21 @@
     .foot .txt {
       display: none;
     }
+  }
+
+  .bands {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+
+  .bands .note {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.75rem;
+    font-weight: 400;
   }
 
   .seed {

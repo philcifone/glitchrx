@@ -45,6 +45,11 @@ struct ServeCli {
     /// using this server). Default: ~/.config/glitchrx/presets.
     #[arg(long, value_name = "DIR")]
     presets: Option<PathBuf>,
+
+    /// Settings file: the library and export folders chosen in the GUI.
+    /// Default: ~/.config/glitchrx/config.toml. --root overrides its library.
+    #[arg(long, value_name = "FILE")]
+    config: Option<PathBuf>,
 }
 
 pub fn main(args: Vec<OsString>) -> ExitCode {
@@ -69,6 +74,7 @@ pub fn main(args: Vec<OsString>) -> ExitCode {
         root: cli.root,
         token,
         presets: cli.presets.or_else(glitchrx_serve::presets::default_dir),
+        settings: cli.config.or_else(glitchrx_serve::settings::default_file),
     };
     match serve(config) {
         Ok(()) => ExitCode::SUCCESS,

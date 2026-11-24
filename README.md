@@ -34,11 +34,18 @@ glitchrx --echo photo.jpg                       # writes photo-glitch.tif
 glitchrx --echo photo.jpg                       # again: photo-glitch-1.tif
 glitchrx --echo photo.jpg out.png               # explicit output; its extension sets the format
 glitchrx --echo --format jpeg photo.jpg         # photo-glitch.jpg
+glitchrx --echo --format webp --quality 85 photo.jpg   # smaller files; --lossless keeps every pixel
+glitchrx --echo --format avif --avif-speed 8 photo.jpg # smallest; slow to encode
 glitchrx --echo delay=0.33rows,decay=0.6 --reverb photo.jpg
 glitchrx --echo --encoding ulaw photo.jpg       # read the pixels as mu-law audio
 glitchrx --shift by=0.5rows,phase=2,hits=12 photo.jpg
 glitchrx --pixelsort low=0.3 photo.jpg          # melt the bright areas into streaks
 glitchrx --echo opacity=0.5 photo.jpg           # blend the step at half strength
+glitchrx --levels black=20,white=230 --hsl saturation=-40 photo.jpg   # photo adjustments
+glitchrx --curves points=0:20/128:150/255:235,channel=blue photo.jpg
+glitchrx --shift --crop 0.1,0,0.8,1 photo.jpg    # crop first: X,Y,W,H as shares of the photo
+glitchrx --pixelsort --work-size 1024 photo.jpg # run on a 1024 px copy: coarser, faster
+glitchrx --shift --work-size 1024 --scale-back photo.jpg   # ...enlarged back, hard pixel edges
 glitchrx --stutter --batch *.jpg                # every file, automatic names
 glitchrx --info photo.jpg                       # format, size, orientation, colour profile
 glitchrx --list                                 # every effect and parameter
@@ -52,7 +59,7 @@ photo-glitch.tif  (6240 x 4160, tiff, seed 81723)
 
 Re-run with `--seed` to reproduce a result you liked. Use `--save-recipe` to keep the whole chain in a small TOML file, and replay it later with `--recipe`.
 
-The output is TIFF by default: uncompressed 8-bit RGB, ready for masking in Photoshop. The colour profile of the original is written into every output, so colours match the original.
+The output is TIFF by default: uncompressed 8-bit RGB, ready for masking in Photoshop. PNG, JPEG, WebP and AVIF are also written (not read). The colour profile of the original is written into every output, so colours match the original. AVIF is the exception: it can only mark sRGB and Display P3 (most phone photos are one of the two), and warns when it drops another profile. Lossy formats (JPEG, WebP without `--lossless`, AVIF) smooth fine glitch texture a little. The same input, recipe, seed and settings give the same file every time, in every format.
 
 ### Encodings
 
@@ -93,10 +100,14 @@ A distance of whole pixels keeps colours. `phase=1` or `phase=2` adds one or two
 | `distort` | Distortion | Hard clip, soft saturation, or folding highlights into bands |
 | `speed` | Change Speed | Squeezes or stretches parts of the picture: shears |
 | `pixelsort` | (pixel effect) | Sorts runs of pixels by brightness, hue or saturation: streaks down or across the picture |
+| `levels` | (adjustment) | Black point, white point and midtone gamma |
+| `curves` | (adjustment) | A tone curve through up to 16 points, `points=0:0/64:52/192:204/255:255` |
+| `hsl` | (adjustment) | Hue turn, saturation and lightness, for every colour or some (`range=reds`, `range=reds+blues`, ...) |
+| `balance` | (adjustment) | Tints the shadows, midtones or highlights, keeping brightness |
 
-`pixelsort` is not audio: it works on whole pixels, so the encoding and channels do not apply. Every step also takes `opacity` (0 to 1), which blends its result over the picture it received.
+`pixelsort` and the adjustments are not audio: they work on whole pixels, so the encoding and channels do not apply. Adjustments are ordinary steps, so masks and opacity limit them like any other. Every step also takes `opacity` (0 to 1), which blends its result over the picture it received.
 
-All parameters are documented in `docs/effects.md`, which is generated from the code. Where an effect lands is set by `region`, `hits` and `len`, shared by every effect.
+All parameters are documented in `docs/effects.md`, which is generated from the code. Plans and ideas are in `docs/roadmap.md`; hosting it for others is in `docs/hosting.md`. Where an effect lands is set by `region`, `hits` and `len`, shared by every effect.
 
 ### Safety rules
 
@@ -114,7 +125,7 @@ All parameters are documented in `docs/effects.md`, which is generated from the 
 
 ```
 glitchrx serve                                   # http://127.0.0.1:7878, this machine only
-glitchrx serve --root ~/Pictures                 # also browse, open and save photos there
+glitchrx serve --root ~/Pictures                 # browse this folder, whatever Settings says
 glitchrx serve --host 0.0.0.0 --token --root ~/Pictures   # from a phone over LAN or WireGuard
 ```
 
@@ -123,16 +134,23 @@ glitchrx serve --host 0.0.0.0 --token --root ~/Pictures   # from a phone over LA
 **On a phone, add it to the home screen** (Safari: Share, then Add to Home Screen). It then opens full screen with its own icon, like an app. The home-screen app may keep its own cookies, so it can ask for the token once. Exports open the share sheet (Save Image, Save to Files, AirDrop) through a Save button in the status bar.
 
 In the GUI:
-- **Open** a photo from your device (it is sent to your own server, nowhere else) or, with `--root`, from the server's folders. If steps are already in the stack, you are asked whether to keep them or start fresh (undoable; "Don't ask again" is changeable in Presets).
+- **Open** a photo from your device (it is sent to your own server, nowhere else) or from the server's library folder (chosen in Settings, or `--root`). If steps are already in the stack, you are asked whether to keep them or start fresh (undoable; "Don't ask again" is changeable in Settings).
 - **Pick the encoding** for the whole recipe (and mono, stereo or RGB) at the top. Any step can override both.
-- **Add steps** by tapping an effect in the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter), data effects (invert, bitcrush, backwards, shift, shuffle) and pixel effects (pixelsort). On a phone the palette sits behind the floating + button. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
-- **Placement** (`region`, `hits`, `len`) is always shown on each step. Dragging the region's two handles shades the preview outside the band it covers.
-- **Shake** (the shuffle arrows) rolls a step's own settings at random, within the useful range; placement and encoding stay. **Re-roll** (the dice, beside the seed at the end of Placement) picks a new seed, which moves where hits land; it is greyed out when a step has nothing random (`hits=0`, except for `shuffle`).
-- **Blend** each step with its opacity, and **mask** it. A mask is built from components: brushes (paint and erase), linear gradients, radials (hard-edged circles; feather fades them) and brightness ranges that limit the mask to light or dark parts. Tap a component to make it active; a radial or linear then shows handles on the photo to move or resize it, and the others show pins to tap. Each component adds, subtracts or intersects, and has its own opacity and feather (side by side when it is active); long-press to select several and set them together. Copy, Cut and Paste move components between steps. Paint in shows the step only inside the mask; Paint out shows it everywhere else. The red overlay shows the mask; Done ends editing. On a desktop, B and E paint and erase and [ and ] size the brush. Masks are saved in the recipe as strokes and shapes, so they replay exactly at full resolution.
-- **Presets** (the bookmark) are your own saved recipes, kept by the server in `~/.config/glitchrx/presets` (`--presets DIR` to move them), so your phone and desktop share them. Use one to replace the steps, or add its steps to the current recipe. They are ordinary recipe files: `glitchrx --recipe ~/.config/glitchrx/presets/NAME.toml photo.jpg`.
-- **Hold "original"** (or the `\` key) to compare with the untouched photo.
+- **Add steps** by tapping an effect in the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter), data effects (invert, bitcrush, backwards, shift, shuffle) pixel effects (pixelsort) and adjustments (levels, curves, hsl, balance; curves has a curve editor). On a phone the palette sits behind the floating + button. Steps run top to bottom. Each one can be switched off, moved, duplicated or removed.
+- **Placement** is always shown on each step. Every effect starts on the whole picture; the **Bands** switch scatters it in seeded bands instead and shows `hits`, `len` and the seed. Dragging the region's two handles shades the preview outside the band it covers.
+- **Sliders** mark their default with a small tick and snap onto it; double tap a slider, or use the reset arrow above it, to go back to the default.
+- **Edit** (beside Clear) shows every step on one line: tap the circles to select several and duplicate or remove them, or drag the grip on the right to reorder. A preset group drags as a block.
+- **Shake** (the shuffle arrows at the top of a step's settings) rolls a step's own settings at random, within the useful range; placement and encoding stay. **Re-roll** (the dice, beside the seed at the end of Placement) picks a new seed, which moves where hits land; it is greyed out when a step has nothing random (`hits=0`, except for `shuffle`).
+- **Blend** each step with its opacity, and **mask** it. A mask is built from components: brushes (paint and erase), linear gradients, radials (hard-edged circles; feather fades them), rectangles (resize, turn and move them), pen paths (tap out points, drag while placing one to curve the sides, tap the first to close; points stay editable) and brightness ranges that limit the mask to light or dark parts. Tap a component to make it active; a radial, linear or rectangle then shows handles on the photo to move or resize it, and the others show pins to tap. Each component adds, subtracts or intersects, and has its own opacity and feather (side by side when it is active); long-press to select several and set them together. Copy, Cut and Paste move components between steps. Paint in shows the step only inside the mask; Paint out shows it everywhere else. The red overlay shows the mask; Done ends editing. On a desktop, B and E paint and erase and [ and ] size the brush. Masks are saved in the recipe as strokes and shapes, so they replay exactly at full resolution.
+- **Presets** (the bookmark) are your own saved recipes, kept by the server in `~/.config/glitchrx/presets` (`--presets DIR` to move them), so your phone and desktop share them. Use one to replace the steps, or add its steps to the current recipe. Its steps stay together in the stack under the preset's name and move as a block; once you change one, the group shows Modified, with Revert (back to the preset) and Update preset (save the changes to it). They are ordinary recipe files: `glitchrx --recipe ~/.config/glitchrx/presets/NAME.toml photo.jpg`.
+- **Press and hold the photo** (or the `\` key) to see the untouched original; while masking, hold the compare button in the top bar instead.
+- **Zoom** with a pinch, ctrl + wheel or a trackpad pinch; double-tap, tap the magnifier or press Z for 100% and back. Zoomed in, drag (or use the wheel) to pan. Once the view holds still, what is on screen is cut from the full-resolution render, so it is sharp and exactly the export. While masking, one finger paints and two fingers zoom and pan; the brush keeps its size on screen, so zooming in paints finer lines.
+- **Crop** with the button beside the zoom button: a frame over the whole photo, free or at Original, 1:1, 4:5 or 16:9 (turned with the portrait/landscape switch). The crop comes before every step, so the steps and work size apply to the cropped picture. Masks stay on the same part of the photo when you change the crop. Undoable; saved in the recipe.
+- **Work size** (Full, 4K, 2K, 1K, on the photo at the bottom left) runs the steps on a smaller copy: the glitch texture gets coarser and everything gets faster. At 1K the live preview is already exact. Export writes that size, or enlarges it back to the photo's size with hard pixel edges. It is saved in the recipe.
 - **Undo and redo** with the buttons or Ctrl+Z / Ctrl+Shift+Z. History holds recipes, not images.
-- **Export** at full resolution as TIFF, PNG or JPEG. With `--root`, results can be saved next to the original using the CLI's `-glitch`, `-glitch-1` naming. Nothing is overwritten. The recipe can be downloaded, then loaded again later or replayed with `glitchrx --recipe`.
+- **Export** at full resolution as TIFF, PNG, JPEG (with quality), WebP (quality, or lossless) or AVIF (quality and speed; slow). Download it to this device, save it next to an original from the library using the CLI's `-glitch`, `-glitch-1` naming, or **Save As** into any folder in the server's home folder under a name you choose. Nothing is ever overwritten. The format and its settings are remembered on each device. The recipe can be downloaded, then loaded again later or replayed with `glitchrx --recipe`.
+- **Continue from a saved recipe.** Recipes saved beside an export (in the library or export folder) remember the photo they were made on. Opening that photo again offers to continue from the newest one; Export, then "Saved on the server", lists them all.
+- **Settings** (the gear): light, dark or system appearance; the library folder (what Open browses) and the export folder (where Save As starts), picked from the server's home folder and kept in `~/.config/glitchrx/config.toml` for every device; and what opening another photo does with the steps.
 
 While you change things, the preview runs the recipe on a copy of the photo shrunk to your screen, with every size scaled to match, so even a 26 MP photo answers quickly. That copy is close to the export but not identical, because pixel-level texture cannot shrink with the picture. So once you stop for a moment the preview settles to an exact render: the recipe at full resolution, shrunk to fit, which is exactly what export gives (0.3 to 1.6 s on a 26 MP photo). The status bar says whether the view is approximate or exact. A newer change cancels a render that is still running, and a live preview that runs over 3 s stops with a "too heavy to preview live" notice (export still works).
 

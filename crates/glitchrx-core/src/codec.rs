@@ -1,5 +1,5 @@
-//! Image files in and out: decode any supported format to a [`Raster`],
-//! encode a raster as TIFF, PNG or JPEG.
+//! Image files in and out: decode JPEG, PNG or TIFF to a [`Raster`],
+//! encode a raster as TIFF, PNG, JPEG, WebP or AVIF.
 //!
 //! Decoding applies the EXIF orientation (so the raster is upright) and
 //! keeps the ICC colour profile, which is written into the output so the
@@ -13,12 +13,14 @@ use crate::error::{Error, Result};
 use crate::raster::Raster;
 use crate::turbo::{self, EncodeOptions, PixelFormat, Scale, Subsampling};
 
-/// File formats glitchrx reads and writes.
+/// File formats glitchrx writes. The first three it also reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
     Tiff,
     Png,
     Jpeg,
+    Webp,
+    Avif,
 }
 
 impl Format {
@@ -27,6 +29,8 @@ impl Format {
             Format::Tiff => "tiff",
             Format::Png => "png",
             Format::Jpeg => "jpeg",
+            Format::Webp => "webp",
+            Format::Avif => "avif",
         }
     }
 
@@ -36,6 +40,8 @@ impl Format {
             Format::Tiff => "tif",
             Format::Png => "png",
             Format::Jpeg => "jpg",
+            Format::Webp => "webp",
+            Format::Avif => "avif",
         }
     }
 
@@ -44,20 +50,39 @@ impl Format {
             Format::Tiff => "image/tiff",
             Format::Png => "image/png",
             Format::Jpeg => "image/jpeg",
+            Format::Webp => "image/webp",
+            Format::Avif => "image/avif",
         }
     }
 
-    /// `tiff`, `tif`, `png`, `jpeg`, `jpg` (any case).
+    /// `tiff`, `tif`, `png`, `jpeg`, `jpg`, `webp`, `avif` (any case).
     pub fn parse(s: &str) -> Option<Format> {
         match s.trim().to_ascii_lowercase().as_str() {
             "tiff" | "tif" => Some(Format::Tiff),
             "png" => Some(Format::Png),
             "jpeg" | "jpg" | "jpe" | "jfif" => Some(Format::Jpeg),
+            "webp" => Some(Format::Webp),
+            "avif" => Some(Format::Avif),
             _ => None,
         }
     }
 
-    /// Recognise a file by its first bytes.
+    /// Whether glitchrx can open files of this format (WebP and AVIF are
+    /// export only).
+    pub fn readable(self) -> bool {
+        matches!(self, Format::Tiff | Format::Png | Format::Jpeg)
+    }
+
+    /// Whether some detail is thrown away when encoding with `settings`.
+    pub fn lossy(self, settings: &EncodeSettings) -> bool {
+        match self {
+            Format::Tiff | Format::Png => false,
+            Format::Webp => !settings.lossless,
+            Format::Jpeg | Format::Avif => true,
+        }
+    }
+
+    /// Recognise a file glitchrx can open by its first bytes.
     pub fn sniff(bytes: &[u8]) -> Option<Format> {
         if bytes.starts_with(&[0xFF, 0xD8]) {
             Some(Format::Jpeg)
@@ -102,6 +127,8 @@ pub fn decode_scaled(bytes: &[u8], max: Option<(usize, usize)>) -> Result<Image>
         Format::Jpeg => decode_jpeg(bytes, max)?,
         Format::Png => decode_png(bytes)?,
         Format::Tiff => decode_tiff(bytes)?,
+        // sniff only names formats it can read.
+        Format::Webp | Format::Avif => return Err(Error::UnknownFormat),
     };
     let mut raster = raster.orient(orientation);
     if let Some((w, h)) = max {
@@ -240,18 +267,62 @@ fn to_rgb(w: usize, h: usize, s: &[u8], channels: usize, cmyk: bool) -> Result<R
     Ok(Raster::new(w, h, rgb))
 }
 
-/// Encode a raster. `icc` is embedded when given.
+/// How to encode the lossy formats. Each format reads only what applies to
+/// it, and fills in its own default for anything left out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct EncodeSettings {
+    /// 1..=100, for JPEG, lossy WebP and AVIF. Defaults: JPEG 95, WebP 90,
+    /// AVIF 80.
+    pub quality: Option<u8>,
+    /// WebP: lossless instead of lossy.
+    pub lossless: bool,
+    /// AVIF: 1 (slowest, smallest) to 10 (fastest). Default 6.
+    pub speed: Option<u8>,
+}
+
+impl EncodeSettings {
+    pub const JPEG_QUALITY: u8 = 95;
+    pub const WEBP_QUALITY: u8 = 90;
+    pub const AVIF_QUALITY: u8 = 80;
+    pub const AVIF_SPEED: u8 = 6;
+}
+
+/// Encode a raster with each format's default settings. `icc` is embedded
+/// when given (AVIF: see [`crate::avif`]).
 pub fn encode(raster: &Raster, format: Format, icc: Option<&[u8]>) -> Result<Vec<u8>> {
+    encode_with(raster, format, icc, &EncodeSettings::default())
+}
+
+/// Encode a raster. The same raster and settings always give the same bytes.
+pub fn encode_with(
+    raster: &Raster,
+    format: Format,
+    icc: Option<&[u8]>,
+    settings: &EncodeSettings,
+) -> Result<Vec<u8>> {
+    let quality = |default| settings.quality.unwrap_or(default).clamp(1, 100);
     match format {
         Format::Tiff => encode_tiff(raster, icc),
         Format::Png => encode_png(raster, icc),
+        Format::Webp => crate::webp::encode(
+            raster,
+            quality(EncodeSettings::WEBP_QUALITY),
+            settings.lossless,
+            icc,
+        ),
+        Format::Avif => crate::avif::encode(
+            raster,
+            quality(EncodeSettings::AVIF_QUALITY),
+            settings.speed.unwrap_or(EncodeSettings::AVIF_SPEED),
+            icc,
+        ),
         Format::Jpeg => turbo::encode(
             raster.width as u32,
             raster.height as u32,
             &raster.bytes,
             PixelFormat::Rgb,
             EncodeOptions {
-                quality: 95,
+                quality: quality(EncodeSettings::JPEG_QUALITY),
                 // Full chroma: glitch colour fringes are the point.
                 subsampling: Subsampling::S444,
                 progressive: false,
@@ -410,6 +481,190 @@ mod tests {
             assert_eq!(img.raster, sample(), "{f}");
             assert_eq!(img.icc.as_deref(), Some(&icc[..]), "{f}");
         }
+    }
+
+    /// A minimal ICC profile with only a description, v2 (`desc`) or v4
+    /// (`mluc`) style.
+    fn profile(name: &str, v4: bool) -> Vec<u8> {
+        let mut tag = Vec::new();
+        if v4 {
+            let text: Vec<u8> = name.encode_utf16().flat_map(|u| u.to_be_bytes()).collect();
+            tag.extend_from_slice(b"mluc\0\0\0\0");
+            tag.extend_from_slice(&1u32.to_be_bytes());
+            tag.extend_from_slice(&12u32.to_be_bytes());
+            tag.extend_from_slice(b"enUS");
+            tag.extend_from_slice(&(text.len() as u32).to_be_bytes());
+            tag.extend_from_slice(&28u32.to_be_bytes());
+            tag.extend_from_slice(&text);
+        } else {
+            tag.extend_from_slice(b"desc\0\0\0\0");
+            tag.extend_from_slice(&(name.len() as u32 + 1).to_be_bytes());
+            tag.extend_from_slice(name.as_bytes());
+            tag.push(0);
+        }
+        let mut p = vec![0u8; 128];
+        p.extend_from_slice(&1u32.to_be_bytes());
+        p.extend_from_slice(b"desc");
+        p.extend_from_slice(&144u32.to_be_bytes());
+        p.extend_from_slice(&(tag.len() as u32).to_be_bytes());
+        p.extend_from_slice(&tag);
+        p
+    }
+
+    /// A larger, busier picture than `sample`, for the lossy encoders.
+    fn picture() -> Raster {
+        let (w, h) = (64, 48);
+        let bytes = (0..w * h)
+            .flat_map(|i| {
+                let (x, y) = (i % w, i / w);
+                [(x * 4) as u8, (y * 5) as u8, ((x ^ y) * 8) as u8]
+            })
+            .collect();
+        Raster::new(w, h, bytes)
+    }
+
+    fn decode_webp(bytes: &[u8]) -> Raster {
+        let (mut w, mut h) = (0, 0);
+        // SAFETY: libwebp allocates the pixels, copied then freed here.
+        unsafe {
+            let p = libwebp_sys::WebPDecodeRGB(bytes.as_ptr(), bytes.len(), &mut w, &mut h);
+            assert!(!p.is_null(), "not a webp");
+            let v = std::slice::from_raw_parts(p, (w * h * 3) as usize).to_vec();
+            libwebp_sys::WebPFree(p.cast());
+            Raster::new(w as usize, h as usize, v)
+        }
+    }
+
+    #[test]
+    fn webp_is_exact_when_lossless_and_close_when_lossy() {
+        let img = picture();
+        let lossless = EncodeSettings {
+            lossless: true,
+            ..EncodeSettings::default()
+        };
+        let bytes = encode_with(&img, Format::Webp, None, &lossless).unwrap();
+        assert_eq!(&bytes[0..4], b"RIFF");
+        assert_eq!(&bytes[8..12], b"WEBP");
+        assert_eq!(decode_webp(&bytes), img);
+        let lossy = encode_with(&img, Format::Webp, None, &EncodeSettings::default()).unwrap();
+        let back = decode_webp(&lossy);
+        let err: f64 = img
+            .bytes
+            .iter()
+            .zip(&back.bytes)
+            .map(|(a, b)| (*a as f64 - *b as f64).abs())
+            .sum::<f64>()
+            / img.bytes.len() as f64;
+        assert!(err < 8.0, "mean error {err}");
+        // Lower quality, smaller file; and the same bytes every time.
+        let low = EncodeSettings {
+            quality: Some(20),
+            ..EncodeSettings::default()
+        };
+        let small = encode_with(&img, Format::Webp, None, &low).unwrap();
+        assert!(small.len() < lossy.len());
+        assert_eq!(small, encode_with(&img, Format::Webp, None, &low).unwrap());
+    }
+
+    #[test]
+    fn webp_carries_the_colour_profile() {
+        let icc = profile("Display P3", true);
+        let bytes = encode(&picture(), Format::Webp, Some(&icc)).unwrap();
+        let at = bytes
+            .windows(4)
+            .position(|w| w == b"ICCP")
+            .expect("an ICCP chunk");
+        assert_eq!(&bytes[at + 8..at + 8 + icc.len()], &icc[..]);
+        assert_eq!(decode_webp(&bytes).width, 64);
+    }
+
+    #[test]
+    fn webp_refuses_what_it_cannot_hold() {
+        let wide = Raster::new(
+            crate::webp::MAX_SIDE + 1,
+            1,
+            vec![0; (crate::webp::MAX_SIDE + 1) * 3],
+        );
+        assert!(matches!(
+            encode(&wide, Format::Webp, None),
+            Err(Error::Unsupported(_))
+        ));
+    }
+
+    #[test]
+    fn avif_is_deterministic_and_marks_display_p3() {
+        let img = picture();
+        let fast = EncodeSettings {
+            speed: Some(10),
+            ..EncodeSettings::default()
+        };
+        let a = encode_with(&img, Format::Avif, None, &fast).unwrap();
+        assert_eq!(&a[4..12], b"ftypavif");
+        assert_eq!(a, encode_with(&img, Format::Avif, None, &fast).unwrap());
+        // sRGB is what readers assume, so it has no colour box; Display P3
+        // gets one naming its primaries (code point 12), around the same AV1 data.
+        let primaries = |f: &[u8]| {
+            f.windows(8)
+                .position(|w| w == b"colrnclx")
+                .map(|at| u16::from_be_bytes([f[at + 8], f[at + 9]]))
+        };
+        assert_eq!(primaries(&a), None);
+        let p3 = encode_with(
+            &img,
+            Format::Avif,
+            Some(&profile("Display P3", false)),
+            &fast,
+        )
+        .unwrap();
+        assert_eq!(primaries(&p3), Some(12));
+        let mdat = |f: &[u8]| f[f.windows(4).rposition(|w| w == b"mdat").unwrap()..].to_vec();
+        assert_eq!(mdat(&p3), mdat(&a), "the picture data is the same");
+        // Lower quality, smaller file.
+        let low = EncodeSettings {
+            quality: Some(20),
+            ..fast
+        };
+        assert!(encode_with(&img, Format::Avif, None, &low).unwrap().len() < a.len());
+    }
+
+    #[test]
+    fn profile_names_and_what_avif_keeps() {
+        assert_eq!(
+            crate::avif::profile_name(&profile("sRGB IEC61966-2.1", false)).as_deref(),
+            Some("sRGB IEC61966-2.1")
+        );
+        assert_eq!(
+            crate::avif::profile_name(&profile("Display P3", true)).as_deref(),
+            Some("Display P3")
+        );
+        assert_eq!(crate::avif::profile_name(b"junk"), None);
+        assert!(crate::avif::keeps_profile(None));
+        assert!(crate::avif::keeps_profile(Some(&profile(
+            "sRGB built-in",
+            true
+        ))));
+        assert!(crate::avif::keeps_profile(Some(&profile(
+            "Display P3",
+            true
+        ))));
+        assert!(!crate::avif::keeps_profile(Some(&profile(
+            "Adobe RGB (1998)",
+            false
+        ))));
+        assert!(!crate::avif::keeps_profile(Some(b"junk")));
+    }
+
+    #[test]
+    fn formats_know_what_they_read_and_lose() {
+        assert_eq!(Format::parse("WEBP"), Some(Format::Webp));
+        assert_eq!(Format::parse("avif"), Some(Format::Avif));
+        assert!(!Format::Webp.readable() && !Format::Avif.readable() && Format::Jpeg.readable());
+        let lossless = EncodeSettings {
+            lossless: true,
+            ..EncodeSettings::default()
+        };
+        assert!(!Format::Webp.lossy(&lossless) && Format::Webp.lossy(&EncodeSettings::default()));
+        assert!(Format::Avif.lossy(&lossless) && !Format::Png.lossy(&EncodeSettings::default()));
     }
 
     #[test]

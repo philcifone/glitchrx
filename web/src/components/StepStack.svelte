@@ -5,16 +5,33 @@
   // steps get the room.
   import Dices from '@lucide/svelte/icons/dices';
   import Plus from '@lucide/svelte/icons/plus';
+  import ChevronUp from '@lucide/svelte/icons/chevron-up';
+  import ChevronDown from '@lucide/svelte/icons/chevron-down';
+  import { blocksOf } from '../lib/groups';
   import { tick } from 'svelte';
   import { app } from '../lib/app.svelte';
+  import { revealIn } from '../lib/scroll';
   import { CHANNEL_CHOICES } from '../lib/channels';
   import EffectPalette from './EffectPalette.svelte';
   import StepCard from './StepCard.svelte';
+  import StepEditList from './StepEditList.svelte';
 
   const encodings = $derived(app.config?.encodings ?? []);
   const current = $derived(encodings.find((e) => e.id === app.recipe.encoding));
 
-  let list: HTMLOListElement;
+  let list = $state<HTMLOListElement>();
+  /** Edit mode: one line per step, select several, drag to reorder. */
+  let editing = $state(false);
+
+  function startEditing() {
+    app.stopMasking();
+    editing = true;
+  }
+
+  // Nothing left to edit: back to the cards.
+  $effect(() => {
+    if (editing && app.recipe.steps.length === 0) editing = false;
+  });
   let sheet: HTMLDialogElement;
 
   /** Add a step and bring its card into view. */
@@ -22,8 +39,11 @@
     if (sheet?.open) sheet.close();
     app.addStep(effect);
     await tick();
-    list?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    revealIn(list?.lastElementChild);
   }
+
+  // The stack as blocks: loose steps, and preset groups holding theirs.
+  const blocks = $derived(blocksOf(app.recipe.steps, app.recipe.groups));
 
   /** A tap on the backdrop (the dialog element itself) closes the sheet. */
   function backdrop(e: MouseEvent) {
@@ -32,7 +52,7 @@
 </script>
 
 <div class="wrap">
-<div class="stack">
+<div class="stack" class:editing>
   <section class="card sample">
     <div class="row">
       <label for="encoding">Encoding</label>
@@ -66,15 +86,62 @@
 
   <div class="head">
     <h2 class="section-label">Steps</h2>
-    <button class="icon" onclick={() => app.rerollAll()} disabled={!app.anySeeded} title="New seeds for every step that has something random" aria-label="Re-roll all seeds">
-      <Dices size={18} strokeWidth={1.75} />
-    </button>
-    <button class="plain" onclick={() => app.clearSteps()} disabled={app.recipe.steps.length === 0}>Clear</button>
+    {#if editing}
+      <button class="plain strong" onclick={() => (editing = false)}>Done</button>
+    {:else}
+      <button class="icon" onclick={() => app.rerollAll()} disabled={!app.anySeeded} title="New seeds for every step that has something random" aria-label="Re-roll all seeds">
+        <Dices size={18} strokeWidth={1.75} />
+      </button>
+      <button class="plain" onclick={() => app.clearSteps()} disabled={app.recipe.steps.length === 0}>Clear</button>
+      <button class="plain" onclick={startEditing} disabled={app.recipe.steps.length === 0} title="Select, remove and drag steps into order">Edit</button>
+    {/if}
   </div>
 
+  {#if editing}
+    <StepEditList />
+  {:else}
+
   <ol class="steps" bind:this={list}>
-    {#each app.recipe.steps as step, i (step.uid)}
-      <li><StepCard {step} index={i} count={app.recipe.steps.length} /></li>
+    {#each blocks as b (b.kind === 'step' ? b.step.uid : b.group.id)}
+      {#if b.kind === 'step'}
+        <li><StepCard step={b.step} index={b.i} /></li>
+      {:else}
+        {@const id = b.group.id}
+        {@const modified = app.groupModified(id)}
+        <li class="group" aria-label="From preset {b.group.preset}">
+          <div class="ghead">
+            <span class="gname">
+              <span class="from">From preset</span>
+              <span class="serif pname">{b.group.preset}</span>
+            </span>
+            {#if modified}<span class="badge">Modified</span>{/if}
+            <button class="icon" onclick={() => app.moveGroup(id, -1)} disabled={!app.canMoveGroup(id, -1)} title="Move the group up" aria-label="Move the group up">
+              <ChevronUp size={18} strokeWidth={1.75} />
+            </button>
+            <button class="icon" onclick={() => app.moveGroup(id, 1)} disabled={!app.canMoveGroup(id, 1)} title="Move the group down" aria-label="Move the group down">
+              <ChevronDown size={18} strokeWidth={1.75} />
+            </button>
+          </div>
+          <ol class="steps inner">
+            {#each b.steps as s (s.step.uid)}
+              <li><StepCard step={s.step} index={s.i} /></li>
+            {/each}
+          </ol>
+          <div class="gfoot">
+            <button class="plain" onclick={() => app.revertGroup(id)} disabled={!modified} title="Back to the preset's settings">Revert</button>
+            <button
+              class="plain"
+              onclick={() => app.updatePreset(id)}
+              disabled={!modified || !app.config?.presets}
+              title="Save these steps as the preset {b.group.preset}"
+            >
+              Update preset
+            </button>
+            <span class="grow"></span>
+            <button class="plain" onclick={() => app.ungroup(id)} title="Keep the steps, drop the group">Ungroup</button>
+          </div>
+        </li>
+      {/if}
     {:else}
       <li class="dim none">
         No steps yet. <span class="wide-only">Pick an effect above</span><span class="phone-only">Tap + to add an effect</span>;
@@ -82,12 +149,13 @@
       </li>
     {/each}
   </ol>
+  {/if}
 </div>
 
 <!-- Hidden while painting a mask: it would sit on the painting tools. -->
 <button
   class="primary fab"
-  class:away={!!app.masking}
+  class:away={!!app.masking || editing}
   onclick={() => sheet.showModal()}
   disabled={!app.config}
   aria-label="Add an effect"
@@ -109,6 +177,13 @@
 </dialog>
 
 <style>
+  /* Edit mode has no floating button to keep room for, and its selection
+     bar is sticky, which honours padding: none at the bottom, so the bar
+     sits on the edge. */
+  .stack.editing {
+    padding-bottom: 0;
+  }
+
   .stack {
     flex: 1;
     min-height: 0;
@@ -268,6 +343,10 @@
     flex: 1;
   }
 
+  .strong {
+    font-weight: 600;
+  }
+
   .steps {
     list-style: none;
     margin: 0;
@@ -280,5 +359,69 @@
   .none {
     padding: 4px;
     font-size: 0.9rem;
+  }
+
+  /* A preset group: its cards on a tinted panel, a label above them and
+     its actions below. */
+  .group {
+    background: var(--fill);
+    border-radius: calc(var(--radius-lg) + 4px);
+    padding: 4px 6px 2px;
+  }
+
+  .ghead {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0 6px 8px;
+    margin-bottom: 8px;
+    border-bottom: var(--hairline);
+    min-width: 0;
+  }
+
+  .gname {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+
+  .from {
+    flex: none;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+  }
+
+  .pname {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .badge {
+    flex: none;
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .gfoot {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 2px 0;
+  }
+
+  .gfoot .plain {
+    font-size: 0.9rem;
+  }
+
+  .grow {
+    flex: 1;
   }
 </style>

@@ -11,6 +11,7 @@ use glitchrx_core::codec::Image;
 use glitchrx_core::effects::{self, REGISTRY};
 use glitchrx_core::mask::Mask;
 use glitchrx_core::params::Kind;
+use glitchrx_core::recipe::Crop;
 use glitchrx_core::{Encoding, Recipe, Result, Step};
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +23,17 @@ pub struct RecipeDto {
     pub encoding: Encoding,
     #[serde(default = "one")]
     pub channels: usize,
+    /// The canvas the steps run on (see `Recipe::work_size`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub work_size: Option<u32>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scale_back: bool,
+    /// The photo's file name, recorded in saved recipes (`Recipe::source`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// The part of the photo kept, as shares of it (see `Recipe::crop`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crop: Option<Crop>,
     #[serde(default)]
     pub steps: Vec<StepDto>,
 }
@@ -30,11 +42,25 @@ fn one() -> usize {
     1
 }
 
+/// The last part of a path-like name (either slash), at most 255 bytes.
+fn source_name(s: &str) -> String {
+    let name = s.rsplit(['/', '\\']).next().unwrap_or("").trim();
+    let mut end = name.len().min(255);
+    while !name.is_char_boundary(end) {
+        end -= 1;
+    }
+    name[..end].to_string()
+}
+
 impl Default for RecipeDto {
     fn default() -> Self {
         RecipeDto {
             encoding: Encoding::default(),
             channels: 1,
+            work_size: None,
+            scale_back: false,
+            source: None,
+            crop: None,
             steps: Vec::new(),
         }
     }
@@ -93,18 +119,29 @@ impl RecipeDto {
             .iter()
             .map(|s| {
                 let info = effects::lookup(&s.effect)?;
-                Ok(Step {
+                let mut step = Step {
                     effect: s.effect.clone(),
                     effect_version: s.effect_version.unwrap_or(info.version),
                     seed: s.seed.0,
                     params: s.params.clone(),
                     mask: s.mask.clone(),
-                })
+                };
+                step.upgrade(); // an older step keeps its picture (D-56)
+                Ok(step)
             })
             .collect::<Result<Vec<_>>>()?;
         let r = Recipe {
             encoding: self.encoding,
             channels: self.channels,
+            work_size: self.work_size,
+            scale_back: self.scale_back,
+            // A name only: anything with a folder in it is cut to its last part.
+            source: self
+                .source
+                .as_deref()
+                .map(source_name)
+                .filter(|s| !s.is_empty()),
+            crop: self.crop,
             steps,
             ..Recipe::default()
         };
@@ -116,6 +153,10 @@ impl RecipeDto {
         RecipeDto {
             encoding: r.encoding,
             channels: r.channels,
+            work_size: r.work_size,
+            scale_back: r.scale_back,
+            source: r.source.clone(),
+            crop: r.crop,
             steps: r
                 .steps
                 .iter()
@@ -136,7 +177,7 @@ impl RecipeDto {
 pub struct EffectDto {
     pub id: &'static str,
     pub version: u32,
-    /// Picker section: "audio", "data" or "pixel". Pixel effects ignore
+    /// Picker section: "audio", "data", "pixel" or "adjust". Pixel and adjust effects ignore
     /// the encoding and channels.
     pub group: &'static str,
     /// The Audacity effect this one follows.
@@ -148,6 +189,15 @@ pub struct EffectDto {
     /// A scaled preview cannot match; render exactly when idle.
     pub exact_preview: bool,
     pub params: Vec<ParamDto>,
+    /// How steps from older versions become current (D-56), for recipes
+    /// the GUI kept in the browser.
+    pub upgrades: Vec<UpgradeDto>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UpgradeDto {
+    pub to: u32,
+    pub fill: BTreeMap<&'static str, &'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -182,6 +232,14 @@ pub fn effects() -> Vec<EffectDto> {
                 details: e.details,
                 random_within: e.random_within,
                 exact_preview: e.exact_preview,
+                upgrades: e
+                    .upgrades
+                    .iter()
+                    .map(|u| UpgradeDto {
+                        to: u.to,
+                        fill: u.fill.iter().copied().collect(),
+                    })
+                    .collect(),
                 params: e
                     .all_params()
                     .into_iter()
@@ -195,6 +253,8 @@ pub fn effects() -> Vec<EffectDto> {
                             Kind::Size => ("size", None, None, None),
                             Kind::Region => ("region", None, None, None),
                             Kind::Choice(c) => ("choice", None, None, Some(c)),
+                            Kind::Set(c) => ("set", None, None, Some(c)),
+                            Kind::Curve => ("curve", None, None, None),
                         };
                         ParamDto {
                             name: p.name,
@@ -247,9 +307,16 @@ pub struct DocDto {
     /// The EXIF orientation that was applied (1 = none).
     pub orientation: u8,
     pub has_icc: bool,
+    /// The colour profile's name, when it has one.
+    pub profile: Option<String>,
+    /// AVIF export keeps these colours (no profile, sRGB or Display P3).
+    pub avif_keeps_profile: bool,
     pub file_len: usize,
     /// Raw RGB bytes the effects work on.
     pub raw_len: usize,
+    /// Recipes on the server made on this photo, newest first (to offer
+    /// "continue from"; see `recipes`).
+    pub recipes: Vec<crate::recipes::Found>,
 }
 
 impl DocDto {
@@ -263,8 +330,14 @@ impl DocDto {
             format: img.format.name(),
             orientation: img.orientation,
             has_icc: img.icc.is_some(),
+            profile: img
+                .icc
+                .as_deref()
+                .and_then(glitchrx_core::avif::profile_name),
+            avif_keeps_profile: glitchrx_core::avif::keeps_profile(img.icc.as_deref()),
             file_len,
             raw_len: img.raster.bytes.len(),
+            recipes: Vec::new(),
         }
     }
 }

@@ -4,7 +4,7 @@
   // back), or add its steps to the current recipe.
   import ListPlus from '@lucide/svelte/icons/list-plus';
   import Trash2 from '@lucide/svelte/icons/trash-2';
-  import { app, type NewPhotoChoice } from '../lib/app.svelte';
+  import { app } from '../lib/app.svelte';
 
   let dialog: HTMLDialogElement;
   let name = $state('');
@@ -27,12 +27,6 @@
   function remove(preset: string) {
     if (confirm(`Delete the preset "${preset}"? This cannot be undone.`)) void app.deletePreset(preset);
   }
-
-  const NEW_PHOTO: { id: NewPhotoChoice; label: string }[] = [
-    { id: 'ask', label: 'Ask' },
-    { id: 'keep', label: 'Keep steps' },
-    { id: 'fresh', label: 'Start fresh' },
-  ];
 
   const canSave = $derived(name.trim() !== '' && app.recipe.steps.some((s) => s.enabled));
   // A preset's effects for its row: the first few, then "...".
@@ -92,15 +86,6 @@
       </ul>
     {/if}
 
-    <h3 class="section-label">When you open another photo</h3>
-    <div class="segmented" role="radiogroup" aria-label="When you open another photo">
-      {#each NEW_PHOTO as c (c.id)}
-        <button role="radio" aria-checked={app.newPhoto === c.id} class:on={app.newPhoto === c.id} onclick={() => app.setNewPhotoChoice(c.id)}>
-          {c.label}
-        </button>
-      {/each}
-    </div>
-    <p class="dim small note">What happens to the steps already in the stack. Applies to this device.</p>
   </div>
 </dialog>
 

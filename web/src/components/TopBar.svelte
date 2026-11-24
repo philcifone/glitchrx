@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Title, open, presets, undo/redo, export, theme toggle. While a mask is
+  // Title, open, presets, undo/redo, export, settings. While a mask is
   // being painted it becomes an edit bar, as in iOS: what is being masked,
   // undo/redo (used constantly while painting) and Done. Nothing floats
   // over the photo, and Open and Export wait until painting is done.
@@ -8,15 +8,16 @@
   import Download from '@lucide/svelte/icons/download';
   import Undo2 from '@lucide/svelte/icons/undo-2';
   import Redo2 from '@lucide/svelte/icons/redo-2';
-  import Sun from '@lucide/svelte/icons/sun';
-  import Moon from '@lucide/svelte/icons/moon';
+  import SquareSplitHorizontal from '@lucide/svelte/icons/square-split-horizontal';
+  import Settings from '@lucide/svelte/icons/settings';
   import { app } from '../lib/app.svelte';
-  import { currentTheme, toggleTheme, type Theme } from '../lib/theme';
-  import { onMount } from 'svelte';
 
-  let { onopen, onexport, onpresets }: { onopen: () => void; onexport: () => void; onpresets: () => void } = $props();
-  let theme = $state<Theme>('dark');
-  onMount(() => (theme = currentTheme()));
+  let {
+    onopen,
+    onexport,
+    onpresets,
+    onsettings,
+  }: { onopen: () => void; onexport: () => void; onpresets: () => void; onsettings: () => void } = $props();
 </script>
 
 <header>
@@ -27,6 +28,23 @@
       <span class="what">Step {t.n}: {t.step.effect}{t.step.enabled ? '' : ' (off)'}</span>
     </div>
     <div class="actions">
+      <!-- Holding the photo paints here, so comparing has its own button. -->
+      <button
+        class="icon"
+        class:on={app.comparing}
+        onpointerdown={(e) => {
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          app.compare(true);
+        }}
+        onpointerup={() => app.compare(false)}
+        onpointercancel={() => app.compare(false)}
+        onlostpointercapture={() => app.compare(false)}
+        oncontextmenu={(e) => e.preventDefault()}
+        title="Hold to see the original (or hold the \ key)"
+        aria-label="Hold to see the original"
+      >
+        <SquareSplitHorizontal size={18} strokeWidth={1.75} />
+      </button>
       <button class="icon" onclick={() => app.undo()} disabled={!app.canUndo} title="Undo the last stroke (Ctrl+Z)" aria-label="Undo">
         <Undo2 size={18} strokeWidth={1.75} />
       </button>
@@ -36,7 +54,7 @@
       <button class="primary" onclick={() => app.stopMasking()} title="Finish painting (Enter)">Done</button>
     </div>
   {:else}
-    <h1>glitchrx</h1>
+    <h1>glitchRx</h1>
     <div class="actions">
       <button class="plain" onclick={onopen} title="Open a photo" aria-label="Open">
         <FolderOpen size={18} strokeWidth={1.75} />
@@ -57,13 +75,8 @@
         <Download size={18} strokeWidth={2} />
         <span class="label">Export</span>
       </button>
-      <button
-        class="icon"
-        onclick={() => (theme = toggleTheme())}
-        title="Switch to {theme === 'dark' ? 'light' : 'dark'} theme"
-        aria-label="Toggle theme"
-      >
-        {#if theme === 'dark'}<Sun size={18} strokeWidth={1.75} />{:else}<Moon size={18} strokeWidth={1.75} />{/if}
+      <button class="icon" onclick={onsettings} title="Settings: appearance, folders" aria-label="Settings">
+        <Settings size={18} strokeWidth={1.75} />
       </button>
     </div>
   {/if}
@@ -125,6 +138,17 @@
     gap: 2px;
   }
 
+  /* The compare button while held. */
+  .actions .icon.on {
+    background: var(--accent);
+    color: var(--accent-fg);
+  }
+
+  .actions .icon {
+    touch-action: none;
+    -webkit-touch-callout: none;
+  }
+
   .actions .primary {
     margin: 0 6px;
     border-radius: 999px;
@@ -142,8 +166,8 @@
     }
   }
 
-  /* Narrow phones (mini, SE, Display Zoom): tighter, still tappable. */
-  @media (max-width: 389px) {
+  /* Phones up to the Pro Max (430 px): tighter, still tappable. */
+  @media (max-width: 429px) {
     header {
       gap: 8px;
       padding-left: 12px;
