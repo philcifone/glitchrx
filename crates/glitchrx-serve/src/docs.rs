@@ -31,6 +31,7 @@ use glitchrx_core::recipe::{Cancel, Crop};
 
 /// What decides a photo's canvas: work size and crop (`Recipe::framing`).
 type Framing = (Option<u32>, Option<Crop>);
+use glitchrx_core::project::{self, Project};
 use glitchrx_core::{Encoding, Raster, Recipe, Result, Step, Units};
 
 /// Upper bound on cached per-step preview rasters, in bytes, per document.
@@ -47,6 +48,12 @@ pub struct Doc {
     pub source: Option<PathBuf>,
     /// Size of the original file.
     pub file_len: usize,
+    /// The original file itself, kept for project files (D-63), which
+    /// carry it as it was rather than re-encoded.
+    pub file: Arc<Vec<u8>>,
+    /// Opened from a project (`.glrx`): `source`, when set, is the project
+    /// file, and `project` its name.
+    pub project: Option<String>,
     /// The decoded, upright image.
     pub image: Arc<Image>,
     /// Bumped by every preview request; a request that finds it changed by
@@ -118,6 +125,8 @@ impl Doc {
             name,
             source,
             file_len: bytes.len(),
+            file: Arc::new(bytes.to_vec()),
+            project: None,
             generation: AtomicU64::new(0),
             zoom_generation: AtomicU64::new(0),
             cache: Mutex::new(RenderCache::default()),
@@ -125,6 +134,24 @@ impl Doc {
             canvas: Mutex::new(((None, None), None)),
             image: Arc::new(image),
         })
+    }
+
+    /// Open a photo or a project file (`file_name` is what it is called on
+    /// disk or in the browser). A project opens as its original, named as
+    /// the original was, and hands back its recipe.
+    pub fn open(
+        id: String,
+        file_name: String,
+        source: Option<PathBuf>,
+        bytes: &[u8],
+    ) -> Result<(Doc, Option<Recipe>)> {
+        if !project::is_project(bytes) {
+            return Ok((Doc::new(id, file_name, source, bytes)?, None));
+        }
+        let p = Project::from_bytes(bytes)?;
+        let mut doc = Doc::new(id, p.name, source, &p.original)?;
+        doc.project = Some(file_name);
+        Ok((doc, Some(p.recipe)))
     }
 
     /// Register a new render request and return its generation number.

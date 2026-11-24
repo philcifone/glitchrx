@@ -16,7 +16,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use glitchrx_core::codec;
-use glitchrx_core::io::{auto_output, base_stem, write_output};
+use glitchrx_core::io::{WriteError, auto_output, base_stem, write_output, write_project};
+use glitchrx_core::project::{self, Project};
 use glitchrx_core::recipe::NEVER;
 use glitchrx_core::{Error, Raster, Recipe};
 use serde::{Deserialize, Serialize};
@@ -247,10 +248,14 @@ fn doc_dto(st: &AppState, doc: &Doc) -> DocDto {
         _ => None,
     };
     let mut dto = DocDto::new(&doc.id, &doc.name, path, doc.file_len, &doc.image);
-    dto.recipes = recipes::scan(&recipe_roots(st))
-        .into_iter()
-        .filter(|f| recipes::matches(f, &doc.name))
-        .collect();
+    dto.project = doc.project.clone();
+    // A project brings its own recipe: nothing to offer to continue from.
+    if doc.project.is_none() {
+        dto.recipes = recipes::scan(&recipe_roots(st))
+            .into_iter()
+            .filter(|f| recipes::matches(f, &doc.name))
+            .collect();
+    }
     dto
 }
 
@@ -538,12 +543,22 @@ async fn upload(
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| "photo.jpg".into());
     let st2 = st.clone();
-    blocking(move || {
-        let doc = Doc::new(random_hex(8), name, None, &body)?;
-        let doc = st2.store.insert(doc);
-        Ok(Json(doc_dto(&st2, &doc)))
-    })
-    .await
+    blocking(move || Ok(Json(open_doc(&st2, name, None, &body)?))).await
+}
+
+/// Open a photo or a project and answer with its description; a project's
+/// recipe comes along, for the GUI to load.
+fn open_doc(
+    st: &AppState,
+    file_name: String,
+    source: Option<PathBuf>,
+    bytes: &[u8],
+) -> ApiResult<DocDto> {
+    let (doc, recipe) = Doc::open(random_hex(8), file_name, source, bytes)?;
+    let doc = st.store.insert(doc);
+    let mut dto = doc_dto(st, &doc);
+    dto.recipe = recipe.as_ref().map(RecipeDto::from_recipe);
+    Ok(dto)
 }
 
 /// Keep only the final path component and drop control characters, so a
@@ -562,10 +577,10 @@ struct OpenRequest {
     path: String,
 }
 
-/// Open a photo from `--root`.
+/// Open a photo or a project from `--root`.
 async fn open(State(st): State<Shared>, Json(req): Json<OpenRequest>) -> ApiResult<Json<DocDto>> {
     let path = browse::resolve(&root(&st)?, &req.path)?;
-    if !path.is_file() || !browse::is_photo(&path) {
+    if !path.is_file() || !browse::is_openable(&path) {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "not a photo"));
     }
     let st2 = st.clone();
@@ -575,9 +590,7 @@ async fn open(State(st): State<Shared>, Json(req): Json<OpenRequest>) -> ApiResu
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let doc = Doc::new(random_hex(8), name, Some(path), &bytes)?;
-        let doc = st2.store.insert(doc);
-        Ok(Json(doc_dto(&st2, &doc)))
+        Ok(Json(open_doc(&st2, name, Some(path), &bytes)?))
     })
     .await
 }
@@ -876,6 +889,34 @@ struct ExportRequest {
     /// Save modes only: also write the recipe as TOML next to the output.
     #[serde(default)]
     with_recipe: bool,
+    /// A project file (`.glrx`, D-63) instead of a picture: the original,
+    /// the recipe and a preview. `format` and the encoder settings are
+    /// then unused.
+    #[serde(default)]
+    project: bool,
+    /// Save next to the original only: write the project over the one the
+    /// photo was opened from (the GUI asks first).
+    #[serde(default)]
+    replace: bool,
+}
+
+impl ExportRequest {
+    /// The file extension of what is written.
+    fn ext(&self) -> &'static str {
+        if self.project {
+            project::EXTENSION
+        } else {
+            codec::Format::from(self.format).extension()
+        }
+    }
+
+    fn mime(&self) -> &'static str {
+        if self.project {
+            project::MIMETYPE
+        } else {
+            codec::Format::from(self.format).mime()
+        }
+    }
 }
 
 impl ExportRequest {
@@ -895,13 +936,30 @@ impl ExportRequest {
 }
 
 /// File name for a download: `photo.jpg` -> `photo-glitch.tif`.
-fn export_name(doc_name: &str, format: Format) -> String {
+fn export_name(doc_name: &str, ext: &str) -> String {
     let stem = std::path::Path::new(doc_name)
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let ext = codec::Format::from(format).extension();
     format!("{}-glitch.{ext}", base_stem(&stem))
+}
+
+/// What an export writes: the picture, or a project holding the original,
+/// the recipe and a preview of the same render.
+fn output_bytes(
+    doc: &Doc,
+    recipe: &Recipe,
+    req: &ExportRequest,
+    settings: &codec::EncodeSettings,
+) -> ApiResult<Vec<u8>> {
+    if !req.project {
+        return export_bytes(doc, recipe, req.format, settings);
+    }
+    let bent = doc.render_full(recipe, NEVER)?;
+    let full = (doc.image.raster.width, doc.image.raster.height);
+    let raster = recipe.finish(bent.as_ref().clone(), full);
+    let preview = project::preview(&raster, doc.image.icc.as_deref())?;
+    Ok(Project::new(recipe.clone(), &doc.name, &doc.file, Some(preview))?.to_bytes()?)
 }
 
 /// Bend the full image and encode it, keeping the colour profile.
@@ -933,8 +991,8 @@ async fn export(
     let recipe = req.recipe.to_recipe()?;
     let settings = req.settings()?;
     blocking(move || {
-        let bytes = export_bytes(&doc, &recipe, req.format, &settings)?;
-        let name = export_name(&doc.name, req.format);
+        let bytes = output_bytes(&doc, &recipe, &req, &settings)?;
+        let name = export_name(&doc.name, req.ext());
         // RFC 6266: an ASCII fallback plus the exact UTF-8 name.
         let ascii: String = name
             .chars()
@@ -952,10 +1010,7 @@ async fn export(
         );
         Ok((
             [
-                (
-                    header::CONTENT_TYPE,
-                    codec::Format::from(req.format).mime().to_string(),
-                ),
+                (header::CONTENT_TYPE, req.mime().to_string()),
                 (header::CONTENT_DISPOSITION, disposition),
                 (header::CACHE_CONTROL, "no-store".to_string()),
             ],
@@ -1001,17 +1056,28 @@ async fn save(
     };
     let recipe = req.recipe.to_recipe()?;
     let settings = req.settings()?;
+    if req.replace && (!req.project || doc.project.is_none()) {
+        return Err(ApiError::bad(
+            "only a project can be saved over the one it was opened from",
+        ));
+    }
     blocking(move || {
-        let bytes = export_bytes(&doc, &recipe, req.format, &settings)?;
-        let ext = codec::Format::from(req.format).extension();
-        let out = auto_output(&source, ext).map_err(|e| ApiError::internal(e.to_string()))?;
+        let bytes = output_bytes(&doc, &recipe, &req, &settings)?;
+        let conflict = |e: WriteError| ApiError::new(StatusCode::CONFLICT, e.to_string());
+        if req.replace {
+            // Over the project itself (D-63); the GUI asked first.
+            write_project(&source, &source, &bytes, true).map_err(conflict)?;
+            return Ok(Json(Saved {
+                saved: vec![browse::relative(&root, &source)],
+            }));
+        }
+        let out = auto_output(&source, req.ext()).map_err(|e| ApiError::internal(e.to_string()))?;
         let write = |path: &std::path::Path, data: &[u8]| {
-            write_output(&source, path, data, false)
-                .map_err(|e| ApiError::new(StatusCode::CONFLICT, e.to_string()))
+            write_output(&source, path, data, false).map_err(conflict)
         };
         write(&out, &bytes)?;
         let mut saved = vec![browse::relative(&root, &out)];
-        if req.with_recipe {
+        if req.with_recipe && !req.project {
             let rpath = out.with_extension("recipe.toml");
             write(&rpath, recipe.to_toml().as_bytes())?;
             saved.push(browse::relative(&root, &rpath));
@@ -1058,9 +1124,7 @@ async fn desktop_open(State(st): State<Shared>) -> ApiResult<Response> {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let doc = Doc::new(random_hex(8), name, Some(path), &bytes)?;
-        let doc = st2.store.insert(doc);
-        Ok(Json(doc_dto(&st2, &doc)).into_response())
+        Ok(Json(open_doc(&st2, name, Some(path), &bytes)?).into_response())
     })
     .await
 }
@@ -1088,16 +1152,16 @@ async fn save_as(
     let recipe = req.recipe.to_recipe()?;
     let settings = req.settings()?;
     blocking(move || {
-        let ext = codec::Format::from(req.format).extension();
+        let ext = req.ext();
         let (dir, name) = match &doc.source {
             Some(src) => {
                 let suggested = auto_output(src, ext)
                     .ok()
                     .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-                    .unwrap_or_else(|| export_name(&doc.name, req.format));
+                    .unwrap_or_else(|| export_name(&doc.name, ext));
                 (src.parent().map(|p| p.to_path_buf()), suggested)
             }
-            None => (pictures_dir(), export_name(&doc.name, req.format)),
+            None => (pictures_dir(), export_name(&doc.name, ext)),
         };
         let Some(out) = dialogs.save_as(dir.as_deref(), &name) else {
             return Ok(cancelled());
@@ -1105,12 +1169,18 @@ async fn save_as(
         // An uploaded photo has no file on disk; an empty path matches
         // nothing, so only the "never the input" check is skipped.
         let source = doc.source.clone().unwrap_or_default();
-        let bytes = export_bytes(&doc, &recipe, req.format, &settings)?;
-        write_output(&source, &out, &bytes, true)
-            .map_err(|e| ApiError::new(StatusCode::CONFLICT, e.to_string()))?;
+        let bytes = output_bytes(&doc, &recipe, &req, &settings)?;
+        // The dialog asked before replacing; a project may even replace
+        // the one it came from (D-63), a photo never.
+        let written = if req.project {
+            write_project(&source, &out, &bytes, true)
+        } else {
+            write_output(&source, &out, &bytes, true)
+        };
+        written.map_err(|e| ApiError::new(StatusCode::CONFLICT, e.to_string()))?;
         let mut saved = vec![out.display().to_string()];
         let mut skipped = Vec::new();
-        if req.with_recipe {
+        if req.with_recipe && !req.project {
             let rpath = out.with_extension("recipe.toml");
             match write_output(&source, &rpath, recipe.to_toml().as_bytes(), false) {
                 Ok(()) => saved.push(rpath.display().to_string()),
@@ -1229,9 +1299,12 @@ fn file_name(name: &str, ext: &str) -> ApiResult<String> {
             "a file name, without folders, not starting with a dot",
         ));
     }
-    let has_ext = std::path::Path::new(&clean)
-        .extension()
-        .is_some_and(|e| codec::Format::parse(&e.to_string_lossy()) == codec::Format::parse(ext));
+    // The extension itself, or another spelling of the same format (`.jpeg`).
+    let has_ext = std::path::Path::new(&clean).extension().is_some_and(|e| {
+        let e = e.to_string_lossy();
+        e.eq_ignore_ascii_case(ext)
+            || codec::Format::parse(&e).is_some_and(|f| codec::Format::parse(ext) == Some(f))
+    });
     Ok(if has_ext {
         clean
     } else {
@@ -1252,11 +1325,12 @@ async fn save_to(
     let folder = store
         .folder(&req.folder)
         .map_err(|_| ApiError::bad(format!("{}: not a folder in your home folder", req.folder)))?;
-    let ext = codec::Format::from(req.export.format).extension();
+    let ext = req.export.ext();
     let out = folder.join(file_name(&req.name, ext)?);
     let recipe = req.export.recipe.to_recipe()?;
     let encode = req.export.settings()?;
-    let (format, with_recipe) = (req.export.format, req.export.with_recipe);
+    let with_recipe = req.export.with_recipe && !req.export.project;
+    let export = req.export;
     let source = doc.source.clone().unwrap_or_default();
     let shown = |p: &std::path::Path| format!("~/{}", store.relative(p));
     let (out_shown, rpath) = (shown(&out), out.with_extension("recipe.toml"));
@@ -1269,7 +1343,7 @@ async fn save_to(
         ));
     }
     blocking(move || {
-        let bytes = export_bytes(&doc, &recipe, format, &encode)?;
+        let bytes = output_bytes(&doc, &recipe, &export, &encode)?;
         let write = |path: &std::path::Path, data: &[u8]| {
             write_output(&source, path, data, false)
                 .map_err(|e| ApiError::new(StatusCode::CONFLICT, e.to_string()))
@@ -1289,6 +1363,9 @@ async fn save_to(
 struct SuggestRequest {
     folder: String,
     format: Format,
+    /// A project file's name rather than a picture's.
+    #[serde(default)]
+    project: bool,
 }
 
 #[derive(Serialize)]
@@ -1309,7 +1386,11 @@ async fn suggest_name(
     let folder = store
         .folder(&req.folder)
         .map_err(|_| ApiError::bad(format!("{}: not a folder in your home folder", req.folder)))?;
-    let ext = codec::Format::from(req.format).extension();
+    let ext = if req.project {
+        project::EXTENSION
+    } else {
+        codec::Format::from(req.format).extension()
+    };
     let out =
         auto_output(&folder.join(&doc.name), ext).map_err(|e| ApiError::internal(e.to_string()))?;
     let name = out
@@ -1400,15 +1481,20 @@ async fn browse_dir(
     blocking(move || Ok(Json(browse::list(&root, &q.path)?))).await
 }
 
-/// A small JPEG thumbnail of a photo under `--root`.
+/// A small JPEG thumbnail of a photo under `--root`, or of a project's
+/// preview (its original, if it has none).
 async fn thumb(State(st): State<Shared>, Query(q): Query<PathQuery>) -> ApiResult<Response> {
     let path = browse::resolve(&root(&st)?, &q.path)?;
-    if !browse::is_photo(&path) {
+    if !browse::is_openable(&path) {
         return Err(ApiError::new(StatusCode::NOT_FOUND, "not a photo"));
     }
     blocking(move || {
-        let bytes =
+        let mut bytes =
             std::fs::read(&path).map_err(|_| ApiError::new(StatusCode::NOT_FOUND, "not found"))?;
+        if project::is_project(&bytes) {
+            let p = Project::from_bytes(&bytes)?;
+            bytes = p.preview.unwrap_or(p.original);
+        }
         let img = codec::decode_scaled(&bytes, Some((240, 240)))?;
         let jpeg = render::preview_jpeg(&img.raster, 75).map_err(ApiError::internal)?;
         Ok((
@@ -1431,12 +1517,16 @@ mod tests {
     fn names() {
         assert_eq!(sanitize_name("../../etc/passwd"), "passwd");
         assert_eq!(sanitize_name("C:\\x\\photo.JPG"), "photo.JPG");
-        assert_eq!(export_name("photo.JPG", Format::Tiff), "photo-glitch.tif");
-        assert_eq!(
-            export_name("photo-glitch-3.jpg", Format::Png),
-            "photo-glitch.png"
-        );
-        assert_eq!(export_name("a b.tiff", Format::Jpeg), "a b-glitch.jpg");
+        assert_eq!(export_name("photo.JPG", "tif"), "photo-glitch.tif");
+        assert_eq!(export_name("photo-glitch-3.jpg", "png"), "photo-glitch.png");
+        assert_eq!(export_name("a b.tiff", "jpg"), "a b-glitch.jpg");
+        assert_eq!(export_name("IMG_1.jpg", "glrx"), "IMG_1-glitch.glrx");
+        // A typed name keeps its own spelling of the format, and gets the
+        // extension otherwise.
+        assert_eq!(file_name("x.jpeg", "jpg").unwrap(), "x.jpeg");
+        assert_eq!(file_name("x", "glrx").unwrap(), "x.glrx");
+        assert_eq!(file_name("x.GLRX", "glrx").unwrap(), "x.GLRX");
+        assert_eq!(file_name("x.bar", "glrx").unwrap(), "x.bar.glrx");
         assert_eq!(percent_encode("a b.jpg"), "a%20b.jpg");
     }
 

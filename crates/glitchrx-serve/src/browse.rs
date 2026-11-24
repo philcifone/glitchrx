@@ -67,6 +67,17 @@ pub fn relative(root: &Path, path: &Path) -> String {
         .join("/")
 }
 
+/// A project file (`.glrx`), by its name.
+pub fn is_project(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case(glitchrx_core::project::EXTENSION))
+}
+
+/// What Open offers: photos and projects.
+pub fn is_openable(path: &Path) -> bool {
+    is_photo(path) || is_project(path)
+}
+
 pub fn is_photo(path: &Path) -> bool {
     path.extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
@@ -105,7 +116,7 @@ pub fn list(root: &Path, rel: &str) -> Result<Listing, BrowseError> {
         };
         if meta.is_dir() {
             dirs.push(item);
-        } else if meta.is_file() && is_photo(&real) {
+        } else if meta.is_file() && is_openable(&real) {
             files.push(item);
         }
     }

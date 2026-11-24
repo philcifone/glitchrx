@@ -48,8 +48,8 @@ impl NativeDialogs {
 impl Dialogs for NativeDialogs {
     fn pick_photo(&self, dir: Option<&Path>) -> Option<PathBuf> {
         self.builder(dir)
-            .set_title("Open a photo")
-            .add_filter("Photos", PHOTO_EXTENSIONS)
+            .set_title("Open a photo or project")
+            .add_filter("Photos and projects", PHOTO_EXTENSIONS)
             .blocking_pick_file()?
             .into_path()
             .ok()

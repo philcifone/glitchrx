@@ -1310,3 +1310,152 @@ async fn histogram_of_the_picture_reaching_a_step() {
     let (s, _, _) = send(&app, ask(3)).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn projects_download_open_and_save_over_themselves() {
+    use glitchrx_core::project::{self, Project};
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("pics");
+    fs::create_dir_all(&root).unwrap();
+    let original = fixture("orient-6.jpg");
+    fs::write(root.join("photo.jpg"), &original).unwrap();
+    let app = app(Some(root.canonicalize().unwrap()), None);
+
+    // A project downloaded from an uploaded photo carries it and the recipe.
+    let doc = upload(&app, "photo.jpg", original.clone()).await;
+    let id = doc["id"].as_str().unwrap();
+    assert!(doc["project"].is_null());
+    let (s, h, b) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/export"),
+            json!({"recipe": sample_recipe(), "format": "tiff", "project": true}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    assert_eq!(h[header::CONTENT_TYPE], project::MIMETYPE);
+    assert!(
+        h[header::CONTENT_DISPOSITION]
+            .to_str()
+            .unwrap()
+            .contains("photo-glitch.glrx")
+    );
+    let p = Project::from_bytes(&b).unwrap();
+    assert_eq!(p.name, "photo.jpg");
+    assert_eq!(p.recipe.steps.len(), 2);
+    assert!(p.preview.is_some());
+    assert_eq!(
+        codec::decode(&p.original).unwrap().raster,
+        codec::decode(&original).unwrap().raster
+    );
+
+    // Uploaded back, it opens as its original with its recipe.
+    let opened = upload(&app, "edit.glrx", b.clone()).await;
+    assert_eq!(opened["name"], "photo.jpg");
+    assert_eq!(opened["project"], "edit.glrx");
+    assert_eq!(opened["recipe"]["steps"].as_array().unwrap().len(), 2);
+    assert_eq!(opened["recipe"]["steps"][0]["effect"], "echo");
+
+    // In the library: listed, with the preview as its thumbnail.
+    fs::write(root.join("edit.glrx"), &b).unwrap();
+    let (_, _, l) = send(
+        &app,
+        Request::get("/api/browse?path=")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    let names: Vec<_> = json_of(&l)["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["name"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(names, ["edit.glrx", "photo.jpg"]);
+    let (s, _, t) = send(
+        &app,
+        Request::get("/api/thumb?path=edit.glrx")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(t.starts_with(&[0xFF, 0xD8]));
+
+    // Opened from the library, saved next to it as a new project, then
+    // over itself when asked.
+    let (_, _, o) = send(
+        &app,
+        post_json("/api/docs/open", json!({"path": "edit.glrx"})),
+    )
+    .await;
+    let o = json_of(&o);
+    let id = o["id"].as_str().unwrap();
+    assert_eq!(o["path"], "edit.glrx");
+    assert_eq!(o["recipes"], json!([]), "no continue-from for a project");
+    let one_step = json!({"steps": [{"effect": "invert", "seed": "1", "params": {}}]});
+    let (s, _, r) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/save"),
+            json!({"recipe": one_step, "format": "tiff", "project": true}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&r));
+    assert_eq!(json_of(&r)["saved"], json!(["edit-glitch.glrx"]));
+    assert_eq!(
+        fs::read(root.join("edit.glrx")).unwrap(),
+        b,
+        "not replaced unasked"
+    );
+    let (s, _, r) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/save"),
+            json!({"recipe": one_step, "format": "tiff", "project": true, "replace": true}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&r));
+    assert_eq!(json_of(&r)["saved"], json!(["edit.glrx"]));
+    let replaced = Project::from_bytes(&fs::read(root.join("edit.glrx")).unwrap()).unwrap();
+    assert_eq!(replaced.recipe.steps[0].effect, "invert");
+    assert_eq!(
+        replaced.original, p.original,
+        "the photo inside is carried over"
+    );
+
+    // A photo is never replaced, and a picture never replaces a project.
+    let (_, _, ph) = send(
+        &app,
+        post_json("/api/docs/open", json!({"path": "photo.jpg"})),
+    )
+    .await;
+    let pid = json_of(&ph)["id"].as_str().unwrap().to_string();
+    for (doc, body) in [
+        (
+            &pid,
+            json!({"recipe": one_step, "format": "tiff", "project": true, "replace": true}),
+        ),
+        (
+            &id.to_string(),
+            json!({"recipe": one_step, "format": "tiff", "replace": true}),
+        ),
+    ] {
+        let (s, _, _) = send(&app, post_json(&format!("/api/docs/{doc}/save"), body)).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+    }
+    assert_eq!(fs::read(root.join("photo.jpg")).unwrap(), original);
+
+    // Not a project, though named like one.
+    let (s, _, _) = send(
+        &app,
+        Request::post("/api/docs?name=x.glrx")
+            .body(Body::from(&b"PK\x03\x04junk"[..]))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(s, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+}
