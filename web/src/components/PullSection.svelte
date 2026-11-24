@@ -6,6 +6,7 @@
   // the grid's spacing and how it shows).
   import Hand from '@lucide/svelte/icons/hand-grab';
   import Eraser from '@lucide/svelte/icons/eraser';
+  import Grid from '@lucide/svelte/icons/grid-3x3';
   import { app } from '../lib/app.svelte';
   import { percent } from '../lib/mask';
   import { GRID_MAX, GRID_MIN, pullSizeScale, strokeCount, STRENGTH_MIN, type GridShow, type PullMode } from '../lib/pull';
@@ -16,6 +17,12 @@
 
   const count = $derived((step.pull?.length ?? 0) + (step.pin?.length ?? 0));
   const tool = $derived(app.pullTool);
+
+  /** Choose a tool, and start pulling with it if not already. */
+  function pick(mode: PullMode) {
+    app.setPullTool({ mode });
+    if (!active) app.startPulling(step.uid);
+  }
   const MODES: [PullMode, string][] = [
     ['draw', 'Draw'],
     ['pins', 'Pins'],
@@ -35,29 +42,32 @@
     <h3 class="section-label">Strokes and pins</h3>
     <span class="dim count">{strokeCount(step.pull?.length ?? 0, step.pin?.length ?? 0)}</span>
   </div>
+  <!-- The tools, always in view (Phil, 2026-11-24: Pins hid behind Draw);
+       picking one starts pulling with it. -->
+  <div class="segmented mode" role="radiogroup" aria-label="Pull tool">
+    {#each MODES as [id, label] (id)}
+      <button
+        role="radio"
+        aria-checked={tool.mode === id}
+        class:on={tool.mode === id}
+        onclick={() => pick(id)}
+        disabled={!usable}
+        title={usable ? (id === 'draw' ? 'Drag on the photo to pull it' : 'Pick up grid points and move them') : step.enabled ? 'Open a photo first' : 'Turn the step on first'}
+      >
+        {#if id === 'draw'}<Hand size={16} strokeWidth={1.75} />{:else}<Grid size={16} strokeWidth={1.75} />{/if}
+        {label}
+      </button>
+    {/each}
+  </div>
   <div class="actions">
     {#if active}
       <button class="primary" onclick={() => app.stopPulling()} title="Finish pulling (Enter)">Done</button>
-    {:else}
-      <button
-        class="primary"
-        onclick={() => app.startPulling(step.uid)}
-        disabled={!usable}
-        title={usable ? 'Drag on the photo to pull it' : step.enabled ? 'Open a photo first' : 'Turn the step on first'}
-      >
-        <Hand size={16} strokeWidth={1.75} /> Draw
-      </button>
     {/if}
     <button class="plain danger" onclick={() => app.clearPull(step.uid)} disabled={!count} title="Remove every stroke and pin (undo brings them back)">
       <Eraser size={16} strokeWidth={1.75} /> Clear
     </button>
   </div>
   {#if active}
-    <div class="segmented mode" role="radiogroup" aria-label="Pull tool">
-      {#each MODES as [id, label] (id)}
-        <button role="radio" aria-checked={tool.mode === id} class:on={tool.mode === id} onclick={() => app.setPullTool({ mode: id })}>{label}</button>
-      {/each}
-    </div>
     <div class="row">
       <span class="lbl">Size</span>
       <input
@@ -121,7 +131,7 @@
     </p>
     {/if}
   {:else if !count}
-    <p class="dim note">Draw on the photo to pull pixels along with your finger, or pin grid points and move them.</p>
+    <p class="dim note">Draw to pull pixels along with your finger, or Pins to pick up grid points and move them.</p>
   {/if}
 </section>
 
