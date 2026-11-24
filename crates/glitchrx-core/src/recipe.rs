@@ -883,6 +883,19 @@ mod tests {
         assert!(echo.prepare(Encoding::default(), 1).is_err());
     }
 
+    /// A version 6 recipe with pins, as written today, keeps loading: files
+    /// saved now must open in every later build (Phil, 2026-11-24).
+    #[test]
+    fn version_6_recipes_with_pins_load() {
+        let v6 = "format = \"glitcharaxia-recipe\"\nversion = 6\n\n[[step]]\n\
+                  effect = \"pull\"\neffect_version = 1\nseed = 0\n\n\
+                  [[step.pull]]\nsize = 0.1\nstrength = 0.6\npoints = [0.5, 0.5, 0.6, 0.5]\n\n\
+                  [[step.pin]]\nsize = 0.2\nfrom = [0.5, 0.5]\nto = [0.56, 0.47]\n";
+        let r = Recipe::from_toml(v6).unwrap();
+        assert_eq!(r.steps[0].pull.len(), 1);
+        assert_eq!(r.steps[0].pin[0].to, [0.56, 0.47]);
+    }
+
     /// A pull step's strokes go to `[[step.pull]]` and come back the same.
     #[test]
     fn pull_strokes_round_trip() {
