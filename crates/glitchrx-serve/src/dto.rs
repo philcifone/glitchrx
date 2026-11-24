@@ -83,6 +83,9 @@ pub struct StepDto {
     /// A pull step's strokes (SPEC 8.2); absent for every other step.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pull: Vec<glitchrx_core::pull::Stroke>,
+    /// A pull step's pins (D-67); absent for every other step.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pin: Vec<glitchrx_core::pull::Pin>,
 }
 
 /// A seed that is written as a JSON string but also accepted as a number.
@@ -129,6 +132,7 @@ impl RecipeDto {
                     params: s.params.clone(),
                     mask: s.mask.clone(),
                     pull: s.pull.clone(),
+                    pin: s.pin.clone(),
                 };
                 step.upgrade(); // an older step keeps its picture (D-56)
                 Ok(step)
@@ -171,6 +175,7 @@ impl RecipeDto {
                     params: s.params.clone(),
                     mask: s.mask.clone(),
                     pull: s.pull.clone(),
+                    pin: s.pin.clone(),
                 })
                 .collect(),
         }
@@ -374,6 +379,7 @@ mod tests {
                 params: BTreeMap::new(),
                 mask: None,
                 pull: Vec::new(),
+                pin: Vec::new(),
             }],
             ..RecipeDto::default()
         };

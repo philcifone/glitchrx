@@ -745,7 +745,7 @@ async fn masks_travel_and_show() {
     assert_eq!(s, StatusCode::OK);
     let toml = String::from_utf8(toml).unwrap();
     assert!(
-        toml.contains("[[step.mask.op]]") && toml.contains("version = 5"),
+        toml.contains("[[step.mask.op]]") && toml.contains("version = 6"),
         "{toml}"
     );
     let req = Request::post("/api/recipe/from-toml")
@@ -1535,7 +1535,7 @@ async fn pull_strokes_travel_through_json_and_toml() {
     assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&toml));
     let toml = String::from_utf8(toml).unwrap();
     assert!(
-        toml.contains("[[step.pull]]") && toml.contains("version = 5"),
+        toml.contains("[[step.pull]]") && toml.contains("version = 6"),
         "{toml}"
     );
     let (s, _, back) = send(

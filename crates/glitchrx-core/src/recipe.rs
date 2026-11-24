@@ -53,10 +53,16 @@
 //! size = 0.12
 //! strength = 0.6
 //! points = [0.40, 0.52, 0.43, 0.53]
+//!
+//! [[step.pin]]
+//! size = 0.2
+//! from = [0.5, 0.5]
+//! to = [0.56, 0.47]
 //! ```
 //!
 //! Version 3 added `opacity` and `mask`; version 4 added the canvas the
-//! steps run on (`work_size`, `scale_back`); version 5 added pull strokes.
+//! steps run on (`work_size`, `scale_back`); version 5 added pull strokes;
+//! version 6 added pull pins.
 //! Older recipes load unchanged (they have none of it) and are written
 //! back as the current version. A build that only knows an older version
 //! refuses a newer one, rather than ignore what it does not know and
@@ -91,7 +97,7 @@ use crate::samples::Encoding;
 /// Magic string identifying a recipe file.
 pub const FORMAT: &str = "glitcharaxia-recipe";
 /// Recipe file format version.
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 
 /// Step keys that are not effect parameters: per-step overrides of the
 /// recipe's sample format, and how strongly the result is blended in.
@@ -143,6 +149,9 @@ pub struct Step {
     /// A `pull` step's strokes, in the order drawn (`[[step.pull]]`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pull: Vec<crate::pull::Stroke>,
+    /// A `pull` step's pins (`[[step.pin]]`), run after its strokes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pin: Vec<crate::pull::Pin>,
 }
 
 impl Step {
@@ -156,6 +165,7 @@ impl Step {
             params: parse_list(effect, params)?,
             mask: None,
             pull: Vec::new(),
+            pin: Vec::new(),
         };
         // Validate now, not halfway through a batch.
         step.prepare(Encoding::default(), 1)?;
@@ -253,14 +263,17 @@ impl Step {
             // Placement is not among its parameters, so `hits=` and the
             // like are refused as unknown below.
             crate::pull::validate(&self.pull).map_err(|err| self.param_error(err))?;
-        } else if !self.pull.is_empty() {
-            return Err(self.param_error(Error::Recipe("only a pull step has strokes".into())));
+            crate::pull::validate_pins(&self.pin).map_err(|err| self.param_error(err))?;
+        } else if !self.pull.is_empty() || !self.pin.is_empty() {
+            return Err(self.param_error(Error::Recipe(
+                "only a pull step has strokes and pins".into(),
+            )));
         }
         let params = Params::new(info.id, &info.all_params(), &given)?;
         let effect = (info.build)(&params)?;
         let pull = info
             .strokes
-            .then(|| crate::pull::Pull::new(&params, &self.pull));
+            .then(|| crate::pull::Pull::new(&params, &self.pull, &self.pin));
         // A pull covers the whole raster; its placement is never used for
         // windows, but every step has one.
         let placement = if info.strokes {
@@ -489,7 +502,7 @@ impl Recipe {
             )));
         }
         match raw.get("version").and_then(|v| v.as_integer()) {
-            Some(2..=5) => {}
+            Some(2..=6) => {}
             Some(1) => {
                 return Err(Error::Recipe(
                     "version 1 recipes are for the JPEG byte engine, which was retired; \
@@ -726,7 +739,7 @@ mod tests {
         r.steps
             .push(Step::new("backwards", "channels=1", 5).unwrap());
         let text = r.to_toml();
-        assert!(text.contains("version = 5"), "{text}");
+        assert!(text.contains("version = 6"), "{text}");
         assert!(text.contains("encoding = \"s16le\""), "{text}");
         assert!(text.contains("encoding = \"ulaw\""), "{text}");
         assert!(text.contains("decay = 0.7"), "{text}");
@@ -845,6 +858,31 @@ mod tests {
         assert_eq!(Recipe::from_toml(&text).unwrap(), r);
     }
 
+    /// A pull step's pins go to `[[step.pin]]` and come back the same;
+    /// other steps may not have any.
+    #[test]
+    fn pull_pins_round_trip() {
+        let mut step = Step::new("pull", "", 0).unwrap();
+        step.pin = vec![crate::pull::Pin {
+            size: 0.2,
+            from: [0.5, 0.5],
+            to: [0.56, 0.47],
+        }];
+        let r = Recipe {
+            steps: vec![step.clone()],
+            ..Recipe::default()
+        };
+        let text = r.to_toml();
+        assert!(
+            text.contains("[[step.pin]]") && text.contains("version = 6"),
+            "{text}"
+        );
+        assert_eq!(Recipe::from_toml(&text).unwrap().steps[0].pin, step.pin);
+        let mut echo = Step::new("echo", "", 1).unwrap();
+        echo.pin = step.pin.clone();
+        assert!(echo.prepare(Encoding::default(), 1).is_err());
+    }
+
     /// A pull step's strokes go to `[[step.pull]]` and come back the same.
     #[test]
     fn pull_strokes_round_trip() {
@@ -958,7 +996,7 @@ mod tests {
         let r = Recipe::from_toml(v2).unwrap();
         assert_eq!(r.version, VERSION);
         assert_eq!(r.steps[0].mask, None);
-        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 6")).is_err());
+        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 7")).is_err());
     }
 
     /// A 6 x 4 picture whose every pixel differs, so resizing shows.

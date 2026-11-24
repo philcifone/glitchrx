@@ -28,6 +28,14 @@
 //! suits the raw-pixel look) or a bilinear blend (`smooth`, like Liquify).
 //! Reads past an edge take the edge pixel.
 //!
+//! **Pins** (D-67). A pin is a point picked up and put down elsewhere,
+//! `[[step.pin]]` with `from`, `to` and `size`. It is built exactly as a
+//! straight stroke from `from` to `to` at full strength, so the point under
+//! it lands where it was put and the picture around it stretches smoothly
+//! rather than folding, however far it goes. Pins run after the strokes,
+//! in order. Unlike a stroke a pin is meant to be moved again: the GUI
+//! changes its `to`, and the map is built afresh.
+//!
 //! Determinism (D-25): basic f64 operations only (and `sqrt`, which IEEE
 //! specifies exactly), no randomness, so no seed matters.
 
@@ -46,6 +54,7 @@ pub const MAP_SIDE: usize = 1024;
 /// (the same scale as a mask's).
 const MAX_STROKES: usize = 5000;
 const MAX_POINTS: usize = 400_000;
+const MAX_PINS: usize = 2000;
 /// Largest brush, as a share of the longer side.
 pub const MAX_SIZE: f64 = 1.0;
 
@@ -133,17 +142,66 @@ impl Stroke {
     }
 }
 
+/// One pin: the point at `from` moved to `to` (x, y shares of the photo),
+/// dragging the picture within `size` of it along.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Pin {
+    /// Brush diameter, as a share of the photo's longer side.
+    pub size: f64,
+    pub from: [f64; 2],
+    pub to: [f64; 2],
+}
+
+impl Pin {
+    /// The stroke a pin is built as: a straight drag at full strength.
+    fn as_stroke(&self) -> Stroke {
+        Stroke {
+            size: self.size,
+            strength: 1.0,
+            points: vec![self.from[0], self.from[1], self.to[0], self.to[1]],
+        }
+    }
+}
+
+/// Strokes and pins may run a little off the picture, but not absurdly far.
+fn on_canvas(v: f64) -> bool {
+    v.is_finite() && (-4.0..=5.0).contains(&v)
+}
+
+fn size_ok(size: f64) -> bool {
+    size.is_finite() && size > 0.0 && size <= MAX_SIZE
+}
+
+/// Check a step's pins; bad ones fail before any work.
+pub fn validate_pins(pins: &[Pin]) -> Result<()> {
+    let bad = |msg: String| Err(Error::Recipe(format!("pull: {msg}")));
+    if pins.len() > MAX_PINS {
+        return bad(format!("{} pins (at most {MAX_PINS})", pins.len()));
+    }
+    for p in pins {
+        if !size_ok(p.size) {
+            return bad(format!(
+                "pin size {} must be above 0 and at most {MAX_SIZE}",
+                p.size
+            ));
+        }
+        if !p.from.iter().chain(&p.to).all(|&v| on_canvas(v)) {
+            return bad("a pin lies far outside the picture".into());
+        }
+    }
+    Ok(())
+}
+
 /// Check a step's strokes; bad ones fail before any work.
 pub fn validate(strokes: &[Stroke]) -> Result<()> {
     let bad = |msg: String| Err(Error::Recipe(format!("pull: {msg}")));
-    // Strokes may run a little off the picture, but not absurdly far.
-    let pos = |v: f64| v.is_finite() && (-4.0..=5.0).contains(&v);
+    let pos = on_canvas;
     if strokes.len() > MAX_STROKES {
         return bad(format!("{} strokes (at most {MAX_STROKES})", strokes.len()));
     }
     let mut points = 0;
     for s in strokes {
-        if !(s.size.is_finite() && s.size > 0.0 && s.size <= MAX_SIZE) {
+        if !size_ok(s.size) {
             return bad(format!(
                 "size {} must be above 0 and at most {MAX_SIZE}",
                 s.size
@@ -169,15 +227,21 @@ pub fn validate(strokes: &[Stroke]) -> Result<()> {
 /// A pull step, ready to run.
 #[derive(Debug, Clone)]
 pub struct Pull {
+    /// The strokes, then the pins as the strokes they are built as.
     strokes: Vec<Stroke>,
     smooth: bool,
 }
 
 impl Pull {
-    /// Build from the step's parameters and strokes (already validated).
-    pub fn new(params: &Params, strokes: &[Stroke]) -> Pull {
+    /// Build from the step's parameters, strokes and pins (already
+    /// validated). Pins run after the strokes.
+    pub fn new(params: &Params, strokes: &[Stroke], pins: &[Pin]) -> Pull {
         Pull {
-            strokes: strokes.to_vec(),
+            strokes: strokes
+                .iter()
+                .cloned()
+                .chain(pins.iter().map(Pin::as_stroke))
+                .collect(),
             smooth: params.choice("sampling") == "smooth",
         }
     }
@@ -511,6 +575,87 @@ mod tests {
             &|| true,
         );
         assert!(matches!(r, Err(Error::Cancelled)));
+    }
+
+    /// A pin puts the point under it where it was dropped, and is the same
+    /// as a straight drag at full strength.
+    #[test]
+    fn a_pin_lands_its_point_where_it_was_put() {
+        let (w, h) = (256, 128);
+        let base = coords(w, h);
+        let units = Units::full(w, h);
+        let pin = Pin {
+            size: 0.3,
+            from: [100.5 / 256.0, 0.5],
+            to: [130.5 / 256.0, 0.5 + 10.0 / 128.0],
+        };
+        let mut b = base.clone();
+        let params = Params::new("pull", INFO.params, &Default::default()).unwrap();
+        Pull::new(&params, &[], std::slice::from_ref(&pin))
+            .apply(&mut b, &units, NEVER)
+            .unwrap();
+        let at = |x: usize, y: usize| (b[(y * w + x) * 3], b[(y * w + x) * 3 + 1]);
+        let (sx, sy) = at(130, 74);
+        assert!(
+            (sx as i32 - 100).abs() <= 1 && (sy as i32 - 64).abs() <= 1,
+            "{:?}",
+            (sx, sy)
+        );
+        let mut c = base.clone();
+        pull(
+            vec![Stroke {
+                size: 0.3,
+                strength: 1.0,
+                points: vec![pin.from[0], pin.from[1], pin.to[0], pin.to[1]],
+            }],
+            false,
+        )
+        .apply(&mut c, &units, NEVER)
+        .unwrap();
+        assert_eq!(b, c);
+        // A pin put back where it was changes nothing.
+        let mut d = base.clone();
+        let home = Pin {
+            to: pin.from,
+            ..pin.clone()
+        };
+        Pull::new(&params, &[], &[home])
+            .apply(&mut d, &units, NEVER)
+            .unwrap();
+        assert_eq!(d, base);
+    }
+
+    #[test]
+    fn bad_pins_are_refused() {
+        let ok = Pin {
+            size: 0.1,
+            from: [0.2, 0.2],
+            to: [0.3, 0.2],
+        };
+        assert!(validate_pins(std::slice::from_ref(&ok)).is_ok());
+        for bad in [
+            Pin {
+                size: 0.0,
+                ..ok.clone()
+            },
+            Pin {
+                size: 2.0,
+                ..ok.clone()
+            },
+            Pin {
+                to: [f64::NAN, 0.2],
+                ..ok.clone()
+            },
+            Pin {
+                from: [0.2, -40.0],
+                ..ok.clone()
+            },
+        ] {
+            assert!(
+                validate_pins(std::slice::from_ref(&bad)).is_err(),
+                "{bad:?}"
+            );
+        }
     }
 
     #[test]
