@@ -320,7 +320,7 @@
     </div>
   {/if}
 
-  {#if app.continueFrom.length && app.doc && !app.cropping && !app.masking && !app.working}
+  {#if app.continueFrom.length && app.doc && !app.cropping && !app.masking && !app.working && !app.fullView}
     <!-- Picking up an old edit (5e): this photo has recipes saved on the
          server. The newest is one tap away; More lists them all. -->
     {@const r = app.continueFrom[0]}
@@ -408,7 +408,8 @@
 <style>
   .continue {
     position: absolute;
-    top: 12px;
+    /* Under the full view button in the corner. */
+    top: 60px;
     left: 50%;
     transform: translateX(-50%);
     width: max-content;
@@ -558,7 +559,7 @@
     align-items: center;
     gap: 10px;
     padding: 4px 4px 4px 14px;
-    max-width: calc(100% - 24px);
+    max-width: calc(100% - 128px);
     white-space: normal;
     color: var(--warn);
   }
