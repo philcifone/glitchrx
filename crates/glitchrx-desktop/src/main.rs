@@ -9,6 +9,10 @@
 //! What the desktop adds is native file dialogs. The server calls them
 //! through [`Dialogs`] from its blocking pool; the page itself gets no
 //! access to Tauri (no IPC), it only talks HTTP to its own server.
+//!
+//! Started with a file (`glitchrx-desktop edit.glrx`, which is what a file
+//! manager runs on a double click once `.glrx` is registered), the page
+//! opens that file first.
 
 // Release builds on Windows should not open a console; harmless elsewhere.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -83,12 +87,20 @@ fn main() {
     // Other users on this machine can reach 127.0.0.1 too; the token keeps
     // them out. A new one each launch, so nothing to store or leak.
     let token = random_hex(16);
+    // The file to open, if the app was started with one.
+    let launch = std::env::args_os()
+        .nth(1)
+        .map(PathBuf::from)
+        .filter(|p| p.is_file());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             let dialogs = Arc::new(NativeDialogs(app.handle().clone()));
             let mut state = AppState::new(home(), Some(token.clone())).with_dialogs(dialogs);
+            if let Some(path) = launch.clone() {
+                state = state.with_launch_file(path);
+            }
             // The same presets as `glitchrx serve`, so both see them.
             if let Some(dir) = glitchrx_serve::presets::default_dir() {
                 state = state.with_presets(dir);

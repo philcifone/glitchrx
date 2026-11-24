@@ -358,7 +358,7 @@ A project file is what a `.psd` is to Photoshop: everything needed to open an ed
 
 **From the CLI.** A `.glrx` input replays its own recipe (`glitchrx edit.glrx out.png`; `--recipe` and effect flags are refused with it, the recipe-wide options apply); `--project[=FILE]` writes one beside the picture; `--info` lists what is inside (section 7).
 
-**In the desktop app.** The app registers `.glrx` (and the MIME type, for Linux file managers), so a double click opens it.
+**In the desktop app.** The native Open dialog offers projects beside photos. On Linux, `scripts/install-desktop.sh` registers the file type (a shared-mime-info entry that knows a project by its name and by its first bytes, and `MimeType=` in the launcher entry), so a double click starts the app with the file, which the page opens first; `tauri.conf.json` declares the same for a bundled `.deb`. Each double click starts its own window for now. macOS delivers the file as an event instead, which waits for the macOS build (`docs/macos.md`).
 
 **The server** keeps each opened photo's file bytes beside its decoded image (today it keeps only the decoded image), since a project must hold the original byte for byte.
 
@@ -492,7 +492,7 @@ Section 8.1. Each part ends green and usable:
 - **7a Format in the core.** Read and write `.glrx` (the `zip` crate, deflate only, no other features), the manifest, the safety rules, location removal, tests: round trip, the same raster after location removal, a refused unknown version, refused zip slip and oversized entries, a fixture `.glrx` committed to `tests/fixtures`.
 - **7b CLI.** Render a `.glrx`, write one with `--project`, `--info`. Outputs are never overwritten without `--force`.
 - **7c Server and GUI.** The server keeps opened photos' file bytes; new endpoints to make a project from the open photo (download, or save to a folder) and to open one (upload, or from the library); the export sheet's two choices; Open accepts `.glrx`, with thumbnails, and a project can be saved over after a confirmation in the library. To check on Phil's iPhone: that Safari's file picker offers `.glrx` files (it greys out types it does not recognise unless the page asks for them) and that a downloaded `.glrx` lands in Files.
-- **7d Desktop.** The file type registered in the Tauri bundle (Linux first, macOS with `docs/macos.md`), a double click opens it.
+- **7d Desktop.** The file type registered for Linux (installer and bundle) and a double click opens it; macOS with `docs/macos.md`.
 
 Phil's answers (2026-11-24): the extension is `.glrx`; a project can be saved over; location is removed; the thumbnail is a JPEG.
 

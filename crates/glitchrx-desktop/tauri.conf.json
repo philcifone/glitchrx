@@ -14,7 +14,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "appimage"],
+    "targets": [
+      "deb",
+      "appimage"
+    ],
     "category": "Graphics",
     "shortDescription": "Databend photos the way Audacity would",
     "longDescription": "Bends the raw pixels of a photo with audio effects (echo, reverb, phaser and more), the way importing it into Audacity as raw data would, and saves a normal image.",
@@ -24,6 +27,24 @@
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.png"
-    ]
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "glrx"
+        ],
+        "name": "glitcharaxia project",
+        "description": "glitcharaxia project: a photo and the steps that bend it",
+        "mimeType": "application/vnd.glitcharaxia.project",
+        "role": "Editor"
+      }
+    ],
+    "linux": {
+      "deb": {
+        "files": {
+          "/usr/share/mime/packages/org.glitcharaxia.glitchrx.xml": "mime/org.glitcharaxia.glitchrx.xml"
+        }
+      }
+    }
   }
 }

@@ -61,6 +61,9 @@ pub struct AppState {
     /// Saved presets; off unless a directory is given (tests never touch
     /// the user's real one).
     pub presets: Option<Presets>,
+    /// The desktop app was started to open this file (a double-clicked
+    /// project or photo). The page opens it once, at startup.
+    launch: std::sync::Mutex<Option<PathBuf>>,
 }
 
 impl AppState {
@@ -74,7 +77,15 @@ impl AppState {
             preview_budget: PREVIEW_BUDGET,
             dialogs: None,
             presets: None,
+            launch: std::sync::Mutex::new(None),
         }
+    }
+
+    /// Open `path` when the page starts (the desktop app, started from a
+    /// file manager with a file).
+    pub fn with_launch_file(self, path: PathBuf) -> AppState {
+        *self.launch.lock().unwrap_or_else(|e| e.into_inner()) = Some(path);
+        self
     }
 
     /// Keep presets in `dir` (created on the first save).
@@ -131,6 +142,7 @@ pub fn router(state: AppState) -> Router {
         .route("/settings", get(get_settings).put(put_settings))
         .route("/folders", get(folders))
         .route("/desktop/open", post(desktop_open))
+        .route("/desktop/launch", post(desktop_launch))
         .route("/presets", get(list_presets))
         .route(
             "/presets/{name}",
@@ -1118,6 +1130,26 @@ async fn desktop_open(State(st): State<Shared>) -> ApiResult<Response> {
         let Some(path) = dialogs.pick_photo(pictures_dir().as_deref()) else {
             return Ok(cancelled());
         };
+        let bytes =
+            std::fs::read(&path).map_err(|e| ApiError::bad(format!("{}: {e}", path.display())))?;
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        Ok(Json(open_doc(&st2, name, Some(path), &bytes)?).into_response())
+    })
+    .await
+}
+
+/// The file the desktop app was started with, opened once (204 when there
+/// is none, or it was already taken). Like the native Open dialog, the path
+/// is the user's own choice on their own machine, not confined to a root.
+async fn desktop_launch(State(st): State<Shared>) -> ApiResult<Response> {
+    let Some(path) = st.launch.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+        return Ok(cancelled());
+    };
+    let st2 = st.clone();
+    blocking(move || {
         let bytes =
             std::fs::read(&path).map_err(|e| ApiError::bad(format!("{}: {e}", path.display())))?;
         let name = path

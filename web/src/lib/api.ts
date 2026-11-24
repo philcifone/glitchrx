@@ -263,6 +263,13 @@ export async function desktopOpen(): Promise<DocInfo | null> {
   return json<DocInfo>(res);
 }
 
+/** Desktop app: the file it was started with (a double-clicked project), once; else null. */
+export async function desktopLaunch(): Promise<DocInfo | null> {
+  const res = await postJson('/api/desktop/launch', {});
+  if (res.status === 204) return null;
+  return json<DocInfo>(res);
+}
+
 /** Desktop app: the native Save dialog, then render and write. */
 export async function saveAs(
   docId: string,

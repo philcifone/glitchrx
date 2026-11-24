@@ -110,3 +110,10 @@ Proper signing only matters for giving the app to other people:
   Cmd+Z before the page sees it.
 - **Folders.** Dialogs start in `~/Pictures`, which exists on every Mac.
   The first Open may trigger macOS's "allow access to Pictures" prompt.
+- **Opening projects with a double click.** `tauri.conf.json` already
+  declares the `.glrx` file type, which the bundler writes into the app's
+  `Info.plist`. But macOS hands the file to a running app as an event
+  (`tauri::RunEvent::Opened { urls }`), not as a command-line argument as
+  Linux does, so `main.rs` needs to catch that event and pass the path to
+  the server (`AppState::with_launch_file` covers the start-up case on
+  Linux; a running window would also need telling).

@@ -1459,3 +1459,24 @@ async fn projects_download_open_and_save_over_themselves() {
     .await;
     assert_eq!(s, StatusCode::UNSUPPORTED_MEDIA_TYPE);
 }
+
+#[tokio::test]
+async fn the_launch_file_opens_once() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("edit.glrx");
+    fs::write(&path, fixture("project-v1.glrx")).unwrap();
+    let app = router(AppState::new(None, None).with_launch_file(path));
+    let (s, _, b) = send(&app, post_json("/api/desktop/launch", json!({}))).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let doc = json_of(&b);
+    assert_eq!(doc["project"], "edit.glrx");
+    assert_eq!(doc["name"], "orient-6.jpg");
+    assert_eq!(doc["recipe"]["steps"].as_array().unwrap().len(), 2);
+    // Taken: a reload starts as usual.
+    let (s, _, _) = send(&app, post_json("/api/desktop/launch", json!({}))).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+    // Without one, nothing.
+    let plain = app_without_presets();
+    let (s, _, _) = send(&plain, post_json("/api/desktop/launch", json!({}))).await;
+    assert_eq!(s, StatusCode::NO_CONTENT);
+}

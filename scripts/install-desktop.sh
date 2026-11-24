@@ -10,6 +10,10 @@
 #   ~/.local/bin/glitchrx-desktop
 #   ~/.local/share/applications/glitchrx-desktop.desktop
 #   ~/.local/share/icons/hicolor/{32x32,128x128,256x256,512x512}/apps/org.glitcharaxia.glitchrx.png
+#   ~/.local/share/mime/packages/org.glitcharaxia.glitchrx.xml   (what a .glrx is)
+#
+# With the file type registered, a double click on a .glrx project opens it
+# in the app.
 #
 # The launcher entry is named after the binary, which is the window's app
 # id on Wayland (and its class on X11), so the desktop can match a running
@@ -22,6 +26,7 @@ ENTRY=glitchrx-desktop.desktop
 BIN="$HOME/.local/bin/glitchrx-desktop"
 APPS="$HOME/.local/share/applications"
 ICONS="$HOME/.local/share/icons/hicolor"
+MIME="$HOME/.local/share/mime"
 SIZES=(32x32 128x128 256x256 512x512)
 SOURCES=(32x32.png 128x128.png 128x128@2x.png icon.png)
 
@@ -29,10 +34,11 @@ refresh() {
   # Optional caches; harmless when the tools are missing.
   update-desktop-database "$APPS" 2>/dev/null || true
   gtk-update-icon-cache -q -t "$ICONS" 2>/dev/null || true
+  update-mime-database "$MIME" 2>/dev/null || true
 }
 
 if [[ "${1:-}" == "--remove" ]]; then
-  rm -f "$BIN" "$APPS/$ENTRY"
+  rm -f "$BIN" "$APPS/$ENTRY" "$MIME/packages/$ID.xml"
   for s in "${SIZES[@]}"; do rm -f "$ICONS/$s/apps/$ID.png"; done
   refresh
   echo "glitchrx desktop removed"
@@ -47,6 +53,7 @@ install -Dm755 target/release/glitchrx-desktop "$BIN"
 for i in "${!SIZES[@]}"; do
   install -Dm644 "crates/glitchrx-desktop/icons/${SOURCES[$i]}" "$ICONS/${SIZES[$i]}/apps/$ID.png"
 done
+install -Dm644 "crates/glitchrx-desktop/mime/$ID.xml" "$MIME/packages/$ID.xml"
 install -d "$APPS"
 cat > "$APPS/$ENTRY" <<DESKTOP
 [Desktop Entry]
@@ -54,7 +61,8 @@ Type=Application
 Name=glitchrx
 GenericName=Photo databender
 Comment=Databend photos the way Audacity would
-Exec=$BIN
+Exec=$BIN %f
+MimeType=application/vnd.glitcharaxia.project;
 Icon=$ID
 Terminal=false
 Categories=Graphics;2DGraphics;RasterGraphics;

@@ -333,6 +333,16 @@ export class App {
         // A stale or corrupt saved recipe is simply ignored.
       }
     }
+    // The desktop app started with a file (a double-clicked project): that
+    // comes first.
+    if (this.desktop) {
+      try {
+        const launched = await api.desktopLaunch();
+        if (launched) return this.opening(launched.project ?? launched.name, async () => launched);
+      } catch (e) {
+        this.fail(e);
+      }
+    }
     const docId = storageGet(DOC_KEY);
     if (docId && !this.doc) {
       try {
