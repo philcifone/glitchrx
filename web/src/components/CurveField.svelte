@@ -211,7 +211,7 @@
     fill: var(--fill);
   }
 
-  /* The dim text colour, not the hairline one: hairlines are tuned to
+  /* The dim text color, not the hairline one: hairlines are tuned to
      barely show against a card, and the curve's fill is close to it. */
   .grid {
     stroke: var(--fg-dim);

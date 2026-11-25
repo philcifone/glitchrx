@@ -168,11 +168,18 @@ pub struct Cli {
     #[arg(long)]
     pub scale_back: bool,
 
-    /// Keep only part of the photo, before anything else: X,Y,W,H as
+    /// Keep only part of the photo, before anything else (or, with
+    /// --crop-result, of the finished picture): X,Y,W,H as
     /// shares of its width and height (0.1,0,0.8,1 trims a tenth off each
     /// side). Saved in the recipe.
     #[arg(long, value_name = "X,Y,W,H", value_parser = parse_crop)]
     pub crop: Option<glitchrx_core::recipe::Crop>,
+
+    /// With --crop: frame the finished picture instead. The steps run on the
+    /// whole photo and the crop is cut from the result, so the glitch is
+    /// the one the whole photo gets. Saved in the recipe.
+    #[arg(long, requires = "crop")]
+    pub crop_result: bool,
 
     /// How steps read the pixels as audio samples [default: u8]. A step can
     /// override it with encoding=... in its parameters.
@@ -180,7 +187,7 @@ pub struct Cli {
     pub encoding: Option<Encoding>,
 
     /// 1 (mono), 2 (stereo: alternate samples are left and right) or 3 (one
-    /// channel per colour, like importing raw data with 3 channels) [default: 1].
+    /// channel per color, like importing raw data with 3 channels) [default: 1].
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u8).range(1..=3))]
     pub channels: Option<u8>,
 
@@ -193,7 +200,7 @@ pub struct Cli {
     #[arg(long)]
     pub batch: bool,
 
-    /// Show format, size, orientation and colour profile of the input(s), then exit.
+    /// Show format, size, orientation and color profile of the input(s), then exit.
     #[arg(long)]
     pub info: bool,
 

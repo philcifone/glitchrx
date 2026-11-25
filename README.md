@@ -7,11 +7,11 @@ Create your own glitch art from digital images through databending. Inspired by 
 - never modifies your original
 - is repeatable: the same seed gives the same result, byte for byte
 - previews live, fast enough to use from a phone. This was developed outside of my home network on a WireGuard VPN, accessing and editing remotely was a breeze.
-- keeps your photo's size, orientation and colour profile
+- keeps your photo's size, orientation and color profile
 
 Everything runs locally. No image is ever uploaded anywhere besides the server or computer you host it on
 
-**Status: beta (0.1.0).** Three ways to use it, all from one build:
+**Status: beta (0.2.0; see `CHANGELOG.md`).** Three ways to use it, all from one build:
 
 - **A web GUI** (`glitchrx serve`) for a browser on the same computer, or a phone or tablet over your LAN or a VPN. It can be added to a phone's home screen and used like an app.
 - **A desktop app** (Linux today; macOS planned) with the same GUI in its own window.
@@ -112,7 +112,7 @@ To use it from your phone, see [Running it on a server or for a phone](#running-
 ### The screen
 
 - **Top bar:** Open, Presets, Undo, Redo, Export, Settings. While you paint a mask or pull, it becomes an edit bar instead: what you are working on, compare, undo, redo and **Done**.
-- **The photo,** with a small toolbox: zoom, crop, and the work size.
+- **The photo.** Above the steps, two cards: the encoding and channels on the left; crop, zoom and the work size on the right (the (i) explains sizes).
 - **The steps:** a card per effect, top to bottom, in the order they run. On a phone the effect palette sits behind the floating **+** button.
 - **Status bar:** the photo's name and size, how long the last render took, and whether the view is approximate or exact.
 
@@ -120,7 +120,7 @@ Icon-only buttons show their name when you hold them on a phone (with a mouse, h
 
 ### Photos
 
-- **Open** a photo from this device (it goes to your own server, nowhere else) or from the server's library folder, chosen in Settings or with `--root`. On an iPhone, a HEIC photo arrives as a JPEG.
+- **Open** a photo with **From Device** (it goes to your own server, nowhere else), a project with **Open .glrx**, or from the server's library folder, chosen in Settings or with `--root`. On an iPhone, a HEIC photo arrives as a JPEG.
 - If there are already steps, you are asked whether to keep them or start fresh (undoable; "Don't ask again" can be changed in Settings).
 - **Continue from a saved recipe.** Recipes saved beside an export remember the photo they were made on. Opening that photo again offers to continue from the newest one; Export, then "Saved on the server", lists them all.
 
@@ -132,7 +132,7 @@ Icon-only buttons show their name when you hold them on a phone (with a mouse, h
 - **Sliders** mark their default with a small tick and snap onto it; double tap a slider to go back to the default. Fields without a slider have a reset arrow.
 - **Shake** (the shuffle arrows at the top of a step's settings) rolls its settings at random, within the useful range; placement and encoding stay.
 - **Placement:** every effect starts on the whole picture. The **Bands** switch scatters it in seeded bands instead and shows `hits`, `len` and the seed. Dragging the region's two handles shades the preview outside the band. **Re-roll** (the dice beside the seed) picks a new seed, which moves where the bands land; it is greyed out when nothing is random.
-- **Edit mode:** hold a step's header to see every step on one line. Tap the circles to select several, then re-roll, duplicate or remove them together; drag the grip on the right to reorder. Hold a row (or tap Done) to go back. With nothing selected, the dice re-rolls every step.
+- **Collapse and Edit mode:** the double caret beside Steps folds every card shut or opens them all. The pencil (or holding a step's header) shows every step on one line; a held step starts out selected (a green ring). Tap the circles to select more, then re-roll, duplicate or remove them together; drag the grip on the right to reorder. Hold a row (or tap Done) to go back. With nothing selected, the dice re-rolls every step.
 
 ### Blend and masks
 
@@ -154,7 +154,7 @@ Presets (the bookmark) are your own saved recipes, kept by the server in `~/.con
 
 - **Compare:** press and hold the photo (or the `\` key) to see the untouched original. While masking or pulling, the photo is for drawing, so hold the compare button in the top bar instead.
 - **Zoom** with a pinch, ctrl + wheel or a trackpad pinch; double-tap, tap the magnifier or press Z for 100% and back. Zoomed in, drag (or scroll) to pan. Once the view holds still, what is on screen is cut from the full-resolution render, so it is sharp and exactly the export.
-- **Crop** with the button beside the zoom: free, or at the photo's own shape, 1:1, 4:5 or 16:9, turned with the portrait and landscape switch. The crop comes before every step. Masks and pulls stay on the same part of the photo when you change it.
+- **Crop** with the button beside the zoom: free, or at the photo's own shape, 1:1, 4:5 or 16:9, turned with the portrait and landscape switch. **Crop the: Photo | Result** decides when it happens; a new crop starts on Result. *Photo* crops first and glitches what is left, so the glitch is made for the crop (and changes with it). *Result* glitches the whole photo and then crops, so you frame the glitch you already have without changing it. Masks and pulls stay on the same part of the photo either way.
 - **Work size** (Full, 4K, 2K, 1K) runs the steps on a smaller copy: the glitch texture gets coarser and everything is faster. Export writes that size, or enlarges it back to the photo's size with hard pixel edges.
 - **Undo and redo** with the buttons, or Ctrl+Z and Ctrl+Shift+Z. History holds recipes, not images, so it costs almost nothing.
 
@@ -193,11 +193,11 @@ Strokes are saved in the recipe as positions on the photo, so they replay exactl
 
 ## Projects
 
-A project (`.glrx`) is to glitchRx what a `.psd` is to Photoshop: the original photo, every step and a preview in one file, to open again on any device and carry on. Choose **Project** in Export; open one with **A project** in Open, or from the library, where projects show their preview.
+A project (`.glrx`) is to glitchRx what a `.psd` is to Photoshop: the original photo, every step and a preview in one file, to open again on any device and carry on. Choose **Project** in Export; open one with **Open .glrx** in Open, or from the library, where projects show their preview.
 
 - It is an ordinary zip file: anyone can unzip it and find the photo, the recipe and a JPEG preview.
-- The photo's **location is removed** as it goes in (the GPS data, as a phone does when sharing); camera, date, orientation and colour profile stay. The image data itself is untouched, so the recipe replays to the same bytes.
-- A project you opened from the library can be saved over (after a confirmation) or saved as a new one. A picture exported from a project takes the project's name.
+- The photo's **location is removed** as it goes in (the GPS data, as a phone does when sharing); camera, date, orientation and color profile stay. The image data itself is untouched, so the recipe replays to the same bytes.
+- A project you opened from the library can be saved over (after a confirmation) or saved as a new one. Save As onto an existing project's name offers to update it. Photos are never written over. A picture exported from a project takes the project's name.
 - From the command line: `glitchrx edit.glrx out.png` renders a project with its own steps, and `--project` writes one beside a picture.
 
 ## Command line
@@ -217,13 +217,14 @@ glitchrx --echo opacity=0.5 photo.jpg           # blend the step at half strengt
 glitchrx --levels black=20,white=230 --hsl saturation=-40 photo.jpg   # photo adjustments
 glitchrx --curves points=0:20/128:150/255:235,channel=blue photo.jpg
 glitchrx --shift --crop 0.1,0,0.8,1 photo.jpg   # crop first: X,Y,W,H as shares of the photo
+glitchrx --shift --crop 0.1,0,0.8,1 --crop-result photo.jpg   # glitch the whole photo, then crop
 glitchrx --pixelsort --work-size 1024 photo.jpg # run on a 1024 px copy: coarser, faster
 glitchrx --shift --work-size 1024 --scale-back photo.jpg   # ...enlarged back, hard pixel edges
 glitchrx --recipe moody.toml photo.jpg          # replay a saved recipe (a pull is drawn in the GUI and replayed this way)
 glitchrx --recipe moody.toml --project photo.jpg   # also write photo-glitch.glrx
 glitchrx edit.glrx out.png                      # render a project with its own steps
 glitchrx --stutter --batch *.jpg                # every file, automatic names
-glitchrx --info photo.jpg                       # format, size, orientation, colour profile
+glitchrx --info photo.jpg                       # format, size, orientation, color profile
 glitchrx --list                                 # every effect and parameter
 ```
 
@@ -235,7 +236,7 @@ photo-glitch.tif  (6240 x 4160, tiff, seed 81723)
 
 Re-run with `--seed` to reproduce a result you liked. `--save-recipe` keeps the whole chain in a small TOML file, and `--recipe` replays it later. `glitchrx --help` lists every option.
 
-The output is TIFF by default: uncompressed 8-bit RGB, ready for masking in Photoshop. The colour profile of the original is written into every output, so colours match. AVIF is the exception: it can only mark sRGB and Display P3 (most phone photos are one of the two), and warns when it drops another profile. The same input, recipe, seed and settings give the same file every time, on every machine.
+The output is TIFF by default: uncompressed 8-bit RGB, ready for masking in Photoshop. The color profile of the original is written into every output, so colors match. AVIF is the exception: it can only mark sRGB and Display P3 (most phone photos are one of the two), and warns when it drops another profile. The same input, recipe, seed and settings give the same file every time, on every machine.
 
 ## Encodings
 
@@ -243,13 +244,13 @@ Audacity's Import Raw Data dialog asks how to read the bytes as samples. That ch
 
 | Encoding | Look |
 | --- | --- |
-| `u8` (default) | Clean ghosts; colours rotate through the channels |
+| `u8` (default) | Clean ghosts; colors rotate through the channels |
 | `s8` | Like `u8`, but highlights clip and invert |
 | `s16le`, `s16be` | Ghosts under heavy rainbow grain; byte order changes the palette |
 | `s24le`, `s24be` | One sample per pixel; posterized two-tone fields |
 | `ulaw`, `alaw` | Posterized neon blocks with hard edges |
 
-`--channels 2` reads the bytes as stereo, as Audacity did when you imported stereo: alternate samples are left and right, and each side is processed on its own. `--channels 3` does the same with three channels; with `u8` those are exactly red, green and blue, so filters that blend neighbouring samples (`wahwah`, `reverb`) keep the colours instead of turning them grey.
+`--channels 2` reads the bytes as stereo, as Audacity did when you imported stereo: alternate samples are left and right, and each side is processed on its own. `--channels 3` does the same with three channels; with `u8` those are exactly red, green and blue, so filters that blend neighboring samples (`wahwah`, `reverb`) keep the colors instead of turning them grey.
 
 **Endianness.** In Audacity you chose little or big endian when importing raw data. That only matters when one sample is two or more bytes: it decides whether the first byte of each pair is the loud (high) or the quiet (low) part. With `s16le` the green and blue bytes of a pixel tend to be the loud parts; with `s16be` it flips. Neither is wrong; they are different palettes.
 
@@ -257,7 +258,7 @@ Audacity's Import Raw Data dialog asks how to read the bytes as samples. That ch
 
 Every pixel is three bytes (R, G, B), and rows follow each other, so a distance in the data is a distance in the picture. Sizes take units: `rows` (`0.33rows` is a third of the width, sideways; `6rows` is six rows down), `px`, `%` of the image (which runs top to bottom, so `40%:60%` is the middle band), or plain bytes.
 
-A distance of whole pixels keeps colours. `phase=1` or `phase=2` adds one or two bytes, which shifts red into green into blue: the colour fringes of databent images.
+A distance of whole pixels keeps colors. `phase=1` or `phase=2` adds one or two bytes, which shifts red into green into blue: the color fringes of databent images.
 
 ### Effects
 
@@ -281,7 +282,7 @@ A distance of whole pixels keeps colours. `phase=1` or `phase=2` adds one or two
 | `pull` | (pixel effect) | Drags pixels along with your finger, and moves grid points as pins ([Pull](#pull-moving-pixels-by-hand)) |
 | `levels` | (adjustment) | Black point, white point and midtone gamma |
 | `curves` | (adjustment) | A tone curve through up to 16 points, `points=0:0/64:52/192:204/255:255`; the GUI has a curve editor |
-| `hsl` | (adjustment) | Hue turn, saturation and lightness, for every colour or some (`range=reds`, `range=reds+blues`, ...) |
+| `hsl` | (adjustment) | Hue turn, saturation and lightness, for every color or some (`range=reds`, `range=reds+blues`, ...) |
 | `balance` | (adjustment) | Tints the shadows, midtones or highlights, keeping brightness |
 
 `pixelsort`, `pull` and the adjustments are not audio: they work on whole pixels, so the encoding and channels do not apply. Adjustments are ordinary steps, so masks and opacity limit them like any other. Every step also takes `opacity` (0 to 1), which blends its result over the picture it received. Where an effect lands is set by `region`, `hits` and `len`, shared by every audio and data effect.
@@ -294,7 +295,7 @@ A recipe is the whole description of a glitch: the steps, their settings and see
 
 ```toml
 format = "glitcharaxia-recipe"
-version = 7
+version = 8
 encoding = "u8"
 channels = 1
 
@@ -341,12 +342,12 @@ This builds the app and installs it for your user only: `~/.local/bin/glitchrx-d
 ## How it works
 
 1. **Decode** the photo to a *raster*: R, G, B for each pixel, row after row, exactly what an uncompressed TIFF stores. A sideways phone photo is turned upright first, so rows are the rows you see.
-2. **Bend.** Each audio or data effect reads a stretch of those bytes as audio samples in its encoding, processes them in floating point the way Audacity would, and clips the result back to bytes. Clipping is where the bright, saturated colours come from. Pixel effects and adjustments work on whole pixels instead; a pull builds a displacement map from its strokes that says, for every pixel, where to read from.
-3. **Encode** the raster as TIFF, PNG, JPEG, WebP or AVIF, with the original colour profile.
+2. **Bend.** Each audio or data effect reads a stretch of those bytes as audio samples in its encoding, processes them in floating point the way Audacity would, and clips the result back to bytes. Clipping is where the bright, saturated colors come from. Pixel effects and adjustments work on whole pixels instead; a pull builds a displacement map from its strokes that says, for every pixel, where to read from.
+3. **Encode** the raster as TIFF, PNG, JPEG, WebP or AVIF, with the original color profile.
 
 The raster always keeps its length, so the image keeps its dimensions. The math uses only basic floating-point operations, which give identical results on every machine, and randomness comes from the seed alone, so a recipe reproduces the same bytes everywhere.
 
-**Earlier: JPEG byte glitching.** Until SPEC v0.3, glitchRx glitched the *compressed* data inside a JPEG. That gives flat colour bands, not the databent look, and was retired. It is kept at the git tag `archive/jpeg-bytes`.
+**Earlier: JPEG byte glitching.** Until SPEC v0.3, glitchRx glitched the *compressed* data inside a JPEG. That gives flat color bands, not the databent look, and was retired. It is kept at the git tag `archive/jpeg-bytes`.
 
 ## Safety rules
 
@@ -359,7 +360,7 @@ The raster always keeps its length, so the image keeps its dimensions. The math 
 
 - glitchRx makes **no outgoing network connections**, ever. `glitchrx serve` only answers the browsers that connect to it.
 - Every font, script and icon of the GUI is built into the program (body text uses the device's own system font), and a Content-Security-Policy stops the page from loading anything from elsewhere. No analytics, no tracking.
-- **Exports carry no EXIF:** no GPS position, camera serial or date leaves with a picture. The colour profile is kept.
+- **Exports carry no EXIF:** no GPS position, camera serial or date leaves with a picture. The color profile is kept.
 - **Projects** keep the photo's metadata except its location, which is removed.
 - Photos opened from a phone live in the server's memory only, unless you save them.
 - Test images in this repository are generated procedurally. Personal sample photos belong in `samples/`, which git ignores.

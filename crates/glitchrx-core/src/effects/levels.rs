@@ -22,7 +22,7 @@ pub static INFO: EffectInfo = EffectInfo {
     details: "Input values at or below `black` become `out_black`, at or above `white` \
               become `out_white`, and the range between is stretched to fit. `gamma` \
               bends the middle: above 1 lightens the midtones, below 1 darkens them. \
-              `channel` limits it to one colour, which shifts the colour balance.",
+              `channel` limits it to one color, which shifts the color balance.",
     params: &[
         CHANNEL,
         ParamSpec {

@@ -1,18 +1,18 @@
 //! `hsl`: hue, saturation and lightness for the whole picture, as in
 //! Photoshop's Hue/Saturation (master only).
 //!
-//! Each pixel goes to HSL, is turned round the colour wheel, has its
+//! Each pixel goes to HSL, is turned round the color wheel, has its
 //! saturation scaled and its lightness pushed towards black or white, and
 //! comes back to RGB. Greys have no hue, and scaling their saturation (0)
 //! keeps them grey.
 //!
-//! **Colour ranges** (D-54, D-57): with `range` set, only some families of
-//! colours change, as in Photoshop's Reds, Yellows, ... For each range, a
-//! pixel's share is its closeness on the colour wheel to the range's
+//! **Color ranges** (D-54, D-57): with `range` set, only some families of
+//! colors change, as in Photoshop's Reds, Yellows, ... For each range, a
+//! pixel's share is its closeness on the color wheel to the range's
 //! centre (full within 15 degrees, fading out by 45, so neighbouring
 //! ranges overlap softly); the shares of the chosen ranges add up (at most
 //! 1: reds and yellows together take orange fully), and are scaled by how
-//! colourful the pixel is (full from a chroma of 1/8 of the range), so
+//! colorful the pixel is (full from a chroma of 1/8 of the range), so
 //! greys and near-greys, whose hue means little, are left alone.
 
 use super::adjust::{per_pixel, to_byte};
@@ -33,9 +33,9 @@ pub static INFO: EffectInfo = EffectInfo {
     }],
     audacity: "none (an adjustment)",
     summary: "Turn the hues, and change saturation and lightness.",
-    details: "`range` limits it to one family of colours (`reds`, `yellows`, ...), \
-              fading softly into the neighbouring ones; greys are left alone. \
-              `hue` turns every colour round the colour wheel, in degrees (120 makes red \
+    details: "`range` limits it to one family of colors (`reds`, `yellows`, ...), \
+              fading softly into the neighboring ones; greys are left alone. \
+              `hue` turns every color round the color wheel, in degrees (120 makes red \
               green, green blue and blue red). `saturation` from -100 (grey) to 100 \
               (twice as vivid, clipping at full). `lightness` from -100 (black) to 100 \
               (white). Greys stay grey under hue and saturation.",
@@ -44,7 +44,7 @@ pub static INFO: EffectInfo = EffectInfo {
             name: "range",
             kind: Kind::Set(&RANGES),
             default: "all",
-            help: "which colours change: all, or families joined by + (reds+blues)",
+            help: "which colors change: all, or families joined by + (reds+blues)",
         },
         ParamSpec {
             name: "hue",
@@ -53,7 +53,7 @@ pub static INFO: EffectInfo = EffectInfo {
                 max: 180,
             },
             default: "0",
-            help: "turn the colours round the wheel, in degrees",
+            help: "turn the colors round the wheel, in degrees",
         },
         ParamSpec {
             name: "saturation",
@@ -98,7 +98,7 @@ fn build(p: &Params) -> Result<Box<dyn Effect>> {
 }
 
 struct Hsl {
-    /// The chosen colour ranges' centre hues (0..6); empty for all colours.
+    /// The chosen color ranges' centre hues (0..6); empty for all colors.
     centres: Vec<f64>,
     turn: f64,
     sat: f64,
@@ -144,7 +144,7 @@ pub(crate) fn from_hsl(h: f64, s: f64, l: f64) -> (f64, f64, f64) {
 
 /// How much a pixel of hue `h` (0..6) and chroma `c` (0..1) belongs to
 /// the range centred on `centre`.
-/// The colour ranges, in order round the wheel from red.
+/// The color ranges, in order round the wheel from red.
 const RANGES: [&str; 6] = ["reds", "yellows", "greens", "cyans", "blues", "magentas"];
 
 fn share(centre: f64, h: f64, c: f64) -> f64 {
@@ -204,7 +204,7 @@ mod tests {
     use crate::samples::Encoding;
 
     #[test]
-    fn hsl_round_trips_every_byte_colour_closely() {
+    fn hsl_round_trips_every_byte_color_closely() {
         let mut r = crate::rng::Rng::new(3);
         for _ in 0..20_000 {
             let c = [r.next_u64() as u8, r.next_u64() as u8, r.next_u64() as u8];
@@ -229,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn a_colour_range_changes_only_its_colours() {
+    fn a_color_range_changes_only_its_colors() {
         // Reds to grey: red goes, blue and grey stay.
         let e = make(&INFO, "range=reds,saturation=-100");
         let mut b = vec![220, 30, 30, 30, 30, 220, 128, 128, 128];
@@ -245,7 +245,7 @@ mod tests {
     }
 
     #[test]
-    fn neighbouring_ranges_together_take_the_colour_between_fully() {
+    fn neighbouring_ranges_together_take_the_color_between_fully() {
         // Orange (255, 128, 0) is half red, half yellow.
         let orange = || vec![255u8, 128, 0];
         let grey = |range: &str| {

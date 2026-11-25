@@ -309,7 +309,7 @@ impl Mask {
                 }
                 Shape::Radial { from, to, hardness } => {
                     if !from.iter().chain(to).all(|&v| pos(v)) {
-                        return bad("circle centre and edge must be near the picture".into());
+                        return bad("circle center and edge must be near the picture".into());
                     }
                     if !unit(*hardness) {
                         return bad(format!("circle hardness {hardness} must be 0..1"));
@@ -321,7 +321,7 @@ impl Mask {
                     angle,
                 } => {
                     if !center.iter().all(|&v| pos(v)) {
-                        return bad("rectangle centre must be near the picture".into());
+                        return bad("rectangle center must be near the picture".into());
                     }
                     if !size
                         .iter()

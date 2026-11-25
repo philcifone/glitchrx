@@ -227,7 +227,8 @@ fn adjust(cli: &Cli, mut recipe: Recipe) -> Result<(Recipe, Option<u64>), Fail> 
     Ok((recipe, cli.seed))
 }
 
-/// `--encoding`, `--channels`, `--work-size`, `--scale-back`, `--crop`.
+/// `--encoding`, `--channels`, `--work-size`, `--scale-back`, `--crop`,
+/// `--crop-result`.
 fn overrides(cli: &Cli, recipe: &mut Recipe) -> Result<(), Fail> {
     if let Some(e) = cli.encoding {
         recipe.encoding = e;
@@ -243,6 +244,7 @@ fn overrides(cli: &Cli, recipe: &mut Recipe) -> Result<(), Fail> {
     }
     if let Some(c) = cli.crop {
         recipe.crop = Some(c);
+        recipe.crop_result = cli.crop_result;
     }
     recipe.validate()?;
     Ok(())
@@ -368,7 +370,7 @@ fn process(cli: &Cli, base: Option<&(Recipe, Option<u64>)>, job: &Job) -> Result
         && !cli.quiet
     {
         eprintln!(
-            "glitchrx: {}: AVIF cannot carry this photo's colour profile; colours may shift (TIFF, PNG, JPEG and WebP keep it)",
+            "glitchrx: {}: AVIF cannot carry this photo's color profile; colors may shift (TIFF, PNG, JPEG and WebP keep it)",
             input.display()
         );
     }
@@ -452,7 +454,11 @@ fn print_project(bytes: &[u8]) -> Result<(), Fail> {
         n => format!("{n} steps: {}", steps.join(", ")),
     };
     if p.recipe.crop.is_some() {
-        recipe.push_str("; cropped");
+        recipe.push_str(if p.recipe.crop_result {
+            "; result cropped"
+        } else {
+            "; cropped"
+        });
     }
     if let Some(w) = p.recipe.work_size {
         recipe.push_str(&format!("; work size {w}"));
@@ -488,10 +494,10 @@ fn print_photo(bytes: &[u8]) -> Result<(), Fail> {
     println!("  orientation  {} ({turn})", img.orientation);
     match &img.icc {
         Some(p) => println!(
-            "  colour       ICC profile, {} (kept in the output)",
+            "  color       ICC profile, {} (kept in the output)",
             human_size(p.len())
         ),
-        None => println!("  colour       no ICC profile (sRGB assumed)"),
+        None => println!("  color       no ICC profile (sRGB assumed)"),
     }
     println!("  raw data     {} as samples", human_size(r.bytes.len()));
     Ok(())

@@ -74,11 +74,13 @@
            what is picked. -->
       <input bind:this={projectInput} type="file" class="visually-hidden" onchange={() => pickFile(projectInput)} tabindex="-1" />
       <div class="pick">
-        <button class="primary" onclick={() => fileInput.click()}>
-          <Upload size={18} strokeWidth={2} /> From this device
+        <!-- Two equal buttons, neither the obvious default (Phil, 2026-11-25):
+             a project picked under the photo button is greyed out by iOS. -->
+        <button onclick={() => fileInput.click()} title="A photo from this device: JPEG, PNG or TIFF">
+          <Upload size={18} strokeWidth={1.75} /> From Device
         </button>
         <button onclick={() => projectInput.click()} title="A .glrx project: the original, its steps and a preview">
-          <FileArchive size={18} strokeWidth={1.75} /> A project
+          <FileArchive size={18} strokeWidth={1.75} /> Open .glrx
         </button>
       </div>
       <p class="dim small">Sent to this glitchrx server only. A photo (JPEG, PNG or TIFF), or a .glrx project to carry on with.</p>
@@ -151,11 +153,11 @@
   }
 
   .pick button {
+    flex: 1 1 0;
+    min-width: 0;
     min-height: 44px;
-  }
-
-  .pick .primary {
-    flex: 1;
+    background: var(--fill-strong);
+    color: var(--fg);
   }
 
   .small {

@@ -19,7 +19,7 @@ pub static INFO: EffectInfo = EffectInfo {
     summary: "Play each window backwards.",
     details: "Reverses the order of the samples (not the bytes inside a sample). A window \
               covering whole rows mirrors them left to right and flips their order; with \
-              `u8` the colour channels also swap, red with blue.",
+              `u8` the color channels also swap, red with blue.",
     params: &[],
     placement: PlacementDefaults {
         region: "0%:100%",

@@ -12,7 +12,7 @@ pub static INFO: EffectInfo = EffectInfo {
     upgrades: &[],
     audacity: "a bitcrusher (Audacity has none built in; the usual Nyquist plug-ins)",
     summary: "Reduce every sample to `bits` bits of resolution.",
-    details: "Posterizes. With `u8` it is plain colour banding; with the multi-byte encodings \
+    details: "Posterizes. With `u8` it is plain color banding; with the multi-byte encodings \
               the lower bytes of each sample are wiped, so whole channels drop to flat values \
               while the others keep their detail.",
     params: &[ParamSpec {

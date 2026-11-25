@@ -6,7 +6,7 @@
 // place that schedules a re-render and records history.
 
 import * as api from './api';
-import { ApiError, TooHeavyError } from './api';
+import { ApiError, ReplaceableError, TooHeavyError } from './api';
 import { History } from './history';
 import { LatestOnly } from './latest';
 import { ResultCache } from './results';
@@ -141,6 +141,7 @@ function normalize(r: Partial<RecipeState>, effect: (id: string) => EffectInfo |
     ...(work ? { work_size: work } : {}),
     ...(work && r.scale_back === true ? { scale_back: true } : {}),
     ...(validCrop(r.crop) ? { crop: { ...r.crop } } : {}),
+    ...(validCrop(r.crop) && r.crop_result === true ? { crop_result: true } : {}),
     ...groups.tidy(steps, groups.cleanGroups(r.groups)),
   };
 }
@@ -288,6 +289,17 @@ export class App {
   toggleCollapsed(uid: string): void {
     if (this.collapsed[uid]) delete this.collapsed[uid];
     else this.collapsed[uid] = true;
+  }
+
+  /** Every step's card is folded shut. */
+  get allCollapsed(): boolean {
+    const steps = this.recipe.steps;
+    return steps.length > 0 && steps.every((s) => this.collapsed[s.uid]);
+  }
+
+  /** Fold every card shut, or open them all. */
+  setAllCollapsed(shut: boolean): void {
+    this.collapsed = shut ? Object.fromEntries(this.recipe.steps.map((s) => [s.uid, true])) : {};
   }
   /**
    * The mask component being edited (its index in the mask), or null.
@@ -476,9 +488,14 @@ export class App {
         // A project (D-63) brings its own steps; undo goes back to the last ones.
         this.askNewPhoto = 0;
         this.loadRecipe(brought);
-      } else if (carried && this.newPhoto === 'fresh') this.startFresh();
-      // Steps from the last photo: keep them, clear them, or ask.
-      else if (carried && this.newPhoto === 'ask') this.askNewPhoto = carried;
+      } else {
+        // A crop belongs to the photo it was made on: a new photo starts
+        // uncropped, even when it keeps the steps (Phil, 2026-11-25).
+        this.dropCrop();
+        // Steps from the last photo: keep them, clear them, or ask.
+        if (carried && this.newPhoto === 'fresh') this.startFresh();
+        else if (carried && this.newPhoto === 'ask') this.askNewPhoto = carried;
+      }
       this.setImage(null);
       this.setOriginal(null, '');
       this.setMaskUrl(null);
@@ -491,6 +508,14 @@ export class App {
     } finally {
       this.working = null;
     }
+  }
+
+  /** Remove the crop, if any. Undo brings it back. */
+  private dropCrop(): void {
+    if (!this.recipe.crop) return;
+    delete this.recipe.crop;
+    delete this.recipe.crop_result;
+    this.changed();
   }
 
   /** Clear the steps for a new photo. Undo brings them back. */
@@ -524,6 +549,7 @@ export class App {
       ...(r.work_size ? { work_size: r.work_size } : {}),
       ...(r.scale_back ? { scale_back: true } : {}),
       ...(r.crop ? { crop: { ...r.crop } } : {}),
+      ...(r.crop && r.crop_result ? { crop_result: true } : {}),
       steps: r.steps
         .filter((s) => s.enabled)
         .map(({ effect, effect_version, seed, params, mask, pull }) => ({
@@ -1202,11 +1228,14 @@ export class App {
   // turns it on and off.
 
   editingSteps = $state(false);
+  /** The step held to start Edit mode: it starts out selected. */
+  editFirst: string | null = null;
 
-  startEditingSteps(): void {
+  startEditingSteps(uid?: string): void {
     if (!this.recipe.steps.length) return;
     this.stopMasking();
     this.stopPulling();
+    this.editFirst = uid ?? null;
     this.editingSteps = true;
   }
 
@@ -1309,6 +1338,7 @@ export class App {
         work_size: dto.work_size,
         scale_back: dto.scale_back,
         crop: dto.crop,
+        crop_result: dto.crop_result,
         steps: dto.steps.map((s) => ({
           ...s,
           params: { ...s.params },
@@ -1524,11 +1554,26 @@ export class App {
   // -------------------------------------------------------------------------
   // Work size (SPEC 5b): the canvas the steps run on.
 
-  /** The size of the crop (the whole photo without one). */
+  /**
+   * What the steps start from: the crop of the photo (the whole photo
+   * without one, or when the crop frames the result, D-69).
+   */
   get croppedSize(): Size | null {
     const d = this.doc;
     if (!d) return null;
-    const c = cropRect(this.recipe.crop, d.width, d.height);
+    const c = cropRect(this.recipe.crop_result ? undefined : this.recipe.crop, d.width, d.height);
+    return { w: c.w, h: c.h };
+  }
+
+  /** The crop frames the finished picture rather than the photo. */
+  get cropsResult(): boolean {
+    return !!this.recipe.crop && !!this.recipe.crop_result;
+  }
+
+  /** A size, cut to the crop of the result if there is one. */
+  private framed(s: Size): Size {
+    if (!this.cropsResult) return s;
+    const c = cropRect(this.recipe.crop, s.w, s.h);
     return { w: c.w, h: c.h };
   }
 
@@ -1539,25 +1584,46 @@ export class App {
     return photoFrame(cropRect(this.recipe.crop, d.width, d.height), d.width, d.height);
   }
 
-  /** The size the steps run on: the crop, shrunk to the work size. 100% zoom is this. */
+  /**
+   * The picture shown, at full resolution: the size the steps run on (the
+   * crop, shrunk to the work size), or with a crop of the result, the
+   * frame cut from that. 100% zoom is this, and zoomed patches are
+   * measured in it, as the server measures them.
+   */
   get canvasSize(): Size | null {
     const c = this.croppedSize;
     if (!c) return null;
     const n = this.recipe.work_size;
     const [w, h] = n ? fitSize(c.w, c.h, n, n) : [c.w, c.h];
-    return { w, h };
+    return this.framed({ w, h });
+  }
+
+  /** The size `scale_back` gives: the crop's (or the frame of the whole photo). */
+  get scaledBackSize(): Size | null {
+    const c = this.croppedSize;
+    return c && this.framed(c);
   }
 
   /** The exported file's size: the canvas, or scaled back to the crop's. */
   get outputSize(): Size | null {
-    return this.recipe.scale_back ? this.croppedSize : this.canvasSize;
+    return this.recipe.scale_back ? this.scaledBackSize : this.canvasSize;
   }
 
   // -------------------------------------------------------------------------
   // Crop (SPEC 5d): a frame over the whole, unbent photo; Done applies it.
 
-  /** The crop being edited, as shares of the photo, and the photo to edit it on. */
-  cropping = $state<{ rect: Crop; url: string | null } | null>(null);
+  /**
+   * The crop being edited, as shares of the photo; whether it frames the
+   * result (D-69); and the pictures to frame: the photo unbent, or the
+   * whole result. Each is fetched when first shown.
+   */
+  cropping = $state<{ rect: Crop; result: boolean; photo: string | null; bent: string | null } | null>(null);
+
+  /** The picture under the crop frame, once loaded. */
+  get cropUrl(): string | null {
+    const c = this.cropping;
+    return c ? (c.result ? c.bent : c.photo) : null;
+  }
 
   async startCrop(): Promise<void> {
     const doc = this.doc;
@@ -1565,20 +1631,50 @@ export class App {
     if (this.masking) this.stopMasking();
     this.pulling = null;
     if (this.zoomed) this.toggleZoom();
-    this.cropping = { rect: { ...(this.recipe.crop ?? { x: 0, y: 0, w: 1, h: 1 }) }, url: null };
-    // The whole photo, unbent: the steps run on the crop, so they cannot
-    // be shown outside it.
-    const { crop: _c, work_size: _w, ...rest } = this.dto();
+    this.cropping = {
+      rect: { ...(this.recipe.crop ?? { x: 0, y: 0, w: 1, h: 1 }) },
+      // A new crop frames the result, the picture on screen (Phil,
+      // 2026-11-25); an existing one keeps its own choice.
+      result: this.recipe.crop ? this.cropsResult : true,
+      photo: null,
+      bent: null,
+    };
+    await this.loadCropPicture();
+  }
+
+  /** Frame the photo before the steps, or the finished picture. */
+  setCropResult(on: boolean): void {
+    if (!this.cropping || this.cropping.result === on) return;
+    this.cropping.result = on;
+    void this.loadCropPicture();
+  }
+
+  /**
+   * The picture to frame. For the photo: the whole photo, unbent, since
+   * the steps run on the crop and cannot be shown outside it. For the
+   * result: every step over the whole photo, uncropped.
+   */
+  private async loadCropPicture(): Promise<void> {
+    const doc = this.doc;
+    const c = this.cropping;
+    if (!doc || !c) return;
+    const which = c.result ? 'bent' : 'photo';
+    if (c[which]) return;
+    const { crop: _c, crop_result: _r, work_size: _w, ...rest } = this.dto();
+    const recipe = c.result ? { ...rest, ...(_w ? { work_size: _w } : {}) } : rest;
     const { w, h } = this.target('full');
     try {
-      const res = await api.preview(doc.id, rest, w, h, false, undefined, true);
-      if (!res || !this.cropping) return;
+      const res = c.result
+        ? await api.preview(doc.id, recipe, w, h, this.needsExact)
+        : await api.preview(doc.id, recipe, w, h, false, undefined, true);
+      if (!res) return;
       const url = URL.createObjectURL(res.blob);
       await preload(url);
-      if (this.cropping) this.cropping.url = url;
+      if (this.cropping === c && !c[which]) c[which] = url;
       else URL.revokeObjectURL(url);
     } catch (e) {
-      this.cancelCrop();
+      // Too heavy to show the result live: the frame can still be set.
+      if (!(e instanceof TooHeavyError)) this.cancelCrop();
       this.fail(e);
     }
   }
@@ -1588,7 +1684,9 @@ export class App {
   }
 
   private endCrop(): void {
-    if (this.cropping?.url) URL.revokeObjectURL(this.cropping.url);
+    const c = this.cropping;
+    if (c?.photo) URL.revokeObjectURL(c.photo);
+    if (c?.bent) URL.revokeObjectURL(c.bent);
     this.cropping = null;
   }
 
@@ -1603,14 +1701,17 @@ export class App {
     if (!c || !d) return this.endCrop();
     const px = cropRect(c.rect, d.width, d.height);
     const whole = px.w === d.width && px.h === d.height;
-    const old = JSON.stringify(this.recipe.crop ?? null);
+    const old = JSON.stringify([this.recipe.crop ?? null, this.cropsResult]);
     // Shares rounded to 6 places: plenty for 100 megapixels, and a tidy recipe.
     const r6 = (v: number) => Math.round(v * 1e6) / 1e6;
     const next = whole ? null : { x: r6(c.rect.x), y: r6(c.rect.y), w: r6(c.rect.w), h: r6(c.rect.h) };
+    const result = !!next && c.result;
     this.endCrop();
-    if (JSON.stringify(next) === old) return;
+    if (JSON.stringify([next, result]) === old) return;
     if (next) this.recipe.crop = next;
     else delete this.recipe.crop;
+    if (result) this.recipe.crop_result = true;
+    else delete this.recipe.crop_result;
     this.changed();
   }
 
@@ -1725,7 +1826,7 @@ export class App {
     const doc = this.doc;
     const t = this.cropTarget();
     if (!doc || !t) return;
-    const key = JSON.stringify([doc.id, t, this.recipe.work_size, this.recipe.crop]);
+    const key = JSON.stringify([doc.id, t, this.recipe.work_size, this.recipe.crop, this.cropsResult]);
     if (key === this.originalCropKey) return;
     this.originalCropKey = key;
     try {
@@ -1969,13 +2070,25 @@ export class App {
     }
   }
 
-  /** Save As into a folder under the server's home folder (never overwrites). */
+  /**
+   * Save As into a folder under the server's home folder. Never overwrites,
+   * except a project of the same name, which it offers to update (Phil,
+   * 2026-11-25: a project is a working file; only photos need guarding).
+   */
   async saveTo(opts: ExportOptions, folder: string, name: string, withRecipe: boolean): Promise<void> {
     const doc = this.doc;
     if (!doc) return;
     this.working = this.exporting(opts);
     try {
-      const saved = await api.saveTo(doc.id, this.saved(), opts, folder, name, withRecipe);
+      let saved: string[];
+      try {
+        saved = await api.saveTo(doc.id, this.saved(), opts, folder, name, withRecipe);
+      } catch (e) {
+        if (!(e instanceof ReplaceableError)) throw e;
+        const file = /\.glrx$/i.test(name) ? name : `${name}.glrx`;
+        if (!confirm(`Update ${file}?\n\nIt is replaced with these steps. The photo inside it stays as it is.`)) return;
+        saved = await api.saveTo(doc.id, this.saved(), { ...opts, replace: true }, folder, name, withRecipe);
+      }
       this.flash(`Saved ${saved.join(', ')}`);
     } catch (e) {
       this.fail(e);

@@ -6,6 +6,10 @@
   import Plus from '@lucide/svelte/icons/plus';
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
+  import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
+  import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
+  import Pencil from '@lucide/svelte/icons/pencil';
+  import { tip } from '../lib/hold';
   import { blocksOf } from '../lib/groups';
   import { tick } from 'svelte';
   import { app } from '../lib/app.svelte';
@@ -18,8 +22,12 @@
 
   const encodings = $derived(app.config?.encodings ?? []);
   const current = $derived(encodings.find((e) => e.id === app.recipe.encoding));
+  /** Encoding descriptions come from the server in lower case. */
+  const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
   let list = $state<HTMLOListElement>();
+  /** The work size's note, shown by the toolbox's info button. */
+  let info = $state(false);
   /** Edit mode (held on a step): one line per step, select several, drag to reorder. */
   const editing = $derived(app.editingSteps);
 
@@ -48,13 +56,12 @@
 
 <div class="wrap">
 <div class="stack" class:editing>
-  {#if app.doc}
-    <PhotoTools />
-  {/if}
-  <section class="card sample">
-    <div class="row">
-      <label for="encoding">Encoding</label>
-      <select id="encoding" value={app.recipe.encoding} onchange={(e) => app.setEncoding(e.currentTarget.value)}>
+  <!-- Two cards side by side (Phil, 2026-11-25): how the steps read the
+       pixels on the left, the photo's tools on the right; what they mean
+       in one line of notes under both. -->
+  <div class="top" class:alone={!app.doc}>
+    <section class="card sample" aria-label="Samples">
+      <select id="encoding" value={app.recipe.encoding} onchange={(e) => app.setEncoding(e.currentTarget.value)} aria-label="Encoding" title="Encoding: how the steps read the pixels as audio samples">
         {#each encodings as enc (enc.id)}
           <option value={enc.id}>{enc.id}</option>
         {/each}
@@ -72,11 +79,22 @@
           </button>
         {/each}
       </div>
-    </div>
-    {#if current}
-      <p class="dim note">{current.describe}. Any step can override it.</p>
+    </section>
+    {#if app.doc}
+      <PhotoTools bind:info />
     {/if}
-  </section>
+  </div>
+  <div class="notes dim">
+    {#if current}
+      <p><span class="what">Encoding {current.id}.</span> {cap(current.describe)}. Any step can override it.</p>
+    {/if}
+    {#if info && app.doc}
+      <p>
+        <span class="what">Size.</span> Smaller sizes render faster and coarsen the glitch; Full gives the finest texture. Compare a few
+        before exporting.
+      </p>
+    {/if}
+  </div>
 
   <div class="palette">
     <EffectPalette onpick={add} />
@@ -87,9 +105,27 @@
     {#if editing}
       <button class="plain strong" onclick={() => app.stopEditingSteps()} title="Back to the cards (or hold a step)">Done</button>
     {:else if app.recipe.steps.length}
-      <!-- Edit mode has no button of its own (Phil, 2026-11-24): a step is
-           held to edit the list, so say so here. -->
-      <span class="dim hint">Hold a step to edit the list</span>
+      <!-- Fold every card shut or open them all, and Edit mode, which
+           holding a step also starts (Phil, 2026-11-25). -->
+      <button
+        class="icon"
+        {@attach tip}
+        onclick={() => app.setAllCollapsed(!app.allCollapsed)}
+        title={app.allCollapsed ? 'Expand all steps' : 'Collapse all steps'}
+        aria-label={app.allCollapsed ? 'Expand all steps' : 'Collapse all steps'}
+      >
+        <!-- Carets pointing apart open everything; pointing together fold it. -->
+        {#if app.allCollapsed}<ChevronsUpDown size={20} strokeWidth={1.75} />{:else}<ChevronsDownUp size={20} strokeWidth={1.75} />{/if}
+      </button>
+      <button
+        class="icon"
+        {@attach tip}
+        onclick={() => app.startEditingSteps()}
+        title="Edit the list: select, reorder, duplicate, remove (or hold a step)"
+        aria-label="Edit the list of steps"
+      >
+        <Pencil size={19} strokeWidth={1.75} />
+      </button>
     {/if}
   </div>
 
@@ -201,35 +237,58 @@
   }
 
   /* Wraps the channel control onto its own line when the panel is narrow. */
-  .row {
+  /* Two equal cards; the samples card alone before a photo is open. */
+  .top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .top.alone {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Each card: a control on top, a segmented row below. */
+  .sample {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px;
   }
 
-  .row select {
-    flex: 1 1 96px;
-    min-width: 96px;
+  .sample select {
+    width: 100%;
+    min-height: 36px;
   }
 
-  .sample label {
-    font-weight: 600;
+  .sample .segmented {
+    display: flex;
   }
 
-  .note {
-    margin: 8px 0 0;
+  .sample .segmented button {
+    flex: 1;
+    min-width: 0;
+    padding-left: 2px;
+    padding-right: 2px;
     font-size: 0.85rem;
   }
 
-  /* Encoding descriptions come from the server in lower case. */
-  .note::first-letter {
-    text-transform: uppercase;
+  .notes {
+    margin: -4px 4px 0;
+    font-size: 0.85rem;
   }
 
-  .segmented {
-    flex: none;
+  .notes p {
+    margin: 0 0 4px;
   }
+
+  .notes .what {
+    color: var(--fg);
+    font-weight: 500;
+  }
+
+
 
   .palette {
     display: flex;
@@ -328,7 +387,7 @@
     }
   }
 
-  /* As tall with the hint as with Done, so nothing jumps between modes. */
+  /* As tall with the buttons as with Done, so nothing jumps between modes. */
   .head {
     display: flex;
     align-items: center;
@@ -343,11 +402,6 @@
 
   .strong {
     font-weight: 600;
-  }
-
-  .hint {
-    font-size: 0.8rem;
-    padding: 0 4px;
   }
 
   .steps {

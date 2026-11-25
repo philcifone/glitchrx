@@ -23,8 +23,8 @@ const W: u32 = 480;
 const H: u32 = 320;
 
 /// A small landscape-like scene: sky gradient, sun, textured hills, a band
-/// of fine stripes (text-like edges) and colour bars. Different regions
-/// exercise smooth areas, edges, saturated colour and noise.
+/// of fine stripes (text-like edges) and color bars. Different regions
+/// exercise smooth areas, edges, saturated color and noise.
 fn scene(w: u32, h: u32) -> Raster {
     let mut rng = Rng::new(2026);
     let mut rgb = Vec::with_capacity((w * h * 3) as usize);
@@ -65,7 +65,7 @@ fn scene(w: u32, h: u32) -> Raster {
                 g = 20.0;
                 b = 20.0;
             }
-            // Colour bars along the bottom.
+            // Color bars along the bottom.
             if fy >= 0.9 {
                 let bar = (fx * 8.0) as u32;
                 let bits = [7, 6, 3, 2, 5, 4, 1, 0][bar.min(7) as usize];
@@ -80,7 +80,7 @@ fn scene(w: u32, h: u32) -> Raster {
     Raster::new(w as usize, h as usize, rgb)
 }
 
-/// A stand-in colour profile. The decoders only carry it through, so its
+/// A stand-in color profile. The decoders only carry it through, so its
 /// content does not matter; real profiles are binary blobs like this.
 pub const ICC: &[u8] = b"glitcharaxia test profile; not a real ICC profile.";
 
@@ -336,7 +336,7 @@ fn main() -> Result<()> {
         .chunks_exact(3)
         .map(|p| ((p[0] as u32 * 77 + p[1] as u32 * 150 + p[2] as u32 * 29) >> 8) as u8)
         .collect();
-    // Palette: 2 bits per channel, 64 colours.
+    // Palette: 2 bits per channel, 64 colors.
     let palette: Vec<u8> = (0..64u8)
         .flat_map(|i| [(i >> 4) * 85, ((i >> 2) & 3) * 85, (i & 3) * 85])
         .collect();

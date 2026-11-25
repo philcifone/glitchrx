@@ -105,7 +105,7 @@
   }
 
   const FORMATS: { id: ExportFormat; label: string; note: string }[] = [
-    { id: 'tiff', label: 'TIFF', note: 'Uncompressed 8-bit RGB with the colour profile: ready for masking in Photoshop. Large.' },
+    { id: 'tiff', label: 'TIFF', note: 'Uncompressed 8-bit RGB with the color profile: ready for masking in Photoshop. Large.' },
     { id: 'png', label: 'PNG', note: 'Lossless and smaller than TIFF. Every pixel exactly as bent.' },
     { id: 'jpeg', label: 'JPEG', note: 'Small and readable everywhere.' },
     { id: 'webp', label: 'WebP', note: 'Smaller than JPEG at the same look, or lossless and smaller than PNG.' },
@@ -129,7 +129,7 @@
   const out = $derived(app.outputSize);
   const tooBigForWebp = $derived(!!out && Math.max(out.w, out.h) > WEBP_MAX_SIDE);
   const canvas = $derived(app.canvasSize);
-  const cropped = $derived(app.croppedSize);
+  const cropped = $derived(app.scaledBackSize);
   // Shrunk to a work size: the crop (or photo) and the canvas differ.
   const shrunk = $derived(!!cropped && !!canvas && canvas.w !== cropped.w);
   const blocked = $derived(!project && prefs.format === 'webp' && tooBigForWebp);
@@ -253,7 +253,7 @@
         </div>
         {#if doc && !doc.avif_keeps_profile}
           <p class="warn small">
-            AVIF cannot carry this photo's colour profile{doc.profile ? ` (${doc.profile})` : ''}, so colours may shift. TIFF, PNG, JPEG and WebP keep it.
+            AVIF cannot carry this photo's color profile{doc.profile ? ` (${doc.profile})` : ''}, so colors may shift. TIFF, PNG, JPEG and WebP keep it.
           </p>
         {/if}
       {/if}

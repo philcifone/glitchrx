@@ -5,7 +5,7 @@ export type Theme = 'dark' | 'light';
 export type ThemeChoice = Theme | 'system';
 const KEY = 'glitchrx.theme';
 
-/** Bar colour per theme (--card), for the browser and iOS status bar. */
+/** Bar color per theme (--card), for the browser and iOS status bar. */
 const BAR: Record<Theme, string> = { light: '#fbf7ec', dark: '#282828' };
 
 /**
@@ -52,7 +52,7 @@ export function setTheme(choice: ThemeChoice): void {
   }
   if (choice === 'system') {
     delete root.dataset.theme;
-    // Each scheme's own bar colour again.
+    // Each scheme's own bar color again.
     document.querySelectorAll('meta[name="theme-color"]').forEach((m) => {
       const media = m.getAttribute('media') ?? '';
       m.setAttribute('content', BAR[media.includes('dark') ? 'dark' : 'light']);

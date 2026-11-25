@@ -48,9 +48,9 @@ export interface DocInfo {
   /** EXIF orientation that was applied (1 = none). */
   orientation: number;
   has_icc: boolean;
-  /** The colour profile's name, if it has one. */
+  /** The color profile's name, if it has one. */
   profile: string | null;
-  /** An AVIF export keeps these colours (no profile, sRGB or Display P3). */
+  /** An AVIF export keeps these colors (no profile, sRGB or Display P3). */
   avif_keeps_profile: boolean;
   file_len: number;
   /** Raw RGB bytes the effects work on. */
@@ -99,7 +99,7 @@ export interface ServerConfig {
 
 /**
  * How many interleaved channels the samples form: mono, stereo, or three
- * (with 8-bit samples, one per colour, so R, G and B are processed alone).
+ * (with 8-bit samples, one per color, so R, G and B are processed alone).
  */
 export type Channels = 1 | 2 | 3;
 
@@ -204,6 +204,8 @@ export interface RecipeDto {
   scale_back?: boolean;
   /** The part of the photo kept, before anything else. */
   crop?: Crop;
+  /** The crop frames the finished picture instead (D-69). */
+  crop_result?: boolean;
   /** The photo's file name, recorded in saved recipes. */
   source?: string;
   steps: StepDto[];
@@ -248,6 +250,7 @@ export interface RecipeState {
   work_size?: number;
   scale_back?: boolean;
   crop?: Crop;
+  crop_result?: boolean;
   steps: StepState[];
   /** Preset groups; UI only, never sent to the server or saved in recipes. */
   groups?: PresetGroup[];
@@ -290,7 +293,10 @@ export interface ExportOptions {
   speed?: number;
   /** A project file (.glrx: the original, the recipe and a preview) instead of the picture. */
   project?: boolean;
-  /** Save next to the original only: over the project the photo was opened from. */
+  /**
+   * Save next to the original: over the project the photo was opened from.
+   * Save As: update the project already there under that name.
+   */
   replace?: boolean;
   /**
    * Download and Save next to original: the name typed in the Export sheet,

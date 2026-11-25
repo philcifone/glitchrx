@@ -7,8 +7,8 @@
 //! - assembly is off (it would need nasm to build), and the Rust paths are
 //!   the same everywhere.
 //!
-//! This encoder cannot embed an ICC profile. Colour is described instead
-//! with code points (an `nclx` colour box): sRGB, or Display P3 when the
+//! This encoder cannot embed an ICC profile. Color is described instead
+//! with code points (an `nclx` color box): sRGB, or Display P3 when the
 //! photo's profile is Display P3 (as iPhone photos are). Other profiles are
 //! dropped; [`keeps_profile`] tells callers so they can say so.
 
@@ -39,12 +39,12 @@ pub fn encode(r: &Raster, quality: u8, speed: u8, icc: Option<&[u8]>) -> Result<
 
 /// Rewrap an encoded picture, marked as Display P3.
 ///
-/// ravif always marks its files as sRGB, which leaves the colour box out
+/// ravif always marks its files as sRGB, which leaves the color box out
 /// (sRGB is what readers assume). The AV1 data inside does not depend on the
-/// primaries (they only say how to read the colours), so it is taken out of
+/// primaries (they only say how to read the colors), so it is taken out of
 /// the file's `mdat` box and wrapped again by the same serializer, with a
-/// colour box naming P3 primaries and otherwise what ravif wrote: sRGB
-/// transfer, BT.601 matrix, full range. Readers take the colour box over the
+/// color box naming P3 primaries and otherwise what ravif wrote: sRGB
+/// transfer, BT.601 matrix, full range. Readers take the color box over the
 /// AV1 header's own description.
 fn as_display_p3(file: &[u8], color_len: usize, r: &Raster) -> Result<Vec<u8>> {
     use avif_serialize::constants::{ColorPrimaries, MatrixCoefficients, TransferCharacteristics};
@@ -60,7 +60,7 @@ fn as_display_p3(file: &[u8], color_len: usize, r: &Raster) -> Result<Vec<u8>> {
             .map_err(|_| bad())?,
     ) as usize;
     let av1 = file.get(at + 4..at - 4 + size).ok_or_else(bad)?;
-    // Without alpha or EXIF, the colour data is all the box holds.
+    // Without alpha or EXIF, the color data is all the box holds.
     if av1.len() != color_len {
         return Err(bad());
     }
@@ -72,7 +72,7 @@ fn as_display_p3(file: &[u8], color_len: usize, r: &Raster) -> Result<Vec<u8>> {
     Ok(out.to_vec(av1, None, r.width as u32, r.height as u32, 8))
 }
 
-/// Whether an AVIF export keeps the colours this profile describes: no
+/// Whether an AVIF export keeps the colors this profile describes: no
 /// profile, sRGB, or Display P3.
 pub fn keeps_profile(icc: Option<&[u8]>) -> bool {
     match icc {

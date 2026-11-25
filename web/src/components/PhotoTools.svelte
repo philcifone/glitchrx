@@ -2,13 +2,20 @@
   // The photo's toolbox, at the top of the step panel: crop, the zoom, and
   // the work size. They used to float over the photo, where they got in
   // the way of looking at it (Phil, 2026-11-24); here they sit with the
-  // other recipe-wide settings, just above the encoding.
+  // other recipe-wide settings, in a card beside the encoding's: crop,
+  // zoom and an info button on top, the work size below. The info button
+  // shows the work size's note under the cards (`info`), inline like the
+  // encoding's, rather than in a popup the app has nowhere else.
   import CropIcon from '@lucide/svelte/icons/crop';
   import ZoomIn from '@lucide/svelte/icons/zoom-in';
   import ZoomOut from '@lucide/svelte/icons/zoom-out';
+  import Info from '@lucide/svelte/icons/info';
+  import { tip } from '../lib/hold';
   import { app } from '../lib/app.svelte';
   import { WORK_SIZES } from '../lib/canvas';
   import { percent } from '../lib/view';
+
+  let { info = $bindable(false) }: { info?: boolean } = $props();
 
   const g = $derived(app.geometry);
   /** Crop has the stage while it is open; the rest waits for Done. */
@@ -16,12 +23,13 @@
 </script>
 
 <section class="card tools" aria-label="Photo">
+  <div class="line">
   <button
     class="tool"
     class:on={!!app.recipe.crop}
     onclick={() => app.startCrop()}
     disabled={busy}
-    title="Crop: keep part of the photo, before the steps"
+    title="Crop: keep part of the photo, or of the result"
     aria-label="Crop"
   >
     <CropIcon size={18} strokeWidth={1.75} />
@@ -43,6 +51,18 @@
       <ZoomIn size={18} strokeWidth={1.75} />
     {/if}
   </button>
+  <button
+    class="tool info"
+    class:on={info}
+    {@attach tip}
+    onclick={() => (info = !info)}
+    aria-pressed={info}
+    title={info ? 'Hide the note on sizes' : 'What the sizes do'}
+    aria-label={info ? 'Hide the note on sizes' : 'What the sizes do'}
+  >
+    <Info size={18} strokeWidth={1.75} />
+  </button>
+  </div>
   <!-- Work size (5b): the size the steps run on. Smaller is faster and
        exact at once, with coarser glitch texture. -->
   <div
@@ -72,12 +92,23 @@
     padding: 10px 12px;
   }
 
-  /* One row: crop and zoom on the left, the work size on the right. */
+  /* Crop, zoom and info on top; the work size below, the card's width. */
   .tools {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
+    flex-direction: column;
+    justify-content: space-between;
     gap: 8px;
+    padding: 10px;
+  }
+
+  .line {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .info {
+    margin-left: auto;
   }
 
   .tool {
@@ -106,10 +137,15 @@
   }
 
   .work {
-    margin-left: auto;
+    display: flex;
   }
 
   .work button {
+    flex: 1;
+    min-width: 0;
+    padding-left: 2px;
+    padding-right: 2px;
+    font-size: 0.85rem;
     font-variant-numeric: tabular-nums;
   }
 </style>

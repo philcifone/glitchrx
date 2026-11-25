@@ -3,7 +3,7 @@
 //! A project file carries the original photo, and a phone photo usually
 //! says where it was taken. Before it goes into a project, the location is
 //! removed the way a phone does when sharing: the rest of the metadata
-//! (camera, date, orientation, colour profile) stays.
+//! (camera, date, orientation, color profile) stays.
 //!
 //! Everything is done **in place**, without moving a byte: values are
 //! overwritten with zeros or spaces, never cut out (PNG text chunks, which

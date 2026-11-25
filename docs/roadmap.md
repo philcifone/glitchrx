@@ -28,7 +28,7 @@ Unscheduled; pick any.
 
 ### 16-bit pictures
 
-**What it is.** Today every picture is 8 bits per colour channel (256
+**What it is.** Today every picture is 8 bits per color channel (256
 levels) inside the tool. 16-bit TIFFs and PNGs already open, but they are
 reduced to 8 bits on the way in, and outputs are 8-bit.
 
@@ -36,8 +36,8 @@ reduced to 8 bits on the way in, and outputs are 8-bit.
 - Edits with many steps, especially levels and curves, keep smoother
   gradients with 65,536 levels than with 256 (less banding in skies).
 - The byte effects would see different data: a 16-bit sample would line up
-  with one 16-bit colour channel, so `s16le` and friends would bend whole
-  colour values rather than pairs of neighbouring bytes. That is a new
+  with one 16-bit color channel, so `s16le` and friends would bend whole
+  color values rather than pairs of neighboring bytes. That is a new
   look, not just more precision.
 - Exports could be 16-bit TIFF and PNG, which Lightroom and Photoshop edit
   with more headroom.
@@ -80,7 +80,7 @@ When people databend in Audacity, they often open a BMP file. BMP stores
 each pixel as blue, green, red (not red, green, blue) and the rows from the
 bottom of the picture to the top. So an echo that runs "forward" through
 the file runs upwards on the picture, and channel effects hit different
-colours. A recipe setting `layout = "bmp"` would reproduce that look.
+colors. A recipe setting `layout = "bmp"` would reproduce that look.
 Small to medium effort; the main work is tests and making masks and the
 crop still line up.
 
@@ -108,7 +108,7 @@ the mask shortcuts (B, E, `[` and `]`, Enter, Esc, Delete).
 - **App icon.** Phil likes it (2026-11-23). Revisit only when he wants to
   play with it again.
 - **Recipe work size.** Built in Phase 5b (D-48).
-- **Several hsl colour ranges at once.** Built after Phase 6 (D-57).
+- **Several hsl color ranges at once.** Built after Phase 6 (D-57).
 - **A histogram in the levels editor.** Built as the classic levels view (D-60).
 
 ## Future (after the tool is shared)
@@ -117,7 +117,7 @@ the mask shortcuts (B, E, `[` and `]`, Enter, Esc, Delete).
 
 Put off until well after sharing (Phil, 2026-11-23). There are dozens of
 camera raw formats, and turning sensor data into a picture needs
-demosaicing, white balance, colour profiles and a tone curve: a raw
+demosaicing, white balance, color profiles and a tone curve: a raw
 developer in its own right. Converting to DNG first does not remove that
 step. JPEG, PNG, TIFF, WebP and AVIF cover the need for now; export a TIFF
 from Lightroom to glitch a raw photo.

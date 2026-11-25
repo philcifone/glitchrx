@@ -9,7 +9,7 @@ use glitchrx_core::turbo::{self, EncodeOptions, PixelFormat, Subsampling};
 pub const MAX_PREVIEW_SIDE: u32 = 4096;
 
 /// Encode a preview raster as a JPEG for transfer. Full chroma: glitch
-/// colour fringes are the point, keep them.
+/// color fringes are the point, keep them.
 pub fn preview_jpeg(r: &Raster, quality: u8) -> Result<Vec<u8>, String> {
     turbo::encode(
         r.width as u32,

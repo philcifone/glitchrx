@@ -56,7 +56,7 @@ pub const PREVIEW_SIDE: usize = 1024;
 
 /// The preview a project carries: `picture` (the finished render, at any
 /// size) shrunk to [`PREVIEW_SIDE`] and encoded as a JPEG, with the photo's
-/// colour profile so it looks as the export does.
+/// color profile so it looks as the export does.
 pub fn preview(picture: &Raster, icc: Option<&[u8]>) -> Result<Vec<u8>> {
     let small = picture.downscale(PREVIEW_SIDE, PREVIEW_SIDE);
     let settings = EncodeSettings {

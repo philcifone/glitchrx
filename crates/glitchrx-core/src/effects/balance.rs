@@ -1,4 +1,4 @@
-//! `balance`: colour balance for the shadows, midtones or highlights, as
+//! `balance`: color balance for the shadows, midtones or highlights, as
 //! in Photoshop's Color Balance.
 //!
 //! Each slider pushes one channel against its opposite (cyan against red,
@@ -8,7 +8,7 @@
 //! across the range: shadows (1 - L)^2, midtones 2L(1 - L), highlights
 //! L^2 (midtones doubled here so all three peak at 1). Keeping luminosity
 //! then shifts all three channels equally to restore the brightness, so
-//! only the colour changes.
+//! only the color changes.
 
 use super::adjust::{luma, per_pixel, to_byte};
 use super::{Effect, EffectInfo, Group, PlacementDefaults, Upgrade, Window};
@@ -32,7 +32,7 @@ pub static INFO: EffectInfo = EffectInfo {
               blue or yellow (-100 to 100; at 100 a full-weight pixel moves by about 100 \
               of 255). Add a step for each range you want to tint: warm highlights and \
               cool shadows are two steps. `luminosity=keep` restores each pixel's \
-              brightness so only the colour changes.",
+              brightness so only the color changes.",
     params: &[
         ParamSpec {
             name: "tones",
@@ -71,7 +71,7 @@ pub static INFO: EffectInfo = EffectInfo {
             name: "luminosity",
             kind: Kind::Choice(&["keep", "change"]),
             default: "keep",
-            help: "keep each pixel's brightness, so only the colour changes",
+            help: "keep each pixel's brightness, so only the color changes",
         },
     ],
     placement: PlacementDefaults {

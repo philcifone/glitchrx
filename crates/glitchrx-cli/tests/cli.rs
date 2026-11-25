@@ -415,6 +415,40 @@ fn crop_keeps_part_of_the_photo_and_is_saved_in_the_recipe() {
     assert!(stderr(&o).contains("crop"), "{}", stderr(&o));
 }
 
+/// `--crop-result` frames the finished picture: the whole photo's glitch,
+/// cut afterwards (D-69). It needs `--crop`.
+#[test]
+fn crop_result_frames_the_finished_picture() {
+    let d = workdir();
+    let echo = ["--echo", "delay=0.4rows", "--seed", "5"];
+    let o = run(d.path(), &[&echo[..], &["photo.jpg", "whole.png"]].concat());
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    let args = [
+        &echo[..],
+        &[
+            "--crop",
+            "0.25,0,0.5,0.5",
+            "--crop-result",
+            "--save-recipe",
+            "photo.jpg",
+            "framed.png",
+        ],
+    ]
+    .concat();
+    let o = run(d.path(), &args);
+    assert_eq!(code(&o), 0, "{}", stderr(&o));
+    let whole = codec::decode(&fs::read(d.path().join("whole.png")).unwrap()).unwrap();
+    let framed = codec::decode(&fs::read(d.path().join("framed.png")).unwrap()).unwrap();
+    assert_eq!(framed.raster, whole.raster.crop(120, 0, 240, 160));
+    let recipe = fs::read_to_string(d.path().join("framed.recipe.toml")).unwrap();
+    assert!(recipe.contains("crop_result = true"), "{recipe}");
+    let o = run(
+        d.path(),
+        &["--invert", "--crop-result", "photo.jpg", "x.png"],
+    );
+    assert_eq!(code(&o), 2, "{}", stderr(&o));
+}
+
 #[test]
 fn a_project_replays_to_the_same_picture_and_carries_the_original() {
     let d = workdir();

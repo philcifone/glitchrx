@@ -1204,6 +1204,141 @@ async fn crop_comes_before_the_steps() {
     assert!(String::from_utf8_lossy(&b).contains("crop"));
 }
 
+/// D-69: a crop of the result. The export is the whole render, framed;
+/// previews, zoomed views and the mask view all show just the frame, and
+/// a zoomed view is measured within it.
+#[tokio::test]
+async fn a_crop_of_the_result_frames_the_render() {
+    let app = app(None, None);
+    let original = fixture("baseline-420.jpg"); // 480 x 320
+    let doc = upload(&app, "photo.jpg", original.clone()).await;
+    let id = doc["id"].as_str().unwrap();
+    let mut recipe = sample_recipe();
+    recipe["crop"] = json!({"x": 0.25, "y": 0.0, "w": 0.5, "h": 0.5});
+    recipe["crop_result"] = json!(true);
+
+    let (s, _, b) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/export"),
+            json!({"recipe": recipe, "format": "png"}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let mut whole = codec::decode(&original).unwrap().raster;
+    core_recipe().apply(&mut whole).unwrap();
+    let framed = whole.crop(120, 0, 240, 160);
+    assert_eq!(codec::decode(&b).unwrap().raster, framed);
+
+    // A live preview shows the frame, filling the box.
+    let (s, h, _) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/preview"),
+            json!({"recipe": recipe, "max_w": 120, "max_h": 120}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        (&h["x-width"], &h["x-height"]),
+        (&"120".parse().unwrap(), &"80".parse().unwrap())
+    );
+
+    // A zoomed view: its shares and X-Crop are of the frame.
+    let (s, h, b) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/preview"),
+            json!({"recipe": recipe, "max_w": 4096, "max_h": 4096,
+                   "crop": {"x": 0.5, "y": 0.5, "w": 0.5, "h": 0.5}}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(h["x-crop"], "120,80,120,80");
+    let got = codec::decode(&b).unwrap().raster;
+    let want = framed.crop(120, 80, 120, 80);
+    let err = got
+        .bytes
+        .iter()
+        .zip(&want.bytes)
+        .map(|(a, b)| a.abs_diff(*b) as u64)
+        .sum::<u64>()
+        / got.bytes.len() as u64;
+    assert!(err < 8, "mean error {err}");
+
+    // The mask view lies on the preview: the same size.
+    let (s, _, b) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/mask"),
+            json!({"recipe": recipe, "step": 0, "max_w": 120, "max_h": 120}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let png = codec::decode(&b).unwrap().raster;
+    assert_eq!((png.width, png.height), (120, 80));
+}
+
+/// Save As may update a project of the same name, once asked (Phil,
+/// 2026-11-25): the first try answers 409 with `X-Replaceable`, the second
+/// with `replace` writes over it. Pictures and non-projects are never
+/// replaced.
+#[tokio::test]
+async fn save_as_updates_a_project_once_asked() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join("out")).unwrap();
+    let app = app_with_settings(&home, None);
+    let doc = upload(&app, "photo.jpg", fixture("baseline-444.jpg")).await;
+    let id = doc["id"].as_str().unwrap();
+    let save = |name: &str, project: bool, replace: bool, recipe: Value| {
+        post_json(
+            &format!("/api/docs/{id}/save-to"),
+            json!({"recipe": recipe, "format": "png", "project": project,
+                   "replace": replace, "folder": "out", "name": name}),
+        )
+    };
+    let (s, _, b) = send(&app, save("edit", true, false, sample_recipe())).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let first = fs::read(home.join("out/edit.glrx")).unwrap();
+
+    // Taken: asked about, not written.
+    let mut changed = sample_recipe();
+    changed["steps"][0]["params"]["decay"] = json!("0.3");
+    let (s, h, _) = send(&app, save("edit", true, false, changed.clone())).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert_eq!(h["x-replaceable"], "1");
+    assert_eq!(fs::read(home.join("out/edit.glrx")).unwrap(), first);
+
+    // Asked: updated, and it opens with the new steps.
+    let (s, _, b) = send(&app, save("edit", true, true, changed)).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let now = fs::read(home.join("out/edit.glrx")).unwrap();
+    assert_ne!(now, first);
+    let p = glitchrx_core::project::Project::from_bytes(&now).unwrap();
+    assert_eq!(p.recipe.steps[0].params["decay"], "0.3");
+
+    // A picture never replaces; nor does a project replace a file that is
+    // not one, whatever its name.
+    let (s, _, _) = send(&app, save("pic", false, false, sample_recipe())).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, h, _) = send(&app, save("pic", false, true, sample_recipe())).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert!(h.get("x-replaceable").is_none());
+    fs::write(home.join("out/fake.glrx"), b"not a project").unwrap();
+    let (s, h, _) = send(&app, save("fake", true, true, sample_recipe())).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert!(h.get("x-replaceable").is_none());
+    assert_eq!(
+        fs::read(home.join("out/fake.glrx")).unwrap(),
+        b"not a project"
+    );
+}
+
 #[tokio::test]
 async fn saved_recipes_are_listed_read_and_offered_for_their_photo() {
     let tmp = tempfile::tempdir().unwrap();

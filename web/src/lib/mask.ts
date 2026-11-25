@@ -15,7 +15,7 @@
 import { SLIDER_STEPS, type SliderScale } from './slider';
 import type { Mask, MaskMode, MaskOp, MaskShape, Stroke } from './types';
 
-/** Overlay colour for the mask view: Gruvbox red, like a rubylith. */
+/** Overlay color for the mask view: Gruvbox red, like a rubylith. */
 export const MASK_TINT: [number, number, number] = [204, 36, 29];
 
 /** What a brush component's strokes do. */

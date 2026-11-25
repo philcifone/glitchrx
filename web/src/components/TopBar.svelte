@@ -147,7 +147,7 @@
 
   /* The compare button. Held, its disc fills at once: one change, no
      fades. A dim on press, a fade of the fill and an instant change of the
-     icon's colour all overlapped on iOS, and the icon showed twice, offset,
+     icon's color all overlapped on iOS, and the icon showed twice, offset,
      halfway through (Phil, 2026-11-24). */
   .actions .compare,
   .actions .compare:active:not(:disabled) {

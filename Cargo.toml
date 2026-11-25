@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/glitchrx-core", "crates/glitchrx-cli", "crates/glitchrx-serve", "crates/glitchrx-desktop", "tools/gen-fixtures", "tools/contact-sheet"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 rust-version = "1.88"
@@ -26,7 +26,7 @@ libwebp-sys = "0.14"
 # AVIF: rav1e, pure Rust. Without the asm feature, so no nasm is needed to build.
 ravif = { version = "0.13", default-features = false, features = ["threading"] }
 rgb = "0.8"
-# The AVIF container, to rewrap ravif's output with Display P3 colour.
+# The AVIF container, to rewrap ravif's output with Display P3 color.
 avif-serialize = "0.8"
 # Project files (.glrx) are zips; deflate only, through flate2's pure-Rust
 # backend. 8.x is the newest line that builds on our rust-version.

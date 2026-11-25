@@ -6,7 +6,7 @@
 // crushing, reversing, moving them around. "Pixel" effects are not audio at
 // all: they work on whole pixels in two dimensions (pixel sorting).
 // "Adjust" holds the photo tools (levels, curves, hue and saturation,
-// colour balance), steps like any other. Within a group, effects keep a
+// color balance), steps like any other. Within a group, effects keep a
 // fixed picker order, so related ones sit together.
 
 import type { EffectGroup, EffectInfo } from './types';

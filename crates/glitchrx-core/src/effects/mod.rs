@@ -73,7 +73,7 @@ pub struct Window<'a> {
     pub start: usize,
     pub encoding: Encoding,
     /// 1 (mono), 2 (stereo: samples alternate left/right) or 3 (one channel
-    /// per colour: with 8-bit samples, R, G and B each processed alone).
+    /// per color: with 8-bit samples, R, G and B each processed alone).
     pub channels: usize,
     /// Converts sizes for this raster (full resolution or a preview).
     pub units: &'a Units,
@@ -204,7 +204,7 @@ pub struct EffectInfo {
     /// True if a scaled preview cannot resemble the export, so front ends
     /// should render it at full resolution once the user pauses. The
     /// phaser is the case: its all-pass stages act as delays of a few
-    /// samples, and which colour channels they mix depends on that delay
+    /// samples, and which color channels they mix depends on that delay
     /// modulo 3, which no smaller raster can reproduce.
     pub exact_preview: bool,
     /// True for a step drawn by hand (`pull`): it runs on the whole raster
@@ -288,7 +288,7 @@ pub(crate) const PHASE: ParamSpec = ParamSpec {
     name: "phase",
     kind: Kind::Int { min: 0, max: 5 },
     default: "1",
-    help: "extra bytes on top of the distance: 0 keeps colours, 1 or 2 rotates them",
+    help: "extra bytes on top of the distance: 0 keeps colors, 1 or 2 rotates them",
 };
 
 /// Render the effect reference as Markdown (the source of `docs/effects.md`).
@@ -308,7 +308,7 @@ pub fn markdown_reference() -> String {
     s.push_str(
         "Sizes take units: `%` of the image (which runs top to bottom), `rows` (a fractional \
          row is that share of the width), `px`, or plain bytes. A distance of whole pixels \
-         keeps colours; `phase` adds 1 or 2 bytes, which rotates red into green into blue.\n\n",
+         keeps colors; `phase` adds 1 or 2 bytes, which rotates red into green into blue.\n\n",
     );
     s.push_str("## Encodings\n\n| Encoding | Bytes | Character |\n| --- | --- | --- |\n");
     for e in Encoding::ALL {
@@ -440,7 +440,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn three_channels_filter_each_colour_alone() {
+    fn three_channels_filter_each_color_alone() {
         // A pure red picture through a wahwah: mono blends R, G and B into
         // grey-ish values; three channels leave G and B untouched at zero.
         let red: Vec<u8> = [255u8, 0, 0].repeat(400);

@@ -704,8 +704,11 @@ async fn preview(
         let c = doc.canvas(&framing);
         (c.width, c.height)
     };
+    // The picture shown: the canvas, or the part a crop of the result
+    // frames (D-69). A zoomed crop is a part of that.
+    let frame = framing.result_rect(cw, ch).unwrap_or((0, 0, cw, ch));
     let crop = match req.crop {
-        Some(c) => Some(c.pixels(cw, ch)?),
+        Some(c) => Some(c.pixels(frame.2, frame.3)?),
         None => None,
     };
     let recipe = (!req.original).then(|| framing.clone());
@@ -727,12 +730,23 @@ async fn preview(
     let max_h = req.max_h.clamp(16, render::MAX_PREVIEW_SIDE) as usize;
     let exact = req.exact || zoom;
     let budget = st.preview_budget * if exact { 10 } else { 1 };
-    // Cut the crop (if any) from a full-resolution raster, then shrink it.
-    let shown = move |full: &Raster| match crop {
-        Some((x, y, w, h)) => full.crop(x, y, w, h).downscale(max_w, max_h),
-        None => {
-            let (w, h) = full.fit(max_w, max_h);
-            full.resize(w, h)
+    // Cut the frame and the crop (if any) from a full-resolution canvas,
+    // then shrink it.
+    let shown = move |full: &Raster| {
+        let (fx, fy, fw, fh) = frame;
+        match crop {
+            Some((x, y, w, h)) => full.crop(fx + x, fy + y, w, h).downscale(max_w, max_h),
+            None => {
+                let framed;
+                let full = if (fw, fh) == (full.width, full.height) {
+                    full
+                } else {
+                    framed = full.crop(fx, fy, fw, fh);
+                    &framed
+                };
+                let (w, h) = full.fit(max_w, max_h);
+                full.resize(w, h)
+            }
         }
     };
     blocking(move || {
@@ -743,7 +757,7 @@ async fn preview(
                 let result = if exact {
                     doc.render_full(r, &stop).map(|full| shown(&full))
                 } else {
-                    doc.preview(r, max_w, max_h, &stop)
+                    doc.preview_framed(r, max_w, max_h, &stop)
                 };
                 match result {
                     Ok(raster) => raster,
@@ -789,7 +803,8 @@ async fn preview(
         set("x-width", raster.width.to_string());
         set("x-height", raster.height.to_string());
         if let Some((x, y, w, h)) = crop {
-            // The full-resolution pixels it shows, so the GUI can place it.
+            // The full-resolution pixels it shows, so the GUI can place it
+            // (of the picture shown: within the frame of a cropped result).
             set("x-crop", format!("{x},{y},{w},{h}"));
         }
         Ok(res)
@@ -804,7 +819,7 @@ struct MaskRequest {
     step: usize,
     max_w: u32,
     max_h: u32,
-    /// Overlay colour; the GUI passes its theme's.
+    /// Overlay color; the GUI passes its theme's.
     #[serde(default = "mask_tint")]
     tint: [u8; 3],
 }
@@ -923,8 +938,9 @@ struct ExportRequest {
     /// then unused.
     #[serde(default)]
     project: bool,
-    /// Save next to the original only: write the project over the one the
-    /// photo was opened from (the GUI asks first).
+    /// Save next to the original: write the project over the one the photo
+    /// was opened from. Save As into a folder: update the project already
+    /// there under that name. The GUI asks first either way.
     #[serde(default)]
     replace: bool,
     /// Download and Save next to original: the name typed in the Export
@@ -1016,7 +1032,7 @@ fn output_bytes(
     Ok(Project::new(recipe.clone(), &doc.name, &doc.file, Some(preview))?.to_bytes()?)
 }
 
-/// Bend the full image and encode it, keeping the colour profile.
+/// Bend the full image and encode it, keeping the color profile.
 fn export_bytes(
     doc: &Doc,
     recipe: &Recipe,
@@ -1559,12 +1575,14 @@ fn free_name(dir: &std::path::Path, name: &str, with_recipe: bool) -> PathBuf {
 
 /// Save As into a folder under home, with a name chosen in the browser.
 /// Never overwrites (409, so the dialog can ask for another name) and
-/// never writes the original.
+/// never writes the original, with one exception: a project may update an
+/// existing project of that name, once asked (`replace`; Phil, 2026-11-25).
+/// Its 409 says so with `X-Replaceable: 1`, so the GUI knows to offer it.
 async fn save_to(
     State(st): State<Shared>,
     Path(id): Path<String>,
     Json(req): Json<SaveToRequest>,
-) -> ApiResult<Json<Saved>> {
+) -> ApiResult<Response> {
     let store = settings(&st)?;
     let doc = find(&st, &id)?;
     let folder = store
@@ -1580,26 +1598,45 @@ async fn save_to(
     let shown = |p: &std::path::Path| format!("~/{}", store.relative(p));
     let (out_shown, rpath) = (shown(&out), out.with_extension("recipe.toml"));
     let recipe_shown = shown(&rpath);
-    // Refuse before the long render when the name is taken.
-    if std::fs::symlink_metadata(&out).is_ok() {
-        return Err(ApiError::new(
+    // Refuse before the long render when the name is taken, unless it is a
+    // project being updated (a project only: never a photo, nor another
+    // kind of file that happens to end in .glrx).
+    let taken = std::fs::symlink_metadata(&out).is_ok();
+    let replaceable = taken && export.project && glitchrx_core::io::is_project_file(&out);
+    let update = replaceable && export.replace;
+    if taken && !update {
+        let mut res = ApiError::new(
             StatusCode::CONFLICT,
-            format!("{out_shown} already exists; choose another name"),
-        ));
+            if replaceable {
+                format!("{out_shown} already exists")
+            } else {
+                format!("{out_shown} already exists; choose another name")
+            },
+        )
+        .into_response();
+        if replaceable {
+            res.headers_mut()
+                .insert("x-replaceable", HeaderValue::from_static("1"));
+        }
+        return Ok(res);
     }
     blocking(move || {
         let bytes = output_bytes(&doc, &recipe, &export, &encode)?;
+        let conflict = |e: WriteError| ApiError::new(StatusCode::CONFLICT, e.to_string());
         let write = |path: &std::path::Path, data: &[u8]| {
-            write_output(&source, path, data, false)
-                .map_err(|e| ApiError::new(StatusCode::CONFLICT, e.to_string()))
+            write_output(&source, path, data, false).map_err(conflict)
         };
-        write(&out, &bytes)?;
+        if update {
+            write_project(&source, &out, &bytes, true).map_err(conflict)?;
+        } else {
+            write(&out, &bytes)?;
+        }
         let mut saved = vec![out_shown];
         if with_recipe {
             write(&rpath, recipe.to_toml().as_bytes())?;
             saved.push(recipe_shown);
         }
-        Ok(Json(Saved { saved }))
+        Ok(Json(Saved { saved }).into_response())
     })
     .await
 }

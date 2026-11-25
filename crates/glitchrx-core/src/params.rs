@@ -83,12 +83,12 @@ impl Bound {
 ///
 /// - whole rows scale with the height, the rest of a row with the width, so
 ///   "2 rows and 300 px" at full size is "2/6 rows and 50 px" at 1/6 size;
-/// - the remainder of 0-2 bytes (the channel `phase`, which rotates colours)
+/// - the remainder of 0-2 bytes (the channel `phase`, which rotates colors)
 ///   is kept as is.
 ///
 /// Scaling bytes in proportion to the image's area instead would be wrong
 /// twice over: a third of a row at full size would become a twelfth of one
-/// at 1/4 size, and the byte remainder (the colour rotation) would come out
+/// at 1/4 size, and the byte remainder (the color rotation) would come out
 /// arbitrary.
 ///
 /// At full resolution (`width == full_width`) the mapping is the identity.
