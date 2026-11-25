@@ -6,6 +6,8 @@
   import Plus from '@lucide/svelte/icons/plus';
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
+  import ChevronsDownUp from '@lucide/svelte/icons/chevrons-down-up';
+  import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
   import Pencil from '@lucide/svelte/icons/pencil';
   import { tip } from '../lib/hold';
   import { blocksOf } from '../lib/groups';
@@ -112,7 +114,8 @@
         title={app.allCollapsed ? 'Expand all steps' : 'Collapse all steps'}
         aria-label={app.allCollapsed ? 'Expand all steps' : 'Collapse all steps'}
       >
-        {#if app.allCollapsed}<ChevronDown size={20} strokeWidth={1.75} />{:else}<ChevronUp size={20} strokeWidth={1.75} />{/if}
+        <!-- Carets pointing apart open everything; pointing together fold it. -->
+        {#if app.allCollapsed}<ChevronsUpDown size={20} strokeWidth={1.75} />{:else}<ChevronsDownUp size={20} strokeWidth={1.75} />{/if}
       </button>
       <button
         class="icon"

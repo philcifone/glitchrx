@@ -18,7 +18,7 @@ earlier version always open in a later one.
 - **Save As updates a project.** Saving a project onto the name of an
   existing project asks "Update NAME.glrx?" and replaces it. Photos and
   other files are still never overwritten.
-- **Collapse all and an Edit button** beside Steps: an arrow folds every
+- **Collapse all and an Edit button** beside Steps: double carets fold every
   card shut or opens them all, and a pencil opens Edit mode. Holding a step
   still works.
 - **A note on work sizes**, behind an info button in the photo's toolbox.

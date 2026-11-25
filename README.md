@@ -132,7 +132,7 @@ Icon-only buttons show their name when you hold them on a phone (with a mouse, h
 - **Sliders** mark their default with a small tick and snap onto it; double tap a slider to go back to the default. Fields without a slider have a reset arrow.
 - **Shake** (the shuffle arrows at the top of a step's settings) rolls its settings at random, within the useful range; placement and encoding stay.
 - **Placement:** every effect starts on the whole picture. The **Bands** switch scatters it in seeded bands instead and shows `hits`, `len` and the seed. Dragging the region's two handles shades the preview outside the band. **Re-roll** (the dice beside the seed) picks a new seed, which moves where the bands land; it is greyed out when nothing is random.
-- **Collapse and Edit mode:** the arrow beside Steps folds every card shut or opens them all. The pencil (or holding a step's header) shows every step on one line; a held step starts out selected (a green ring). Tap the circles to select more, then re-roll, duplicate or remove them together; drag the grip on the right to reorder. Hold a row (or tap Done) to go back. With nothing selected, the dice re-rolls every step.
+- **Collapse and Edit mode:** the double caret beside Steps folds every card shut or opens them all. The pencil (or holding a step's header) shows every step on one line; a held step starts out selected (a green ring). Tap the circles to select more, then re-roll, duplicate or remove them together; drag the grip on the right to reorder. Hold a row (or tap Done) to go back. With nothing selected, the dice re-rolls every step.
 
 ### Blend and masks
 
