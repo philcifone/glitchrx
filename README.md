@@ -250,7 +250,7 @@ Audacity's Import Raw Data dialog asks how to read the bytes as samples. That ch
 | `s24le`, `s24be` | One sample per pixel; posterized two-tone fields |
 | `ulaw`, `alaw` | Posterized neon blocks with hard edges |
 
-`--channels 2` reads the bytes as stereo, as Audacity did when you imported stereo: alternate samples are left and right, and each side is processed on its own. `--channels 3` does the same with three channels; with `u8` those are exactly red, green and blue, so filters that blend neighbouring samples (`wahwah`, `reverb`) keep the colors instead of turning them grey.
+`--channels 2` reads the bytes as stereo, as Audacity did when you imported stereo: alternate samples are left and right, and each side is processed on its own. `--channels 3` does the same with three channels; with `u8` those are exactly red, green and blue, so filters that blend neighboring samples (`wahwah`, `reverb`) keep the colors instead of turning them grey.
 
 **Endianness.** In Audacity you chose little or big endian when importing raw data. That only matters when one sample is two or more bytes: it decides whether the first byte of each pair is the loud (high) or the quiet (low) part. With `s16le` the green and blue bytes of a pixel tend to be the loud parts; with `s16be` it flips. Neither is wrong; they are different palettes.
 

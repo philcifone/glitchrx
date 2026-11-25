@@ -37,7 +37,7 @@ reduced to 8 bits on the way in, and outputs are 8-bit.
   gradients with 65,536 levels than with 256 (less banding in skies).
 - The byte effects would see different data: a 16-bit sample would line up
   with one 16-bit color channel, so `s16le` and friends would bend whole
-  color values rather than pairs of neighbouring bytes. That is a new
+  color values rather than pairs of neighboring bytes. That is a new
   look, not just more precision.
 - Exports could be 16-bit TIFF and PNG, which Lightroom and Photoshop edit
   with more headroom.

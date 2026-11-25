@@ -34,7 +34,7 @@ pub static INFO: EffectInfo = EffectInfo {
     audacity: "none (an adjustment)",
     summary: "Turn the hues, and change saturation and lightness.",
     details: "`range` limits it to one family of colors (`reds`, `yellows`, ...), \
-              fading softly into the neighbouring ones; greys are left alone. \
+              fading softly into the neighboring ones; greys are left alone. \
               `hue` turns every color round the color wheel, in degrees (120 makes red \
               green, green blue and blue red). `saturation` from -100 (grey) to 100 \
               (twice as vivid, clipping at full). `lightness` from -100 (black) to 100 \

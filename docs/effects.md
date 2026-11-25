@@ -408,7 +408,7 @@ glitchrx --pixelsort low=0.3,region=25%:100% photo.jpg
 
 Drag pixels around by hand: strokes drawn on the photo pull what is under the brush along with them.
 
-A step made of strokes rather than settings, like Photoshop's Liquify forward warp: each stroke drags the pixels under the brush along its path, strongest at the centre. Strokes are drawn in the GUI (or written as `[[step.pull]]` tables in a recipe: `size` as a share of the photo's longer side, `strength` 0 to 1, and `points` as x, y shares of the photo); added on the command line, the step has none and changes nothing. `sampling=pixels` keeps hard pixel edges; `smooth` blends neighbours, as Liquify does. Placement (`region`, `hits`, `len`) does not apply: the strokes are the placement. Opacity and a mask do, so a pull can be taken back from part of the picture.
+A step made of strokes rather than settings, like Photoshop's Liquify forward warp: each stroke drags the pixels under the brush along its path, strongest at the center. Strokes are drawn in the GUI (or written as `[[step.pull]]` tables in a recipe: `size` as a share of the photo's longer side, `strength` 0 to 1, and `points` as x, y shares of the photo); added on the command line, the step has none and changes nothing. `sampling=pixels` keeps hard pixel edges; `smooth` blends neighbors, as Liquify does. Placement (`region`, `hits`, `len`) does not apply: the strokes are the placement. Opacity and a mask do, so a pull can be taken back from part of the picture.
 
 Version: 1.
 
@@ -418,7 +418,7 @@ Drawn by hand: no seed, and placement (`region`, `hits`, `len`) does not apply.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
-| `sampling` | `pixels` | pixels keeps hard pixel edges; smooth blends neighbours |
+| `sampling` | `pixels` | pixels keeps hard pixel edges; smooth blends neighbors |
 
 Example:
 
@@ -486,7 +486,7 @@ glitchrx --curves points=0:20/128:150/255:235,channel=blue photo.jpg
 
 Turn the hues, and change saturation and lightness.
 
-`range` limits it to one family of colors (`reds`, `yellows`, ...), fading softly into the neighbouring ones; greys are left alone. `hue` turns every color round the color wheel, in degrees (120 makes red green, green blue and blue red). `saturation` from -100 (grey) to 100 (twice as vivid, clipping at full). `lightness` from -100 (black) to 100 (white). Greys stay grey under hue and saturation.
+`range` limits it to one family of colors (`reds`, `yellows`, ...), fading softly into the neighboring ones; greys are left alone. `hue` turns every color round the color wheel, in degrees (120 makes red green, green blue and blue red). `saturation` from -100 (grey) to 100 (twice as vivid, clipping at full). `lightness` from -100 (black) to 100 (white). Greys stay grey under hue and saturation.
 
 Version: 2.
 

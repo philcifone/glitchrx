@@ -53,7 +53,7 @@
   const HINT: Record<MaskShape, string> = {
     brush: 'Paint on the photo. Erase takes back only this brush.',
     linear: 'Full at the solid line, faded out at the other. Drag a line or the middle; drag elsewhere to draw it again.',
-    radial: 'Drag the centre to move it and the ring to resize it; drag elsewhere to draw it again. Feather softens its edge.',
+    radial: 'Drag the center to move it and the ring to resize it; drag elsewhere to draw it again. Feather softens its edge.',
     rect: 'Drag a corner to resize, the top handle to turn (shift: 15 degree steps), inside to move; drag elsewhere to draw it again.',
     path: 'Drag a point to move it, its handles to bend the sides; tap a side to add a point, drag inside to move it all.',
     brightness: 'Pixels in this range, read from the picture as it reaches this step.',

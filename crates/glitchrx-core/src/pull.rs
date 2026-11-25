@@ -86,18 +86,18 @@ pub static INFO: EffectInfo = EffectInfo {
     summary: "Drag pixels around by hand: strokes drawn on the photo pull what is under the brush along with them.",
     details: "A step made of strokes rather than settings, like Photoshop's Liquify forward \
               warp: each stroke drags the pixels under the brush along its path, strongest \
-              at the centre. Strokes are drawn in the GUI (or written as `[[step.pull]]` \
+              at the center. Strokes are drawn in the GUI (or written as `[[step.pull]]` \
               tables in a recipe: `size` as a share of the photo's longer side, `strength` \
               0 to 1, and `points` as x, y shares of the photo); added on the command line, \
               the step has none and changes nothing. `sampling=pixels` keeps hard pixel \
-              edges; `smooth` blends neighbours, as Liquify does. Placement (`region`, \
+              edges; `smooth` blends neighbors, as Liquify does. Placement (`region`, \
               `hits`, `len`) does not apply: the strokes are the placement. Opacity and a \
               mask do, so a pull can be taken back from part of the picture.",
     params: &[ParamSpec {
         name: "sampling",
         kind: Kind::Choice(&["pixels", "smooth"]),
         default: "pixels",
-        help: "pixels keeps hard pixel edges; smooth blends neighbours",
+        help: "pixels keeps hard pixel edges; smooth blends neighbors",
     }],
     placement: PlacementDefaults {
         region: "0%:100%",
