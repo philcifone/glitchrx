@@ -1,26 +1,31 @@
 <script lang="ts">
-  // Drawing a pull on the preview (SPEC 8.2, D-64, D-67). Covers the stage
-  // like the mask painter, and like it takes only the one-finger gestures
-  // from the preview, which keeps two fingers for pinch and pan.
+  // Drawing a pull on the preview (SPEC 8.2, D-64, D-67, D-68). Covers the
+  // stage like the mask painter, and like it takes only the one-finger
+  // gestures from the preview, which keeps two fingers for pinch and pan.
   //
-  // Two tools:
+  // Strokes and pins are one list, in the order made: whatever is done last
+  // goes over the rest. Two tools:
   // - Draw: a stroke goes into the recipe while it is drawn (uncommitted,
   //   at most once a frame), so the preview pulls along behind the finger;
-  //   releasing makes it one undo step. Only the brush ring is drawn: the
-  //   picture itself shows what the stroke does.
+  //   releasing makes it one undo step. It joins the selected brush, or
+  //   starts a new one, which is then selected. Each stroke has a marker
+  //   where the finger lifted; tapping one selects its brush (all its
+  //   markers light up, with their reach), and tapping an empty spot
+  //   selects none. With markers switched off nothing shows, and a tap
+  //   only selects none: nothing hidden can be picked.
   // - Pins: a grid over the photo. Touching near a grid point picks it up
   //   as a new pin; touching near a pin (where it was put, or its home)
-  //   picks that pin up again. Dragging moves it, live; dragging it back
-  //   home removes it. Each move is one undo step. The pin last touched is
-  //   selected (its reach stays drawn), and Size then resizes it alone; a
-  //   tap on an empty spot selects none.
+  //   picks that pin up again. Dragging moves it, live, and brings it to
+  //   the top; dragging it back home removes it. Each move is one undo
+  //   step. The pin last touched is selected; a tap on an empty spot
+  //   selects none.
   //
   // The brush is sized against the screen, as the mask brush is: zoomed in,
   // the same setting pulls a smaller area of the photo.
   import { app } from '../lib/app.svelte';
   import { addPoint, roundCoord } from '../lib/mask';
-  import { gridAxes, pinAt, snap } from '../lib/pull';
-  import type { PullPin, PullStroke } from '../lib/types';
+  import { brushKey, gridAxes, isPin, pinAt, snap, strokeAt, strokeEnd } from '../lib/pull';
+  import type { PullMark, PullPin, PullStroke } from '../lib/types';
 
   let {
     rect,
@@ -36,26 +41,40 @@
   /** Where the ring is drawn (mouse hover, or the finger while drawing). */
   let ring = $state<{ x: number; y: number } | null>(null);
   let live: PullStroke | null = null;
+  /** Where the stroke began, and whether the finger has gone far enough from it to be drawing (not tapping). */
+  let downAt: { x: number; y: number } | null = null;
+  let drawn = $state(false);
   let frame = 0;
 
   const long = $derived(Math.max(rect.w, rect.h));
-  /** The brush's size on the photo: its setting, shrunk by the zoom. */
-  const size = $derived(app.pullTool.size / app.view.z);
   const pinning = $derived(app.pullTool.mode === 'pins');
+  /** The next stroke's size on the photo: the selected brush's, or the tool's shrunk by the zoom. */
+  const size = $derived(app.strokeSettings().size);
+  /** Strokes and pins, as they stand (a live one included). */
+  const marks = $derived<PullMark[]>(app.pullTarget?.step.pull ?? []);
+  /** The selected brush's key, to light up its markers. */
+  const brushSel = $derived(app.selectedBrush?.key ?? null);
+
+  /** How near (in screen pixels) a finger must come to a marker or pin to pick it up. */
+  const REACH_TOUCH = 26;
+  const REACH_MOUSE = 14;
+  /** A press that never strays this far (screen pixels) is a tap. */
+  const TAP = 8;
+  const reach = (e: PointerEvent) => (e.pointerType === 'mouse' ? REACH_MOUSE : REACH_TOUCH);
 
   // ---------------------------------------------------------------------
   // Pins
 
-  /** How near (in screen pixels) a finger must come to a pin to pick it up. */
-  const REACH_TOUCH = 26;
-  const REACH_MOUSE = 14;
   /** A pin dropped this near its home (screen pixels) is removed. */
   const HOME = 10;
 
   const axes = $derived(gridAxes(rect.w, rect.h, app.pullTool.grid));
-  const pins = $derived<PullPin[]>(app.pullTarget?.step.pin ?? []);
-  /** The pin being moved: its index, the pins around it, and where the finger holds it. */
-  let held = $state<{ i: number; base: PullPin[]; grip: { x: number; y: number }; fresh: boolean } | null>(null);
+  /**
+   * The pin being moved: its place in `base` (the marks when it was
+   * touched, a new pin at the end), where the finger holds it, and where
+   * it is drawn now (`now`: on top, once it has moved).
+   */
+  let held = $state<{ i: number; base: PullMark[]; grip: { x: number; y: number }; fresh: boolean; now: number } | null>(null);
 
   /** A share of the photo, on the stage. */
   const at = (q: [number, number]) => ({ x: rect.x + q[0] * rect.w, y: rect.y + q[1] * rect.h });
@@ -63,58 +82,65 @@
   const share = (p: { x: number; y: number }): [number, number] => [roundCoord((p.x - rect.x) / rect.w), roundCoord((p.y - rect.y) / rect.h)];
 
   function pinDown(e: PointerEvent, p: { x: number; y: number }) {
-    const current = $state.snapshot(pins) as PullPin[];
-    const i = pinAt(current, p, at, e.pointerType === 'mouse' ? REACH_MOUSE : REACH_TOUCH);
+    const current = $state.snapshot(marks) as PullMark[];
+    const i = pinAt(current, p, at, reach(e));
     if (i >= 0) {
-      const to = at(current[i].to);
-      held = { i, base: current, grip: { x: p.x - to.x, y: p.y - to.y }, fresh: false };
-      app.pinSel = i;
+      const to = at((current[i] as PullPin).to);
+      held = { i, base: current, grip: { x: p.x - to.x, y: p.y - to.y }, fresh: false, now: i };
+      app.selectMark(i);
     } else {
       const home = snap((p.x - rect.x) / rect.w, (p.y - rect.y) / rect.h, axes);
-      const pin: PullPin = { size: Math.max(0.0001, Math.round(size * 10000) / 10000), from: home, to: home };
+      const pin: PullPin = { size: app.newPullSize, from: home, to: home };
       const h = at(home);
-      held = { i: current.length, base: [...current, pin], grip: { x: p.x - h.x, y: p.y - h.y }, fresh: true };
+      held = { i: current.length, base: [...current, pin], grip: { x: p.x - h.x, y: p.y - h.y }, fresh: true, now: current.length };
     }
   }
 
-  /** The pins with the held one where the finger has it now. */
-  function moved(p: { x: number; y: number }): PullPin[] {
+  /** The marks with the held pin where the finger has it now, on top of the rest (D-68). */
+  function moved(p: { x: number; y: number }): PullMark[] {
     if (!held) return [];
     const to = share({ x: p.x - held.grip.x, y: p.y - held.grip.y });
-    return held.base.map((pin, k) => (k === held!.i ? { ...pin, to } : pin));
+    const pin = { ...(held.base[held.i] as PullPin), to };
+    return [...held.base.filter((_, k) => k !== held!.i), pin];
   }
 
-  let latest: PullPin[] | null = null;
+  let latest: PullMark[] | null = null;
 
   function pinMove(p: { x: number; y: number }) {
     latest = moved(p);
     if (frame) return;
     frame = requestAnimationFrame(() => {
       frame = 0;
-      if (latest) app.livePins(latest);
+      if (!latest) return;
+      app.liveMarks(latest);
+      if (held) held.now = latest.length - 1;
     });
   }
 
   function pinUp(p: { x: number; y: number }) {
     if (!held) return;
-    let out = moved(p);
-    const pin = out[held.i];
-    const a = at(pin.from);
-    const b = at(pin.to);
-    // Dropped home, the pin goes (a new pin that never left was a tap on
-    // an empty spot: nothing is selected). A pin only tapped, not moved,
-    // stays and is selected, even if it sits close to home.
-    const start = at(held.base[held.i].to);
-    const dragged = Math.hypot(b.x - start.x, b.y - start.y) > 3;
-    if (Math.hypot(a.x - b.x, a.y - b.y) <= HOME && (held.fresh || dragged)) {
-      out = out.filter((_, k) => k !== held!.i);
-      app.pinSel = null;
-    } else {
-      app.pinSel = held.i;
-    }
+    const h = held;
+    const out = moved(p);
     held = null;
     latest = null;
-    app.endPins(out);
+    const pin = out[out.length - 1] as PullPin;
+    const a = at(pin.from);
+    const b = at(pin.to);
+    const start = at((h.base[h.i] as PullPin).to);
+    const dragged = Math.hypot(b.x - start.x, b.y - start.y) > 3;
+    if (!h.fresh && !dragged) {
+      // Only tapped: it stays where it is in the list, and is selected.
+      app.endMarks(null);
+      app.selectMark(h.i);
+    } else if (Math.hypot(a.x - b.x, a.y - b.y) <= HOME) {
+      // Dropped home, the pin goes (a new pin that never left was a tap
+      // on an empty spot: nothing is selected).
+      app.endMarks(h.fresh ? null : h.base.filter((_, k) => k !== h.i));
+      app.pullSel = null;
+    } else {
+      app.endMarks(out);
+      app.selectMark(out.length - 1);
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -142,12 +168,9 @@
       return;
     }
     ring = p;
-    live = {
-      size: Math.max(0.0001, Math.round(size * 10000) / 10000),
-      strength: app.pullTool.strength,
-      points: [roundCoord((p.x - rect.x) / rect.w), roundCoord((p.y - rect.y) / rect.h)],
-    };
-    app.livePull(live);
+    downAt = p;
+    drawn = false;
+    live = { ...app.strokeSettings(), points: share(p) };
   }
 
   export function move(e: PointerEvent) {
@@ -158,7 +181,10 @@
       return;
     }
     if (e.pointerType === 'mouse' || live) ring = p;
-    if (!live) return;
+    if (!live || !downAt) return;
+    // Until the finger strays a little, it may be a tap on a marker.
+    if (!drawn && Math.hypot(p.x - downAt.x, p.y - downAt.y) <= TAP) return;
+    drawn = true;
     // Coalesced events carry every sample since the last frame.
     const events = e.getCoalescedEvents?.() ?? [e];
     // A point every tenth of the brush (or 1.5 px): the core steps along
@@ -179,9 +205,19 @@
       return;
     }
     const stroke = live;
+    const tapped = !drawn;
     live = null;
+    drawn = false;
     if (e.pointerType !== 'mouse') ring = null;
-    app.endPull(stroke);
+    if (!tapped || !root || !stroke) {
+      app.endPull(stroke);
+      return;
+    }
+    // A tap: select the brush whose marker is under it, or none.
+    app.endPull(null);
+    const i = app.pullTool.markers ? strokeAt($state.snapshot(marks) as PullMark[], onStage(e), at, reach(e)) : -1;
+    if (i >= 0) app.selectMark(i);
+    else app.pullSel = null;
   }
 
   /** A second finger came down, or the system took the gesture: nothing changes. */
@@ -191,11 +227,11 @@
     if (held) {
       held = null;
       latest = null;
-      app.endPins(null);
     }
     live = null;
+    drawn = false;
     ring = null;
-    app.endPull(null);
+    app.endMarks(null);
   }
 
   export function leave() {
@@ -212,7 +248,7 @@
   });
 </script>
 
-<div class="painter" bind:this={root} aria-label={pinning ? 'Pull: drag a grid point or a pin' : 'Pull: drag on the photo'}>
+<div class="painter" bind:this={root} aria-label={pinning ? 'Pull: drag a grid point or a pin' : 'Pull: drag on the photo, or tap a marker'}>
   {#if pinning}
     <svg class="pins" width="100%" height="100%">
       {#if app.pullTool.show === 'lines'}
@@ -231,22 +267,43 @@
           {/each}
         {/each}
       {/if}
-      {#each pins as pin, i (i)}
+      {#each marks as pin, i (i)}
+        {#if isPin(pin)}
         {@const a = at(pin.from)}
         {@const b = at(pin.to)}
-        {@const active = held?.i === i}
-        {@const chosen = active || (!held && app.pinSel === i)}
+        {@const chosen = held ? held.now === i : app.selectedPin?.i === i}
         {#if chosen}
           <!-- How far this pin reaches. -->
           <circle class="reach" cx={b.x} cy={b.y} r={(pin.size / 2) * long} />
         {/if}
-        <line class="shade" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
-        <line class="tie" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
-        <circle class="home" cx={a.x} cy={a.y} r="4" />
-        <circle class="handle" class:chosen cx={b.x} cy={b.y} r={chosen ? 9 : 7} />
+        <!-- Pins look like stroke markers: plain unless selected, then
+             green and larger (Phil, 2026-11-24: hard to see on a phone). -->
+        <g class:faded={!chosen}>
+          <line class="shade" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
+          <line class="tie" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
+          <circle class="home" cx={a.x} cy={a.y} r="4" />
+        </g>
+        <circle class="marker" class:chosen cx={b.x} cy={b.y} r={chosen ? 10 : 6} />
+        {/if}
       {/each}
     </svg>
-  {:else if ring}
+  {:else if app.pullTool.markers}
+    <!-- A marker where each stroke ends; the selected brush's light up,
+         with their reach. The stroke being drawn has none yet. -->
+    <svg class="pins" width="100%" height="100%">
+      {#each marks as m, i (i)}
+        {#if !isPin(m) && !(drawn && i === marks.length - 1)}
+          {@const q = at(strokeEnd(m))}
+          {@const chosen = brushSel !== null && brushKey(marks, i) === brushSel}
+          {#if chosen}
+            <circle class="reach" cx={q.x} cy={q.y} r={(m.size / 2) * long} />
+          {/if}
+          <circle class="marker" class:chosen cx={q.x} cy={q.y} r={chosen ? 6 : 4.5} />
+        {/if}
+      {/each}
+    </svg>
+  {/if}
+  {#if !pinning && ring}
     <div
       class="ring"
       style:left="{ring.x}px"
@@ -311,14 +368,21 @@
     stroke-width: 1.5;
   }
 
-  .handle {
-    fill: var(--accent);
-    stroke: white;
-    stroke-width: 2;
+  /* An unselected pin's tie and home step back. */
+  .faded {
+    opacity: 0.55;
   }
 
-  .handle.chosen {
-    stroke-width: 3;
+  .marker {
+    fill: rgb(255 255 255 / 0.9);
+    stroke: rgb(0 0 0 / 0.55);
+    stroke-width: 1.5;
+  }
+
+  .marker.chosen {
+    fill: var(--accent);
+    stroke: white;
+    stroke-width: 2.5;
   }
 
   .reach {

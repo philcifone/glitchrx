@@ -558,17 +558,20 @@ fn pulled(params: &str) -> Recipe {
             size: 0.15,
             strength: 0.8,
             points: vec![0.3, 0.4, 0.38, 0.42, 0.45, 0.5, 0.5, 0.6],
-        },
+        }
+        .into(),
         PullStroke {
             size: 0.5,
             strength: 0.3,
             points: vec![0.6, 0.3, 0.7, 0.32],
-        },
+        }
+        .into(),
         PullStroke {
             size: 0.1,
             strength: 1.0,
             points: vec![0.9, 0.8, 1.05, 0.85],
-        },
+        }
+        .into(),
     ];
     Recipe {
         steps: vec![step],

@@ -8,7 +8,7 @@
 //!
 //! ```toml
 //! format = "glitcharaxia-recipe"
-//! version = 5
+//! version = 7
 //! encoding = "u8"     # how steps read bytes as samples; a step may override
 //! channels = 1
 //! work_size = 2048    # optional: steps run on a copy this long (see below)
@@ -41,7 +41,8 @@
 //! feather = 0.01
 //! ```
 //!
-//! A `pull` step also holds its strokes, drawn by hand (see `pull`):
+//! A `pull` step also holds what was drawn on it by hand, strokes and pins
+//! in the order made (see `pull`):
 //!
 //! ```toml
 //! [[step]]
@@ -49,12 +50,13 @@
 //! effect_version = 1
 //! seed = 0
 //!
-//! [[step.pull]]
+//! [[step.pull]]       # a stroke, of brush 1
 //! size = 0.12
 //! strength = 0.6
 //! points = [0.40, 0.52, 0.43, 0.53]
+//! brush = 1
 //!
-//! [[step.pin]]
+//! [[step.pull]]       # a pin
 //! size = 0.2
 //! from = [0.5, 0.5]
 //! to = [0.56, 0.47]
@@ -62,7 +64,10 @@
 //!
 //! Version 3 added `opacity` and `mask`; version 4 added the canvas the
 //! steps run on (`work_size`, `scale_back`); version 5 added pull strokes;
-//! version 6 added pull pins.
+//! version 6 added pull pins, in a list of their own (`[[step.pin]]`, run
+//! after the strokes); version 7 put them among the strokes, in order, and
+//! added brushes. A version 6 recipe loads with its pins after its strokes,
+//! the picture it made.
 //! Older recipes load unchanged (they have none of it) and are written
 //! back as the current version. A build that only knows an older version
 //! refuses a newer one, rather than ignore what it does not know and
@@ -97,7 +102,7 @@ use crate::samples::Encoding;
 /// Magic string identifying a recipe file.
 pub const FORMAT: &str = "glitcharaxia-recipe";
 /// Recipe file format version.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 
 /// Step keys that are not effect parameters: per-step overrides of the
 /// recipe's sample format, and how strongly the result is blended in.
@@ -146,12 +151,9 @@ pub struct Step {
     /// Where the result shows; none means everywhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mask: Option<Mask>,
-    /// A `pull` step's strokes, in the order drawn (`[[step.pull]]`).
+    /// A `pull` step's strokes and pins, in the order made (`[[step.pull]]`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pull: Vec<crate::pull::Stroke>,
-    /// A `pull` step's pins (`[[step.pin]]`), run after its strokes.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pin: Vec<crate::pull::Pin>,
+    pub pull: Vec<crate::pull::Mark>,
 }
 
 impl Step {
@@ -165,7 +167,6 @@ impl Step {
             params: parse_list(effect, params)?,
             mask: None,
             pull: Vec::new(),
-            pin: Vec::new(),
         };
         // Validate now, not halfway through a batch.
         step.prepare(Encoding::default(), 1)?;
@@ -262,9 +263,8 @@ impl Step {
         if info.strokes {
             // Placement is not among its parameters, so `hits=` and the
             // like are refused as unknown below.
-            crate::pull::validate(&self.pull).map_err(|err| self.param_error(err))?;
-            crate::pull::validate_pins(&self.pin).map_err(|err| self.param_error(err))?;
-        } else if !self.pull.is_empty() || !self.pin.is_empty() {
+            crate::pull::validate_marks(&self.pull).map_err(|err| self.param_error(err))?;
+        } else if !self.pull.is_empty() {
             return Err(self.param_error(Error::Recipe(
                 "only a pull step has strokes and pins".into(),
             )));
@@ -273,7 +273,7 @@ impl Step {
         let effect = (info.build)(&params)?;
         let pull = info
             .strokes
-            .then(|| crate::pull::Pull::new(&params, &self.pull, &self.pin));
+            .then(|| crate::pull::Pull::new(&params, &self.pull));
         // A pull covers the whole raster; its placement is never used for
         // windows, but every step has one.
         let placement = if info.strokes {
@@ -459,6 +459,29 @@ impl Crop {
     }
 }
 
+/// Version 6 kept a pull step's pins in `[[step.pin]]`, run after all its
+/// strokes; version 7 has one list in the order made (D-68). Moving each
+/// step's pins to the end of its list gives the picture version 6 made.
+fn pins_among_strokes(raw: &mut toml::Table) {
+    let Some(toml::Value::Array(steps)) = raw.get_mut("step") else {
+        return;
+    };
+    for step in steps.iter_mut().filter_map(|s| s.as_table_mut()) {
+        if !matches!(step.get("pin"), Some(toml::Value::Array(_))) {
+            continue; // nothing to move (anything else fails in the parse)
+        }
+        let Some(toml::Value::Array(pins)) = step.remove("pin") else {
+            continue;
+        };
+        if let toml::Value::Array(marks) = step
+            .entry("pull")
+            .or_insert_with(|| toml::Value::Array(Vec::new()))
+        {
+            marks.extend(pins);
+        }
+    }
+}
+
 /// The smallest work size accepted: below it there is too little picture.
 pub const MIN_WORK_SIZE: u32 = 64;
 
@@ -495,14 +518,16 @@ impl Recipe {
     pub fn from_toml(text: &str) -> Result<Recipe> {
         // Check identity and version before the full parse, so an old recipe
         // gets a useful message rather than a field error.
-        let raw: toml::Table = toml::from_str(text).map_err(|e| Error::Recipe(e.to_string()))?;
+        let mut raw: toml::Table =
+            toml::from_str(text).map_err(|e| Error::Recipe(e.to_string()))?;
         if raw.get("format").and_then(|v| v.as_str()) != Some(FORMAT) {
             return Err(Error::Recipe(format!(
                 "not a glitcharaxia recipe (no `format = \"{FORMAT}\"`)"
             )));
         }
-        match raw.get("version").and_then(|v| v.as_integer()) {
-            Some(2..=6) => {}
+        let version = raw.get("version").and_then(|v| v.as_integer());
+        match version {
+            Some(2..=7) => {}
             Some(1) => {
                 return Err(Error::Recipe(
                     "version 1 recipes are for the JPEG byte engine, which was retired; \
@@ -513,7 +538,14 @@ impl Recipe {
             Some(v) => return Err(Error::Recipe(format!("unsupported recipe version {v}"))),
             None => return Err(Error::Recipe("missing `version`".into())),
         }
-        let mut r: Recipe = toml::from_str(text).map_err(|e| Error::Recipe(e.to_string()))?;
+        let mut r: Recipe = if version == Some(6) {
+            pins_among_strokes(&mut raw);
+            raw.try_into()
+        } else {
+            // From the text, so a mistake is reported with its line.
+            toml::from_str(text)
+        }
+        .map_err(|e| Error::Recipe(e.to_string()))?;
         // Older versions are subsets of this one; from here on it is current.
         r.version = VERSION;
         r.upgrade();
@@ -739,7 +771,7 @@ mod tests {
         r.steps
             .push(Step::new("backwards", "channels=1", 5).unwrap());
         let text = r.to_toml();
-        assert!(text.contains("version = 6"), "{text}");
+        assert!(text.contains("version = 7"), "{text}");
         assert!(text.contains("encoding = \"s16le\""), "{text}");
         assert!(text.contains("encoding = \"ulaw\""), "{text}");
         assert!(text.contains("decay = 0.7"), "{text}");
@@ -858,29 +890,65 @@ mod tests {
         assert_eq!(Recipe::from_toml(&text).unwrap(), r);
     }
 
-    /// A pull step's pins go to `[[step.pin]]` and come back the same;
-    /// other steps may not have any.
+    /// A pull step's strokes and pins share `[[step.pull]]`, in order, and
+    /// come back the same; other steps may not have any.
     #[test]
-    fn pull_pins_round_trip() {
-        let mut step = Step::new("pull", "", 0).unwrap();
-        step.pin = vec![crate::pull::Pin {
+    fn pull_marks_round_trip() {
+        use crate::pull::{Mark, Pin};
+        let pin = Mark::Pin(Pin {
             size: 0.2,
             from: [0.5, 0.5],
             to: [0.56, 0.47],
-        }];
+        });
+        let stroke = Mark::Stroke {
+            stroke: crate::pull::Stroke {
+                size: 0.1,
+                strength: 0.5,
+                points: vec![0.5, 0.5, 0.6, 0.5],
+            },
+            brush: Some(2),
+        };
+        let mut step = Step::new("pull", "", 0).unwrap();
+        step.pull = vec![pin.clone(), stroke];
         let r = Recipe {
             steps: vec![step.clone()],
             ..Recipe::default()
         };
         let text = r.to_toml();
         assert!(
-            text.contains("[[step.pin]]") && text.contains("version = 6"),
+            !text.contains("[[step.pin]]") && text.contains("version = 7"),
             "{text}"
         );
-        assert_eq!(Recipe::from_toml(&text).unwrap().steps[0].pin, step.pin);
+        assert_eq!(Recipe::from_toml(&text).unwrap(), r);
         let mut echo = Step::new("echo", "", 1).unwrap();
-        echo.pin = step.pin.clone();
+        echo.pull = vec![pin];
         assert!(echo.prepare(Encoding::default(), 1).is_err());
+    }
+
+    /// A version 6 recipe with pins, as written by Phase 8's first builds,
+    /// keeps loading, with its pins after its strokes: the same picture.
+    /// Files saved now must open in every later build (Phil, 2026-11-24).
+    #[test]
+    fn version_6_recipes_with_pins_load() {
+        use crate::pull::Mark;
+        let v6 = "format = \"glitcharaxia-recipe\"\nversion = 6\n\n[[step]]\n\
+                  effect = \"pull\"\neffect_version = 1\nseed = 0\n\n\
+                  [[step.pin]]\nsize = 0.2\nfrom = [0.5, 0.5]\nto = [0.56, 0.47]\n\n\
+                  [[step.pull]]\nsize = 0.1\nstrength = 0.6\npoints = [0.5, 0.5, 0.6, 0.5]\n\n\
+                  [[step]]\neffect = \"pull\"\neffect_version = 1\nseed = 0\n\n\
+                  [[step.pin]]\nsize = 0.2\nfrom = [0.4, 0.5]\nto = [0.3, 0.47]\n";
+        let r = Recipe::from_toml(v6).unwrap();
+        let pull = &r.steps[0].pull;
+        assert_eq!(pull.len(), 2);
+        assert!(matches!(pull[0], Mark::Stroke { brush: None, .. }));
+        assert!(matches!(&pull[1], Mark::Pin(p) if p.to == [0.56, 0.47]));
+        assert!(matches!(&r.steps[1].pull[..], [Mark::Pin(_)]));
+        // Written back as version 7, with one list.
+        let text = r.to_toml();
+        assert!(!text.contains("step.pin"), "{text}");
+        assert_eq!(Recipe::from_toml(&text).unwrap(), r);
+        // Version 7 has no `[[step.pin]]`.
+        assert!(Recipe::from_toml(&v6.replace("version = 6", "version = 7")).is_err());
     }
 
     /// A pull step's strokes go to `[[step.pull]]` and come back the same.
@@ -892,12 +960,14 @@ mod tests {
                 size: 0.12,
                 strength: 0.6,
                 points: vec![0.4, 0.52, 0.43, 0.53, 0.47, 0.55],
-            },
+            }
+            .into(),
             crate::pull::Stroke {
                 size: 0.05,
                 strength: 1.0,
                 points: vec![0.1, 0.1, 0.2, 0.1],
-            },
+            }
+            .into(),
         ];
         let r = Recipe {
             steps: vec![step, Step::new("invert", "", 1).unwrap()],
@@ -913,10 +983,10 @@ mod tests {
         let hand = "format = \"glitcharaxia-recipe\"\nversion = 5\n\n[[step]]\n\
                     effect = \"pull\"\neffect_version = 1\nseed = 0\n\n\
                     [[step.pull]]\nsize = 0.1\npoints = [0.5, 0.5, 0.6, 0.5]\n";
-        assert_eq!(
-            Recipe::from_toml(hand).unwrap().steps[0].pull[0].strength,
-            0.6
-        );
+        assert!(matches!(
+            &Recipe::from_toml(hand).unwrap().steps[0].pull[0],
+            crate::pull::Mark::Stroke { stroke, .. } if stroke.strength == 0.6
+        ));
     }
 
     #[test]
@@ -927,15 +997,18 @@ mod tests {
             points: vec![0.5, 0.5, 0.6, 0.5],
         };
         let mut echo = Step::new("echo", "", 1).unwrap();
-        echo.pull = vec![stroke.clone()];
+        echo.pull = vec![stroke.clone().into()];
         assert!(echo.prepare(Encoding::U8, 1).is_err());
         assert!(Step::new("pull", "hits=4", 1).is_err());
         assert!(Step::new("pull", "region=0%:50%", 1).is_err());
         let mut bad = Step::new("pull", "", 1).unwrap();
-        bad.pull = vec![crate::pull::Stroke {
-            size: 0.0,
-            ..stroke
-        }];
+        bad.pull = vec![
+            crate::pull::Stroke {
+                size: 0.0,
+                ..stroke
+            }
+            .into(),
+        ];
         assert!(bad.prepare(Encoding::U8, 1).is_err());
     }
 
@@ -952,7 +1025,7 @@ mod tests {
             points: vec![0.45, 0.5, 0.6, 0.55],
         };
         let mut step = Step::new("pull", "", 0).unwrap();
-        step.pull = vec![stroke];
+        step.pull = vec![stroke.into()];
         let whole = Recipe {
             steps: vec![step.clone()],
             ..Recipe::default()
@@ -996,7 +1069,7 @@ mod tests {
         let r = Recipe::from_toml(v2).unwrap();
         assert_eq!(r.version, VERSION);
         assert_eq!(r.steps[0].mask, None);
-        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 7")).is_err());
+        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 8")).is_err());
     }
 
     /// A 6 x 4 picture whose every pixel differs, so resizing shows.

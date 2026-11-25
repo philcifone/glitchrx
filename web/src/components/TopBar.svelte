@@ -31,7 +31,7 @@
     <div class="actions">
       <!-- Holding the photo paints here, so comparing has its own button. -->
       <button
-        class="icon"
+        class="icon compare"
         class:on={app.comparing}
         onpointerdown={(e) => {
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -44,7 +44,9 @@
         title="Hold to see the original (or hold the \ key)"
         aria-label="Hold to see the original"
       >
-        <SquareSplitHorizontal size={18} strokeWidth={1.75} />
+        <!-- The disc that fills while held: a circle centred on the icon,
+             whatever shape the button's touch area is. -->
+        <span class="disc"><SquareSplitHorizontal size={18} strokeWidth={1.75} /></span>
       </button>
       <button class="icon" onclick={() => app.undo()} disabled={!app.canUndo} title="Undo the last stroke (Ctrl+Z)" aria-label="Undo">
         <Undo2 size={18} strokeWidth={1.75} />
@@ -143,8 +145,26 @@
     gap: 2px;
   }
 
-  /* The compare button while held. */
-  .actions .icon.on {
+  /* The compare button. Held, its disc fills at once: one change, no
+     fades. A dim on press, a fade of the fill and an instant change of the
+     icon's colour all overlapped on iOS, and the icon showed twice, offset,
+     halfway through (Phil, 2026-11-24). */
+  .actions .compare,
+  .actions .compare:active:not(:disabled) {
+    opacity: 1;
+    transition: none;
+    background: none;
+  }
+
+  .disc {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+  }
+
+  .compare.on .disc {
     background: var(--accent);
     color: var(--accent-fg);
   }

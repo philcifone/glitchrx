@@ -1,12 +1,19 @@
 <script lang="ts">
-  // A pull step's strokes and pins (SPEC 8.2, D-67): how many there are,
-  // Draw (pull mode) or Done, and Clear. In pull mode the tool shows here,
-  // under the photo, while the photo takes the gestures: Draw (strokes, with
-  // size and strength) or Pins (grid points picked up and moved, with size,
-  // the grid's spacing and how it shows).
+  // A pull step's strokes and pins (SPEC 8.2, D-67, D-68). The card looks
+  // the same whether or not the photo is being pulled (Phil, 2026-11-24):
+  // the tools (Draw or Pins; picking one starts pulling), what the sliders
+  // change (the selected brush or pin, or the next one) and New, then the
+  // tool's settings, then "Delete this pin" (or brush) while one is
+  // selected. There is no Delete all. Done is in the top bar only.
+  //
+  // What changes is the tool's segment: while the photo is being pulled it
+  // is filled with the accent (engaged), and after Done it goes back to the
+  // plain selected look (chosen, not engaged), so the card itself says
+  // whether a drag on the photo pulls (Phil, 2026-11-24).
   import Hand from '@lucide/svelte/icons/hand-grab';
-  import Eraser from '@lucide/svelte/icons/eraser';
   import Grid from '@lucide/svelte/icons/grid-3x3';
+  import Plus from '@lucide/svelte/icons/plus';
+  import Trash from '@lucide/svelte/icons/trash-2';
   import { app } from '../lib/app.svelte';
   import { percent } from '../lib/mask';
   import { GRID_MAX, GRID_MIN, pullSizeScale, strokeCount, STRENGTH_MIN, type GridShow, type PullMode } from '../lib/pull';
@@ -15,11 +22,31 @@
 
   let { step }: { step: StepState } = $props();
 
-  const count = $derived((step.pull?.length ?? 0) + (step.pin?.length ?? 0));
   const tool = $derived(app.pullTool);
+  const active = $derived(app.pulling === step.uid && !!app.pullTarget);
+  const usable = $derived(step.enabled && !!app.doc);
+  const drawing = $derived(tool.mode === 'draw');
+  // Selections belong to the step being pulled.
+  const brush = $derived(active ? app.selectedBrush : null);
+  const pin = $derived(active ? app.selectedPin : null);
+  const selected = $derived(!!brush || !!pin);
+
+  /** What the sliders show: the selection's settings, else the tool's. */
+  const size = $derived(brush?.first.size ?? pin?.pin.size ?? tool.size);
+  const strength = $derived(brush?.first.strength ?? tool.strength);
+  /** The size on its slider's scale. */
+  const t = $derived(pullSizeScale.toSlider(size));
+
+  /** What the sliders change, in words. */
+  const target = $derived.by(() => {
+    if (brush) return brush.strokes.length === 1 ? 'Selected brush, 1 stroke' : `Selected brush, ${brush.strokes.length} strokes`;
+    if (pin) return 'Selected pin';
+    return drawing ? 'New brush' : 'New pin';
+  });
 
   /** Choose a tool, and start pulling with it if not already. */
   function pick(mode: PullMode) {
+    if (mode !== tool.mode) app.pullSel = null;
     app.setPullTool({ mode });
     if (!active) app.startPulling(step.uid);
   }
@@ -32,67 +59,63 @@
     ['lines', 'Lines'],
     ['off', 'Off'],
   ];
-  const active = $derived(app.pulling === step.uid && !!app.pullTarget);
-  const usable = $derived(step.enabled && !!app.doc);
+  const why = $derived(usable ? '' : step.enabled ? 'Open a photo first' : 'Turn the step on first');
 </script>
 
-<section class="group" aria-label="Strokes">
+<section class="group" aria-label="Strokes and pins">
   <div class="head">
     <h3 class="section-label">Strokes and pins</h3>
-    <span class="dim count">{strokeCount(step.pull?.length ?? 0, step.pin?.length ?? 0)}</span>
+    <span class="dim count">{strokeCount(step.pull ?? [])}</span>
   </div>
-  <!-- The tools, always in view (Phil, 2026-11-24: Pins hid behind Draw);
-       picking one starts pulling with it. -->
+  <!-- The tools, always in view; picking one starts pulling with it. -->
   <div class="segmented mode" role="radiogroup" aria-label="Pull tool">
     {#each MODES as [id, label] (id)}
       <button
         role="radio"
         aria-checked={tool.mode === id}
         class:on={tool.mode === id}
+        class:engaged={active && tool.mode === id}
         onclick={() => pick(id)}
         disabled={!usable}
-        title={usable ? (id === 'draw' ? 'Drag on the photo to pull it' : 'Pick up grid points and move them') : step.enabled ? 'Open a photo first' : 'Turn the step on first'}
+        title={why || (active && tool.mode === id ? 'Pulling: drags on the photo pull it (Done to stop)' : id === 'draw' ? 'Drag on the photo to pull it' : 'Pick up grid points and move them')}
       >
         {#if id === 'draw'}<Hand size={16} strokeWidth={1.75} />{:else}<Grid size={16} strokeWidth={1.75} />{/if}
         {label}
       </button>
     {/each}
   </div>
-  <div class="actions">
-    {#if active}
-      <button class="primary" onclick={() => app.stopPulling()} title="Finish pulling (Enter)">Done</button>
-    {/if}
-    <button class="plain danger" onclick={() => app.clearPull(step.uid)} disabled={!count} title="Remove every stroke and pin (undo brings them back)">
-      <Eraser size={16} strokeWidth={1.75} /> Clear
+  <!-- What the sliders below change; New starts the next brush or pin. -->
+  <div class="target">
+    <span class="what" class:sel={selected}>{target}</span>
+    <!-- Labelled, unlike the icons around it: the add-effect button is a
+         plus too, and sits nearby. -->
+    <button
+      class="plain new"
+      onclick={() => app.newMark(step.uid)}
+      disabled={!usable || (active && !selected)}
+      title={why || (drawing ? 'New brush: the sliders set the next stroke' : 'New pin: the sliders set the next pin')}
+      aria-label={drawing ? 'New brush' : 'New pin'}
+    >
+      <Plus size={16} strokeWidth={1.75} /> New
     </button>
   </div>
-  {#if active}
-    {@const pin = app.selectedPin}
-    {@const shown = pin ? pin.size : app.pullTool.size}
-    {@const t = pullSizeScale.toSlider(shown)}
-    <div class="row">
-      <span class="lbl">{pin ? 'This pin' : 'Size'}</span>
-      <input
-        type="range"
-        min="0"
-        max={SLIDER_STEPS}
-        step="1"
-        value={t}
-        style:--pct="{(t / SLIDER_STEPS) * 100}%"
-        oninput={(e) => {
-          const size = pullSizeScale.fromSlider(Number(e.currentTarget.value));
-          if (pin) app.resizePin(size, false);
-          else app.setPullTool({ size });
-        }}
-        onchange={(e) => {
-          if (pin) app.resizePin(pullSizeScale.fromSlider(Number(e.currentTarget.value)), true);
-        }}
-        aria-label={pin ? 'Size of the selected pin' : 'Brush size'}
-        title={pin ? 'Resize the selected pin ([ and ] keys)' : 'Brush size ([ and ] keys)'}
-      />
-      <span class="val">{percent(shown)}</span>
-    </div>
-    {#if tool.mode === 'draw'}
+  <div class="row">
+    <span class="lbl">Size</span>
+    <input
+      type="range"
+      min="0"
+      max={SLIDER_STEPS}
+      step="1"
+      value={t}
+      style:--pct="{(t / SLIDER_STEPS) * 100}%"
+      oninput={(e) => app.adjustPull({ size: pullSizeScale.fromSlider(Number(e.currentTarget.value)) }, false)}
+      onchange={(e) => app.adjustPull({ size: pullSizeScale.fromSlider(Number(e.currentTarget.value)) }, true)}
+      aria-label={brush ? 'Size of the selected brush' : pin ? 'Size of the selected pin' : 'Size of the next one'}
+      title="Size ([ and ] keys)"
+    />
+    <span class="val">{percent(size)}</span>
+  </div>
+  {#if drawing}
     <div class="row">
       <span class="lbl">Strength</span>
       <input
@@ -100,18 +123,27 @@
         min={Math.round(STRENGTH_MIN * 100)}
         max="100"
         step="1"
-        value={Math.round(app.pullTool.strength * 100)}
-        style:--pct="{((app.pullTool.strength - STRENGTH_MIN) / (1 - STRENGTH_MIN)) * 100}%"
-        oninput={(e) => app.setPullTool({ strength: Number(e.currentTarget.value) / 100 })}
-        aria-label="Pull strength"
+        value={Math.round(strength * 100)}
+        style:--pct="{((strength - STRENGTH_MIN) / (1 - STRENGTH_MIN)) * 100}%"
+        oninput={(e) => app.adjustPull({ strength: Number(e.currentTarget.value) / 100 }, false)}
+        onchange={(e) => app.adjustPull({ strength: Number(e.currentTarget.value) / 100 }, true)}
+        aria-label={brush ? 'Strength of the selected brush' : 'Strength of the next brush'}
         title="How far the pixels under the middle of the brush follow it"
       />
-      <span class="val">{Math.round(app.pullTool.strength * 100)}%</span>
+      <span class="val">{Math.round(strength * 100)}%</span>
     </div>
-    <p class="dim note">
-      Drag on the photo to pull it; two fingers zoom and pan. Each stroke is one undo. Size and strength apply to the next stroke.
-    </p>
-    {:else}
+    <label class="row">
+      <span class="lbl">Markers</span>
+      <span class="grow"></span>
+      <input
+        class="switch"
+        type="checkbox"
+        checked={tool.markers}
+        onchange={(e) => app.setPullTool({ markers: e.currentTarget.checked })}
+        title="A dot where each stroke ends; tap one to select its brush"
+      />
+    </label>
+  {:else}
     <div class="row">
       <span class="lbl">Grid</span>
       <input
@@ -135,13 +167,23 @@
         {/each}
       </div>
     </div>
-    <p class="dim note">
-      Drag a grid point to pull it; touch a pin to move it again, or drag it home to remove it. The pin last touched is selected, and its size changes only it; tap an empty spot to set the size for new pins. Each move is one undo. The grid only picks points, so changing it moves nothing.
-    </p>
-    {/if}
-  {:else if !count}
-    <p class="dim note">Draw to pull pixels along with your finger, or Pins to pick up grid points and move them.</p>
   {/if}
+  <!-- Only the one selected; there is no Delete all (Phil, 2026-11-24). -->
+  {#if selected}
+    <button class="plain danger delete" onclick={() => app.deleteSelected()} title={brush ? `Remove the ${brush.strokes.length === 1 ? 'stroke' : `${brush.strokes.length} strokes`} of this brush (undo brings them back)` : 'Remove this pin (undo brings it back)'}>
+      <Trash size={16} strokeWidth={1.75} />
+      {brush ? 'Delete this brush' : 'Delete this pin'}
+    </button>
+  {/if}
+  <p class="dim note">
+    {#if !active}
+      Tap Draw or Pins to pull the photo.
+    {:else if drawing}
+      Drag on the photo to pull it. Strokes join the selected brush; {tool.markers ? "tap a stroke's marker to select its brush, or New" : 'New'} for a new one. Whatever you do last goes on top.
+    {:else}
+      Drag a grid point to pull it; drag a pin to move it again (it comes to the top), or back home to remove it. Tap a pin to select it, or New for a new one.
+    {/if}
+  </p>
 </section>
 
 <style>
@@ -156,21 +198,38 @@
     font-size: 0.85rem;
   }
 
-  .actions {
+  .target {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin: 4px 0;
+    gap: 4px;
+    min-height: 36px;
+    margin: 2px 0;
   }
 
-  .actions .primary {
-    gap: 6px;
-    border-radius: 999px;
-    padding: 6px 16px;
+  .what {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.9rem;
+    color: var(--fg-dim);
   }
 
-  .actions .plain {
+  .new {
+    gap: 4px;
+  }
+
+  .grow {
+    flex: 1;
+  }
+
+  .delete {
+    align-self: flex-start;
     gap: 6px;
+    margin-top: 2px;
+  }
+
+  .what.sel {
+    color: var(--accent);
+    font-weight: 500;
   }
 
   .row {
@@ -209,6 +268,13 @@
 
   .mode button {
     flex: 1;
+  }
+
+  /* Engaged: the photo takes this tool's gestures (until Done). */
+  .mode button.engaged,
+  .mode button.engaged:hover:not(:disabled) {
+    background: var(--accent);
+    color: var(--accent-fg);
   }
 
   .note {

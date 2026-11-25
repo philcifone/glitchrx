@@ -177,11 +177,14 @@
     e.preventDefault();
   }
 
-  /** Pull mode: [ and ] size the brush, Enter or Esc finish. */
+  /**
+   * Pull mode: [ and ] size the selected brush or pin (or the next one),
+   * Delete removes it, Enter or Esc finish.
+   */
   function pullKey(e: KeyboardEvent) {
-    const pin = app.selectedPin;
-    if ((e.key === '[' || e.key === ']') && pin) app.resizePin(stepSize(pin.size, e.key === '[' ? -1 : 1), true);
-    else if (e.key === '[' || e.key === ']') app.setPullTool({ size: stepSize(app.pullTool.size, e.key === '[' ? -1 : 1) });
+    const now = app.selectedBrush?.first.size ?? app.selectedPin?.pin.size ?? app.pullTool.size;
+    if (e.key === '[' || e.key === ']') app.adjustPull({ size: stepSize(now, e.key === '[' ? -1 : 1) }, true);
+    else if ((e.key === 'Delete' || e.key === 'Backspace') && (app.selectedBrush || app.selectedPin)) app.deleteSelected();
     else if (e.key === 'Escape' || e.key === 'Enter') app.stopPulling();
     else return;
     e.preventDefault();

@@ -71,11 +71,30 @@
   async function suggest() {
     const doc = app.doc;
     if (!doc || typed || app.desktop) return;
+    const ask = (f: string | null) => api.suggestName(doc.id, f, prefs.format, project);
+    // Never blank (Phil, 2026-11-24): if the folder's name cannot be had
+    // (the folder has gone), the download's; if the server cannot answer
+    // at all (it restarted and forgot the photo), one made here the same way.
+    let next: string;
     try {
-      name = await api.suggestName(doc.id, saveAsHere ? folder : null, prefs.format, project);
+      next = await ask(saveAsHere ? folder : null);
     } catch {
-      // The folder may have gone; leave the name as it was.
+      try {
+        next = await ask(null);
+      } catch {
+        next = localName();
+      }
     }
+    if (!typed) name = next;
+  }
+
+  /** The download name without the server: the project's, or the photo's -glitch. */
+  function localName(): string {
+    const doc = app.doc;
+    if (!doc) return '';
+    const stem = (n: string) => n.replace(/\.[^.]*$/, '');
+    if (doc.project && !project) return stem(doc.project);
+    return `${stem(doc.name).replace(/-glitch(-\d+)?$/, '')}-glitch`;
   }
 
   async function changeFolder() {

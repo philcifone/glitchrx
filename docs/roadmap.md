@@ -7,9 +7,11 @@ needed before sharing the tool more widely. Updated 2026-11-24.
 
 ## Where it stands
 
-Phases 1 to 6 are built and merged into `main`: the CLI, the web GUI and
-desktop app, 19 effects (audio-style, data, pixel and adjustments), masks,
-presets, crop, work size, and picking up old edits.
+Phases 1 to 7 and most of Phase 8 are built and merged into `main`: the
+CLI, the web GUI and desktop app, 19 effects (audio-style, data, pixel and
+adjustments), masks, presets, crop, work size, picking up old edits,
+project files and the pull effect. The rest of Phase 8 (pull speed, and
+brushes with strokes and pins in one list) waits on `phase-8-pull`.
 
 ## For Phil before sharing
 
@@ -96,6 +98,11 @@ the mask shortcuts (B, E, `[` and `]`, Enter, Esc, Delete).
   works).
 - Per-effect strength sliders (D-38 explains why opacity covers most of
   this today).
+- Pull: build the displacement map on several cores. Resizing a brush whose
+  strokes go back a long way rebuilds everything after its first stroke
+  (about 0.4 s a frame for 40 strokes on a 12 MP photo). Each small step of
+  a stroke reads the map as it was and writes afterwards, so its rows can
+  be shared out between threads without changing a byte.
 
 ## Done or crossed off
 
