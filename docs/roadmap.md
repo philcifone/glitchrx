@@ -7,11 +7,10 @@ needed before sharing the tool more widely. Updated 2026-11-24.
 
 ## Where it stands
 
-Phases 1 to 7 and most of Phase 8 are built and merged into `main`: the
-CLI, the web GUI and desktop app, 19 effects (audio-style, data, pixel and
+Phases 1 to 8 are built and merged into `main` (2026-11-24): the CLI, the
+web GUI and desktop app, 19 effects (audio-style, data, pixel and
 adjustments), masks, presets, crop, work size, picking up old edits,
-project files and the pull effect. The rest of Phase 8 (pull speed, and
-brushes with strokes and pins in one list) waits on `phase-8-pull`.
+project files, and the pull effect with brushes and pins.
 
 ## For Phil before sharing
 
