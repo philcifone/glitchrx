@@ -10,9 +10,10 @@ earlier version always open in a later one.
 
 ### Fixed
 
-- On a phone, a zoomed photo can be panned all the way to its bottom
-  edge. The step panel's rounded top used to hide the last 14 px, so a
-  mask could not reach it.
+- A zoomed photo can be panned a little past its edges (a quarter of the
+  screen, up to 160 px), so its border can be masked or pulled away from
+  the edge of the screen. On a phone, the step panel's rounded top used
+  to hide the bottom 14 px for good.
 
 ## [0.2.0] - 2026-11-25
 

@@ -47,14 +47,22 @@ describe('placement and clamping', () => {
     close(r.y, (600 - g.fit.h) / 2);
   });
 
-  it('never leaves a gap the picture could cover', () => {
-    // Zoomed 2x: 800 px wide, so the centre may go from 0.25 to 0.75. The
-    // height (533 px) is still under the stage's 600: it stays centred.
+  it('lets a zoomed picture go a little past the edges', () => {
+    // Zoomed 2x: 800 px wide on a 400 px stage. An edge may come 100 px
+    // (a quarter of the stage) inside it, so the centre goes from 0.125.
     const v = clampView({ z: 2, x: 0.01, y: 0.9 }, g);
-    close(v.x, 0.25);
-    close(v.y, 0.5);
+    close(v.x, 100 / 800);
+    // The height (533 px) is under the stage's 600: it moves 150 px either
+    // way of centre (a quarter of 600, under the 160 px cap).
+    close(v.y, 0.5 + 150 / (g.fit.h * 2));
     expect(clampView({ z: 100, x: 0.5, y: 0.5 }, g).z).toBe(g.zMax);
     expect(clampView({ z: 0.2, x: 0.5, y: 0.5 }, g).z).toBe(1);
+  });
+
+  it('keeps the fit centred, and grows the overpan in from there', () => {
+    expect(clampView({ z: 1, x: 0.1, y: 0.9 }, g)).toEqual(FIT);
+    // Halfway up the ramp (1.25x, 500 px wide): half the slack, 50 px.
+    close(clampView({ z: 1.25, x: 0, y: 0.5 }, g).x, (200 - 50) / 500);
   });
 });
 
@@ -81,12 +89,13 @@ describe('gestures', () => {
     close(still.y, under.y);
   });
 
-  it('pans with the finger and stops at the edges', () => {
+  it('pans with the finger and stops a little past the edges', () => {
     const v = zoomAt(FIT, 4, { x: 200, y: 300 }, g);
     const moved = pan(v, -40, 0, g);
     // 40 px left on a 1600 px wide picture is 1/40 of it.
     close(moved.x - v.x, 40 / 1600);
-    expect(pan(v, 10000, 0, g).x).toBeCloseTo(200 / 1600, 6);
+    // The left edge stops 100 px inside the stage: the centre at 100 px.
+    expect(pan(v, 10000, 0, g).x).toBeCloseTo(100 / 1600, 6);
   });
 
   it('wheel zoom is gentle and bounded per event', () => {
