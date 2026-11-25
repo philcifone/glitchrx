@@ -189,6 +189,10 @@ Disk is never the issue: nothing is stored.
 
 ## 6. Locking down the container
 
+For the public or friends container of sections 3 and 4, which holds no
+personal files. For your own container with your photos, use the unit in
+section 8.4 instead: this one cannot see any home folder.
+
 - **Unprivileged LXC** (or a VM if you want a stronger wall), with only
   the binary and `cloudflared` installed.
 - **A systemd unit with hardening** for glitchrx:
@@ -369,10 +373,19 @@ than the unit, so the unit can be shared:
     Restart=on-failure
     NoNewPrivileges=yes
     PrivateTmp=yes
+    PrivateDevices=yes
     ProtectSystem=full
+    MemoryMax=3G
 
     [Install]
     WantedBy=multi-user.target
+
+This is the unit for a personal container. Section 6's is stricter
+(`DynamicUser`, `ProtectHome`) because a public container must not see
+personal files; here the service runs as you and needs your home folder.
+`MemoryMax` makes systemd stop and restart the service, rather than the
+container running out of memory. If you cloned somewhere other than
+`~/glitcharaxia`, change the path in `ExecStart` (and in 8.5).
 
 Then `sudo systemctl daemon-reload && sudo systemctl enable --now glitchrx`.
 `journalctl -u glitchrx` shows the URLs it printed; the token is the one in
