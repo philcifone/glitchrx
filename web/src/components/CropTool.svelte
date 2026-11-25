@@ -2,7 +2,7 @@
   // Crop (SPEC 5d), as in Photos or Lightroom: the whole photo, unbent,
   // with a frame over it. Drag a corner to size it, the middle to move it,
   // and, free of a ratio, an edge to move that side. Ratio, Reset, Cancel
-  // and Done sit under the photo; Enter and Escape work too.
+  // and Crop sit under the photo; Enter and Escape work too.
   //
   // The frame is worked out in the photo's own pixels, so a ratio holds
   // exactly whatever the screen size, and stored as shares of the photo.
@@ -264,7 +264,7 @@
       <button class="plain" onclick={() => app.cancelCrop()}>Cancel</button>
       <button class="plain" onclick={reset}>Reset</button>
       <span class="size dim">{px.w}x{px.h}</span>
-      <button class="primary" onclick={() => app.applyCrop()}>Done</button>
+      <button class="primary" onclick={() => app.applyCrop()}>Crop</button>
     </div>
   </div>
 </div>

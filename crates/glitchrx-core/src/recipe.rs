@@ -71,7 +71,7 @@
 //! added brushes; version 8 added `crop_result`. A version 6 recipe loads
 //! with its pins after its strokes, the picture it made.
 //! Older recipes load unchanged (they have none of it) and are written
-//! back as the current version. A build that only knows an older version
+//! back as the oldest version that holds them, 7 or newer (`needed_version`). A build that only knows an older version
 //! refuses a newer one, rather than ignore what it does not know and
 //! quietly give a different picture.
 //!
@@ -567,8 +567,23 @@ impl Recipe {
         Ok(r)
     }
 
+    /// The recipe as TOML, marked with the oldest version that holds it
+    /// ([`Recipe::needed_version`]).
     pub fn to_toml(&self) -> String {
-        toml::to_string(self).expect("recipe serialization cannot fail")
+        let written = Recipe {
+            version: self.needed_version(),
+            ..self.clone()
+        };
+        toml::to_string(&written).expect("recipe serialization cannot fail")
+    }
+
+    /// The oldest version that holds everything this recipe uses, so a file
+    /// that uses nothing new still opens in builds that know only the
+    /// version before (a project saved on a newer build, opened on an
+    /// older server). Never below 7, the version every build since Phase 8
+    /// writes; only version 8's `crop_result` raises it.
+    pub fn needed_version(&self) -> u32 {
+        if self.result_crop().is_some() { 8 } else { 7 }
     }
 
     /// Bring every step up to its effect's current version (D-56).
@@ -824,7 +839,7 @@ mod tests {
         r.steps
             .push(Step::new("backwards", "channels=1", 5).unwrap());
         let text = r.to_toml();
-        assert!(text.contains("version = 8"), "{text}");
+        assert!(text.contains("version = 7"), "{text}");
         assert!(text.contains("encoding = \"s16le\""), "{text}");
         assert!(text.contains("encoding = \"ulaw\""), "{text}");
         assert!(text.contains("decay = 0.7"), "{text}");
@@ -969,7 +984,7 @@ mod tests {
         };
         let text = r.to_toml();
         assert!(
-            !text.contains("[[step.pin]]") && text.contains("version = 8"),
+            !text.contains("[[step.pin]]") && text.contains("version = 7"),
             "{text}"
         );
         assert_eq!(Recipe::from_toml(&text).unwrap(), r);
@@ -1056,9 +1071,15 @@ mod tests {
         // Saved and read back; left out when false.
         let text = r.to_toml();
         assert!(text.contains("crop_result = true"), "{text}");
+        assert!(text.contains("version = 8"), "{text}");
         assert_eq!(Recipe::from_toml(&text).unwrap(), r);
+        // Without it, version 7: the file opens in builds that predate it.
         r.crop_result = false;
-        assert!(!r.to_toml().contains("crop_result"));
+        let text = r.to_toml();
+        assert!(
+            !text.contains("crop_result") && text.contains("version = 7"),
+            "{text}"
+        );
     }
 
     /// A pull step's strokes go to `[[step.pull]]` and come back the same.

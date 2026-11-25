@@ -28,8 +28,13 @@
   let settingsDialog: SettingsDialog;
   let sheetExpanded = $state(false);
 
-  /** The photo fills the screen (not while masking or cropping). */
-  const full = $derived(app.fullView && !app.drawing && !app.cropping);
+  /**
+   * The photo fills the screen: in full view (not while masking or
+   * pulling, which need the bars), and always while cropping, as Photos
+   * does, so the frame has room on a phone (Phil, 2026-11-25). The crop
+   * bar has its own Cancel and Crop; leaving puts the layout back.
+   */
+  const full = $derived(!!app.cropping || (app.fullView && !app.drawing));
 
   // The bars' own heights, so the layout can animate them away in full
   // view: grid rows animate between lengths, not from `auto`.
