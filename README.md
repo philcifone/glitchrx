@@ -11,7 +11,7 @@ Create your own glitch art from digital images through databending. Inspired by 
 
 Everything runs locally. No image is ever uploaded anywhere besides the server or computer you host it on
 
-**Status: beta (0.1.0).** Three ways to use it, all from one build:
+**Status: beta (0.2.0; see `CHANGELOG.md`).** Three ways to use it, all from one build:
 
 - **A web GUI** (`glitchrx serve`) for a browser on the same computer, or a phone or tablet over your LAN or a VPN. It can be added to a phone's home screen and used like an app.
 - **A desktop app** (Linux today; macOS planned) with the same GUI in its own window.
@@ -112,7 +112,7 @@ To use it from your phone, see [Running it on a server or for a phone](#running-
 ### The screen
 
 - **Top bar:** Open, Presets, Undo, Redo, Export, Settings. While you paint a mask or pull, it becomes an edit bar instead: what you are working on, compare, undo, redo and **Done**.
-- **The photo,** with a small toolbox: zoom, crop, and the work size.
+- **The photo.** Above the steps, two cards: the encoding and channels on the left; crop, zoom and the work size on the right (the (i) explains sizes).
 - **The steps:** a card per effect, top to bottom, in the order they run. On a phone the effect palette sits behind the floating **+** button.
 - **Status bar:** the photo's name and size, how long the last render took, and whether the view is approximate or exact.
 

@@ -20,8 +20,12 @@
 
   const encodings = $derived(app.config?.encodings ?? []);
   const current = $derived(encodings.find((e) => e.id === app.recipe.encoding));
+  /** Encoding descriptions come from the server in lower case. */
+  const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
   let list = $state<HTMLOListElement>();
+  /** The work size's note, shown by the toolbox's info button. */
+  let info = $state(false);
   /** Edit mode (held on a step): one line per step, select several, drag to reorder. */
   const editing = $derived(app.editingSteps);
 
@@ -50,13 +54,12 @@
 
 <div class="wrap">
 <div class="stack" class:editing>
-  {#if app.doc}
-    <PhotoTools />
-  {/if}
-  <section class="card sample">
-    <div class="row">
-      <label for="encoding">Encoding</label>
-      <select id="encoding" value={app.recipe.encoding} onchange={(e) => app.setEncoding(e.currentTarget.value)}>
+  <!-- Two cards side by side (Phil, 2026-11-25): how the steps read the
+       pixels on the left, the photo's tools on the right; what they mean
+       in one line of notes under both. -->
+  <div class="top" class:alone={!app.doc}>
+    <section class="card sample" aria-label="Samples">
+      <select id="encoding" value={app.recipe.encoding} onchange={(e) => app.setEncoding(e.currentTarget.value)} aria-label="Encoding" title="Encoding: how the steps read the pixels as audio samples">
         {#each encodings as enc (enc.id)}
           <option value={enc.id}>{enc.id}</option>
         {/each}
@@ -74,11 +77,22 @@
           </button>
         {/each}
       </div>
-    </div>
-    {#if current}
-      <p class="dim note">{current.describe}. Any step can override it.</p>
+    </section>
+    {#if app.doc}
+      <PhotoTools bind:info />
     {/if}
-  </section>
+  </div>
+  <div class="notes dim">
+    {#if current}
+      <p><span class="what">Encoding {current.id}.</span> {cap(current.describe)}. Any step can override it.</p>
+    {/if}
+    {#if info && app.doc}
+      <p>
+        <span class="what">Size.</span> Smaller sizes render faster and coarsen the glitch; Full gives the finest texture. Compare a few
+        before exporting.
+      </p>
+    {/if}
+  </div>
 
   <div class="palette">
     <EffectPalette onpick={add} />
@@ -220,35 +234,58 @@
   }
 
   /* Wraps the channel control onto its own line when the panel is narrow. */
-  .row {
+  /* Two equal cards; the samples card alone before a photo is open. */
+  .top {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .top.alone {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Each card: a control on top, a segmented row below. */
+  .sample {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px;
   }
 
-  .row select {
-    flex: 1 1 96px;
-    min-width: 96px;
+  .sample select {
+    width: 100%;
+    min-height: 36px;
   }
 
-  .sample label {
-    font-weight: 600;
+  .sample .segmented {
+    display: flex;
   }
 
-  .note {
-    margin: 8px 0 0;
+  .sample .segmented button {
+    flex: 1;
+    min-width: 0;
+    padding-left: 2px;
+    padding-right: 2px;
     font-size: 0.85rem;
   }
 
-  /* Encoding descriptions come from the server in lower case. */
-  .note::first-letter {
-    text-transform: uppercase;
+  .notes {
+    margin: -4px 4px 0;
+    font-size: 0.85rem;
   }
 
-  .segmented {
-    flex: none;
+  .notes p {
+    margin: 0 0 4px;
   }
+
+  .notes .what {
+    color: var(--fg);
+    font-weight: 500;
+  }
+
+
 
   .palette {
     display: flex;
