@@ -704,8 +704,11 @@ async fn preview(
         let c = doc.canvas(&framing);
         (c.width, c.height)
     };
+    // The picture shown: the canvas, or the part a crop of the result
+    // frames (D-69). A zoomed crop is a part of that.
+    let frame = framing.result_rect(cw, ch).unwrap_or((0, 0, cw, ch));
     let crop = match req.crop {
-        Some(c) => Some(c.pixels(cw, ch)?),
+        Some(c) => Some(c.pixels(frame.2, frame.3)?),
         None => None,
     };
     let recipe = (!req.original).then(|| framing.clone());
@@ -727,12 +730,23 @@ async fn preview(
     let max_h = req.max_h.clamp(16, render::MAX_PREVIEW_SIDE) as usize;
     let exact = req.exact || zoom;
     let budget = st.preview_budget * if exact { 10 } else { 1 };
-    // Cut the crop (if any) from a full-resolution raster, then shrink it.
-    let shown = move |full: &Raster| match crop {
-        Some((x, y, w, h)) => full.crop(x, y, w, h).downscale(max_w, max_h),
-        None => {
-            let (w, h) = full.fit(max_w, max_h);
-            full.resize(w, h)
+    // Cut the frame and the crop (if any) from a full-resolution canvas,
+    // then shrink it.
+    let shown = move |full: &Raster| {
+        let (fx, fy, fw, fh) = frame;
+        match crop {
+            Some((x, y, w, h)) => full.crop(fx + x, fy + y, w, h).downscale(max_w, max_h),
+            None => {
+                let framed;
+                let full = if (fw, fh) == (full.width, full.height) {
+                    full
+                } else {
+                    framed = full.crop(fx, fy, fw, fh);
+                    &framed
+                };
+                let (w, h) = full.fit(max_w, max_h);
+                full.resize(w, h)
+            }
         }
     };
     blocking(move || {
@@ -743,7 +757,7 @@ async fn preview(
                 let result = if exact {
                     doc.render_full(r, &stop).map(|full| shown(&full))
                 } else {
-                    doc.preview(r, max_w, max_h, &stop)
+                    doc.preview_framed(r, max_w, max_h, &stop)
                 };
                 match result {
                     Ok(raster) => raster,
@@ -789,7 +803,8 @@ async fn preview(
         set("x-width", raster.width.to_string());
         set("x-height", raster.height.to_string());
         if let Some((x, y, w, h)) = crop {
-            // The full-resolution pixels it shows, so the GUI can place it.
+            // The full-resolution pixels it shows, so the GUI can place it
+            // (of the picture shown: within the frame of a cropped result).
             set("x-crop", format!("{x},{y},{w},{h}"));
         }
         Ok(res)

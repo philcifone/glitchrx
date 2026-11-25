@@ -8,13 +8,15 @@
 //!
 //! ```toml
 //! format = "glitcharaxia-recipe"
-//! version = 7
+//! version = 8
 //! encoding = "u8"     # how steps read bytes as samples; a step may override
 //! channels = 1
 //! work_size = 2048    # optional: steps run on a copy this long (see below)
 //! scale_back = true   # optional: and the result is enlarged to full size
 //!
 //! source = "IMG_1234.jpg"   # optional: the photo it was made on (a name only)
+//!
+//! crop_result = true # optional: the crop frames the result (see below)
 //!
 //! [crop]              # optional: the part of the photo kept (see below)
 //! x = 0.1             # left edge, share of the width
@@ -66,8 +68,8 @@
 //! steps run on (`work_size`, `scale_back`); version 5 added pull strokes;
 //! version 6 added pull pins, in a list of their own (`[[step.pin]]`, run
 //! after the strokes); version 7 put them among the strokes, in order, and
-//! added brushes. A version 6 recipe loads with its pins after its strokes,
-//! the picture it made.
+//! added brushes; version 8 added `crop_result`. A version 6 recipe loads
+//! with its pins after its strokes, the picture it made.
 //! Older recipes load unchanged (they have none of it) and are written
 //! back as the current version. A build that only knows an older version
 //! refuses a newer one, rather than ignore what it does not know and
@@ -85,6 +87,13 @@
 //! all measure against the crop, and the file is the crop's size. The
 //! crop is kept as shares of the photo, which turn into whole pixels by
 //! rounding (`crop_rect`).
+//!
+//! **Crop the result** (`crop_result = true`, D-69) instead frames the
+//! finished picture: the steps run on the whole photo (shrunk to the work
+//! size), exactly as without a crop, and the crop is cut from what they
+//! give (after `scale_back`). The glitch then stays as it is while the
+//! frame moves, and the file is the crop's size. Masks and pulls need no
+//! moving: the steps see the whole photo.
 
 use std::collections::BTreeMap;
 
@@ -102,7 +111,7 @@ use crate::samples::Encoding;
 /// Magic string identifying a recipe file.
 pub const FORMAT: &str = "glitcharaxia-recipe";
 /// Recipe file format version.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 
 /// Step keys that are not effect parameters: per-step overrides of the
 /// recipe's sample format, and how strongly the result is blended in.
@@ -411,6 +420,10 @@ pub struct Recipe {
     /// documentation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
+    /// The crop frames the finished picture rather than the photo the
+    /// steps run on (D-69). Nothing without a crop.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub crop_result: bool,
     #[serde(rename = "step", default)]
     pub steps: Vec<Step>,
 }
@@ -496,6 +509,7 @@ impl Default for Recipe {
             scale_back: false,
             source: None,
             crop: None,
+            crop_result: false,
             steps: Vec::new(),
         }
     }
@@ -527,7 +541,7 @@ impl Recipe {
         }
         let version = raw.get("version").and_then(|v| v.as_integer());
         match version {
-            Some(2..=7) => {}
+            Some(2..=8) => {}
             Some(1) => {
                 return Err(Error::Recipe(
                     "version 1 recipes are for the JPEG byte engine, which was retired; \
@@ -579,21 +593,41 @@ impl Recipe {
         self.prepare_all().map(|_| ())
     }
 
-    /// Everything that decides the canvas, for telling when it changes.
+    /// Everything that decides the canvas, for telling when it changes. A
+    /// crop of the result is not part of it: moving that frame re-runs
+    /// nothing.
     pub fn framing(&self) -> (Option<u32>, Option<Crop>) {
-        (self.work_size, self.crop)
+        (self.work_size, self.photo_crop())
     }
 
-    /// The crop in whole pixels of a `w` x `h` photo (all of it without one).
+    /// The crop taken from the photo before the steps (none when the crop
+    /// frames the result).
+    pub fn photo_crop(&self) -> Option<Crop> {
+        self.crop.filter(|_| !self.crop_result)
+    }
+
+    /// The crop cut from the finished picture, when it frames the result.
+    pub fn result_crop(&self) -> Option<Crop> {
+        self.crop.filter(|_| self.crop_result)
+    }
+
+    /// The crop of the result in whole pixels of a finished `w` x `h`
+    /// picture (none unless the crop frames the result).
+    pub fn result_rect(&self, w: usize, h: usize) -> Option<(usize, usize, usize, usize)> {
+        self.result_crop().map(|c| c.rect(w, h))
+    }
+
+    /// The photo crop in whole pixels of a `w` x `h` photo (all of it
+    /// without one, or when the crop frames the result).
     pub fn crop_rect(&self, w: usize, h: usize) -> (usize, usize, usize, usize) {
-        match &self.crop {
+        match &self.photo_crop() {
             Some(c) => c.rect(w, h),
             None => (0, 0, w, h),
         }
     }
 
-    /// The size of the crop of a `w` x `h` photo: the file's size with
-    /// `scale_back`.
+    /// The size of the photo crop of a `w` x `h` photo: what `scale_back`
+    /// enlarges to.
     pub fn cropped_size(&self, w: usize, h: usize) -> (usize, usize) {
         let (_, _, cw, ch) = self.crop_rect(w, h);
         (cw, ch)
@@ -622,13 +656,32 @@ impl Recipe {
 
     /// What the bent canvas becomes in the file: itself, or with
     /// `scale_back`, enlarged to the crop's size (the size before the
-    /// work size). `original` is the photo's size.
+    /// work size); then, when the crop frames the result, that crop of it.
+    /// `original` is the photo's size.
     pub fn finish(&self, bent: Raster, original: (usize, usize)) -> Raster {
         let full = self.cropped_size(original.0, original.1);
-        if self.scale_back && (bent.width, bent.height) != full {
+        let done = if self.scale_back && (bent.width, bent.height) != full {
             bent.enlarge(full.0, full.1)
         } else {
             bent
+        };
+        match self.result_rect(done.width, done.height) {
+            Some((x, y, w, h)) if (w, h) != (done.width, done.height) => done.crop(x, y, w, h),
+            _ => done,
+        }
+    }
+
+    /// The size of the file for a `w` x `h` photo: the canvas, enlarged
+    /// with `scale_back`, cut to a crop of the result.
+    pub fn output_size(&self, w: usize, h: usize) -> (usize, usize) {
+        let (cw, ch) = if self.scale_back {
+            self.cropped_size(w, h)
+        } else {
+            self.canvas_size(w, h)
+        };
+        match self.result_rect(cw, ch) {
+            Some((_, _, rw, rh)) => (rw, rh),
+            None => (cw, ch),
         }
     }
 
@@ -650,7 +703,7 @@ impl Recipe {
     /// How masks drawn on a `w` x `h` photo land on this recipe's canvas
     /// (none without a crop: they already fit).
     pub fn mask_frame(&self, photo: (usize, usize)) -> Option<crate::mask::Frame> {
-        self.crop
+        self.photo_crop()
             .as_ref()
             .map(|_| crate::mask::Frame::new(self.crop_rect(photo.0, photo.1), photo.0, photo.1))
     }
@@ -771,7 +824,7 @@ mod tests {
         r.steps
             .push(Step::new("backwards", "channels=1", 5).unwrap());
         let text = r.to_toml();
-        assert!(text.contains("version = 7"), "{text}");
+        assert!(text.contains("version = 8"), "{text}");
         assert!(text.contains("encoding = \"s16le\""), "{text}");
         assert!(text.contains("encoding = \"ulaw\""), "{text}");
         assert!(text.contains("decay = 0.7"), "{text}");
@@ -916,7 +969,7 @@ mod tests {
         };
         let text = r.to_toml();
         assert!(
-            !text.contains("[[step.pin]]") && text.contains("version = 7"),
+            !text.contains("[[step.pin]]") && text.contains("version = 8"),
             "{text}"
         );
         assert_eq!(Recipe::from_toml(&text).unwrap(), r);
@@ -943,12 +996,69 @@ mod tests {
         assert!(matches!(pull[0], Mark::Stroke { brush: None, .. }));
         assert!(matches!(&pull[1], Mark::Pin(p) if p.to == [0.56, 0.47]));
         assert!(matches!(&r.steps[1].pull[..], [Mark::Pin(_)]));
-        // Written back as version 7, with one list.
+        // Written back as the current version, with one list.
         let text = r.to_toml();
         assert!(!text.contains("step.pin"), "{text}");
         assert_eq!(Recipe::from_toml(&text).unwrap(), r);
         // Version 7 has no `[[step.pin]]`.
         assert!(Recipe::from_toml(&v6.replace("version = 6", "version = 7")).is_err());
+    }
+
+    /// D-69: a crop of the result runs the steps on the whole photo and
+    /// cuts the frame from what they give, so moving the frame never
+    /// changes the glitch inside it. With a work size and `scale_back`,
+    /// the frame is cut after the enlargement, and `output_size` says
+    /// what comes out.
+    #[test]
+    fn a_crop_of_the_result_frames_the_finished_picture() {
+        let mut bytes = Vec::with_capacity(240 * 160 * 3);
+        for i in 0..240 * 160 * 3 {
+            bytes.push((i * 7 % 251) as u8);
+        }
+        let photo = Raster::new(240, 160, bytes);
+        let crop = Crop {
+            x: 0.25,
+            y: 0.1,
+            w: 0.5,
+            h: 0.6,
+        };
+        let mut r = Recipe {
+            steps: vec![Step::new("echo", "delay=0.4rows", 3).unwrap()],
+            ..Recipe::default()
+        };
+        let whole = r.render(&photo).unwrap();
+        r.crop = Some(crop);
+        let before = r.render(&photo).unwrap();
+        r.crop_result = true;
+        let framed = r.render(&photo).unwrap();
+        let (x, y, w, h) = crop.rect(240, 160);
+        assert_eq!(framed, whole.crop(x, y, w, h));
+        assert_eq!(r.output_size(240, 160), (w, h));
+        // Cropping first bends a narrower picture: a different glitch.
+        assert_eq!((before.width, before.height), (w, h));
+        assert_ne!(before, framed);
+        // The canvas and the masks ignore it; only the end changes.
+        assert_eq!(r.framing(), (None, None));
+        assert!(r.mask_frame((240, 160)).is_none());
+
+        // Work size, enlarged back, then framed.
+        r.work_size = Some(120);
+        r.scale_back = true;
+        let out = r.render(&photo).unwrap();
+        assert_eq!((out.width, out.height), (w, h));
+        assert_eq!(r.output_size(240, 160), (w, h));
+        r.scale_back = false;
+        let out = r.render(&photo).unwrap();
+        let (_, _, sw, sh) = crop.rect(120, 80);
+        assert_eq!((out.width, out.height), (sw, sh));
+        assert_eq!(r.output_size(240, 160), (sw, sh));
+
+        // Saved and read back; left out when false.
+        let text = r.to_toml();
+        assert!(text.contains("crop_result = true"), "{text}");
+        assert_eq!(Recipe::from_toml(&text).unwrap(), r);
+        r.crop_result = false;
+        assert!(!r.to_toml().contains("crop_result"));
     }
 
     /// A pull step's strokes go to `[[step.pull]]` and come back the same.
@@ -1069,7 +1179,7 @@ mod tests {
         let r = Recipe::from_toml(v2).unwrap();
         assert_eq!(r.version, VERSION);
         assert_eq!(r.steps[0].mask, None);
-        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 8")).is_err());
+        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 9")).is_err());
     }
 
     /// A 6 x 4 picture whose every pixel differs, so resizing shows.

@@ -34,6 +34,9 @@ pub struct RecipeDto {
     /// The part of the photo kept, as shares of it (see `Recipe::crop`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
+    /// The crop frames the finished picture (`Recipe::crop_result`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub crop_result: bool,
     #[serde(default)]
     pub steps: Vec<StepDto>,
 }
@@ -61,6 +64,7 @@ impl Default for RecipeDto {
             scale_back: false,
             source: None,
             crop: None,
+            crop_result: false,
             steps: Vec::new(),
         }
     }
@@ -156,6 +160,7 @@ impl RecipeDto {
                 .map(source_name)
                 .filter(|s| !s.is_empty()),
             crop: self.crop,
+            crop_result: self.crop_result,
             steps,
             ..Recipe::default()
         };
@@ -171,6 +176,7 @@ impl RecipeDto {
             scale_back: r.scale_back,
             source: r.source.clone(),
             crop: r.crop,
+            crop_result: r.crop_result,
             steps: r
                 .steps
                 .iter()

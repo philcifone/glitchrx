@@ -6,8 +6,12 @@
   //
   // The frame is worked out in the photo's own pixels, so a ratio holds
   // exactly whatever the screen size, and stored as shares of the photo.
-  // The photo shown is unbent because the steps run on the crop: outside
-  // it there is nothing bent to show.
+  //
+  // Photo | Result (D-69): crop the photo before the steps, or frame the
+  // finished picture. For the photo, the picture shown is unbent, because
+  // the steps then run on the crop: outside it there is nothing bent to
+  // show. For the result, it is the whole glitch, which the frame cuts
+  // from without changing it.
   import FlipHorizontal from '@lucide/svelte/icons/rectangle-horizontal';
   import FlipVertical from '@lucide/svelte/icons/rectangle-vertical';
   import { app } from '../lib/app.svelte';
@@ -179,10 +183,10 @@
     onpointercancel={up}
     role="presentation"
   >
-    {#if app.cropping?.url}
+    {#if app.cropUrl}
       <img
-        src={app.cropping.url}
-        alt="Uncropped original"
+        src={app.cropUrl}
+        alt={app.cropping?.result ? 'The whole result' : 'Uncropped original'}
         draggable="false"
         style:left="{img.x}px"
         style:top="{img.y}px"
@@ -215,6 +219,29 @@
   </div>
 
   <div class="bar">
+    <div class="row">
+      <span class="lbl">Crop the</span>
+      <div class="segmented stage" role="radiogroup" aria-label="Crop the photo or the result">
+        <button
+          role="radio"
+          aria-checked={!app.cropping?.result}
+          class:on={!app.cropping?.result}
+          onclick={() => app.setCropResult(false)}
+          title="Crop the photo, then glitch what is left: the glitch is made for the crop"
+        >
+          Photo
+        </button>
+        <button
+          role="radio"
+          aria-checked={!!app.cropping?.result}
+          class:on={!!app.cropping?.result}
+          onclick={() => app.setCropResult(true)}
+          title="Glitch the whole photo, then crop: the glitch stays as it is"
+        >
+          Result
+        </button>
+      </div>
+    </div>
     <div class="row">
       <div class="segmented" role="radiogroup" aria-label="Crop ratio">
         {#each CROP_RATIOS as c (c.id)}
@@ -464,6 +491,12 @@
     padding-left: 4px;
     padding-right: 4px;
     font-size: 0.85rem;
+  }
+
+  .lbl {
+    flex: none;
+    font-size: 0.85rem;
+    color: var(--fg-dim);
   }
 
   .size {

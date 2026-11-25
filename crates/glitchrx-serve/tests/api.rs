@@ -745,7 +745,7 @@ async fn masks_travel_and_show() {
     assert_eq!(s, StatusCode::OK);
     let toml = String::from_utf8(toml).unwrap();
     assert!(
-        toml.contains("[[step.mask.op]]") && toml.contains("version = 7"),
+        toml.contains("[[step.mask.op]]") && toml.contains("version = 8"),
         "{toml}"
     );
     let req = Request::post("/api/recipe/from-toml")
@@ -1204,6 +1204,85 @@ async fn crop_comes_before_the_steps() {
     assert!(String::from_utf8_lossy(&b).contains("crop"));
 }
 
+/// D-69: a crop of the result. The export is the whole render, framed;
+/// previews, zoomed views and the mask view all show just the frame, and
+/// a zoomed view is measured within it.
+#[tokio::test]
+async fn a_crop_of_the_result_frames_the_render() {
+    let app = app(None, None);
+    let original = fixture("baseline-420.jpg"); // 480 x 320
+    let doc = upload(&app, "photo.jpg", original.clone()).await;
+    let id = doc["id"].as_str().unwrap();
+    let mut recipe = sample_recipe();
+    recipe["crop"] = json!({"x": 0.25, "y": 0.0, "w": 0.5, "h": 0.5});
+    recipe["crop_result"] = json!(true);
+
+    let (s, _, b) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/export"),
+            json!({"recipe": recipe, "format": "png"}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let mut whole = codec::decode(&original).unwrap().raster;
+    core_recipe().apply(&mut whole).unwrap();
+    let framed = whole.crop(120, 0, 240, 160);
+    assert_eq!(codec::decode(&b).unwrap().raster, framed);
+
+    // A live preview shows the frame, filling the box.
+    let (s, h, _) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/preview"),
+            json!({"recipe": recipe, "max_w": 120, "max_h": 120}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(
+        (&h["x-width"], &h["x-height"]),
+        (&"120".parse().unwrap(), &"80".parse().unwrap())
+    );
+
+    // A zoomed view: its shares and X-Crop are of the frame.
+    let (s, h, b) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/preview"),
+            json!({"recipe": recipe, "max_w": 4096, "max_h": 4096,
+                   "crop": {"x": 0.5, "y": 0.5, "w": 0.5, "h": 0.5}}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(h["x-crop"], "120,80,120,80");
+    let got = codec::decode(&b).unwrap().raster;
+    let want = framed.crop(120, 80, 120, 80);
+    let err = got
+        .bytes
+        .iter()
+        .zip(&want.bytes)
+        .map(|(a, b)| a.abs_diff(*b) as u64)
+        .sum::<u64>()
+        / got.bytes.len() as u64;
+    assert!(err < 8, "mean error {err}");
+
+    // The mask view lies on the preview: the same size.
+    let (s, _, b) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/mask"),
+            json!({"recipe": recipe, "step": 0, "max_w": 120, "max_h": 120}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let png = codec::decode(&b).unwrap().raster;
+    assert_eq!((png.width, png.height), (120, 80));
+}
+
 #[tokio::test]
 async fn saved_recipes_are_listed_read_and_offered_for_their_photo() {
     let tmp = tempfile::tempdir().unwrap();
@@ -1539,7 +1618,7 @@ async fn pull_strokes_travel_through_json_and_toml() {
     assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&toml));
     let toml = String::from_utf8(toml).unwrap();
     assert!(
-        toml.contains("[[step.pull]]") && toml.contains("version = 7"),
+        toml.contains("[[step.pull]]") && toml.contains("version = 8"),
         "{toml}"
     );
     let (s, _, back) = send(

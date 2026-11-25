@@ -32,7 +32,13 @@ use glitchrx_core::recipe::{Cancel, Crop};
 /// What decides a photo's canvas: work size and crop (`Recipe::framing`).
 type Framing = (Option<u32>, Option<Crop>);
 use glitchrx_core::project::{self, Project};
+use glitchrx_core::raster::fit_size;
 use glitchrx_core::{Encoding, Raster, Recipe, Result, Step, Units};
+
+/// The longest side of a whole-canvas preview made larger for a crop of
+/// the result: a small frame on a large photo would otherwise ask for a
+/// preview as large as an export.
+const MAX_WHOLE_SIDE: usize = 8192;
 
 /// Upper bound on cached per-step preview rasters, in bytes, per document.
 /// A 4096-pixel preview is about 50 MB, a phone-sized one about 5 MB.
@@ -280,6 +286,37 @@ impl Doc {
         Ok(Raster::new(size.0, size.1, bytes))
     }
 
+    /// The box a preview of the whole canvas is fitted into: `max_w` x
+    /// `max_h`, or with a crop of the result (D-69), larger, so that the
+    /// framed part alone fills the box (at most [`MAX_WHOLE_SIDE`]).
+    fn whole_box(&self, recipe: &Recipe, max_w: usize, max_h: usize) -> (usize, usize) {
+        let canvas = self.canvas(recipe);
+        let (cw, ch) = (canvas.width, canvas.height);
+        let Some((_, _, rw, rh)) = recipe.result_rect(cw, ch) else {
+            return (max_w, max_h);
+        };
+        let (fw, fh) = fit_size(rw, rh, max_w, max_h);
+        let (bw, bh) = ((cw * fw).div_ceil(rw), (ch * fh).div_ceil(rh));
+        fit_size(bw, bh, MAX_WHOLE_SIDE, MAX_WHOLE_SIDE)
+    }
+
+    /// A preview of what the file shows: [`Doc::preview`], then, with a
+    /// crop of the result, that part of it.
+    pub fn preview_framed(
+        &self,
+        recipe: &Recipe,
+        max_w: usize,
+        max_h: usize,
+        cancel: Cancel<'_>,
+    ) -> Result<Raster> {
+        let (bw, bh) = self.whole_box(recipe, max_w, max_h);
+        let whole = self.preview(recipe, bw, bh, cancel)?;
+        Ok(match recipe.result_rect(whole.width, whole.height) {
+            Some((x, y, w, h)) => whole.crop(x, y, w, h),
+            None => whole,
+        })
+    }
+
     /// Step `index`'s mask at preview size, as coverage 0..1 per pixel, with
     /// the preview's width and height. Brightness operations read the
     /// picture as it arrives at the step, which comes from the cache. A step
@@ -300,7 +337,9 @@ impl Doc {
             steps: recipe.steps[..index].to_vec(),
             ..recipe.clone()
         };
-        let input = self.preview(&before, max_w, max_h, cancel)?;
+        // Over the whole canvas, sized as the preview it lies on.
+        let (bw, bh) = self.whole_box(recipe, max_w, max_h);
+        let input = self.preview(&before, bw, bh, cancel)?;
         let (w, h) = (input.width, input.height);
         // Drawn on the whole photo; moved onto the cropped canvas.
         let frame = recipe.mask_frame(self.photo_size());
@@ -309,7 +348,15 @@ impl Doc {
             (Some(m), None) => m.render(w, h, &input.bytes, cancel)?,
             (None, _) => vec![1.0; w * h],
         };
-        Ok((w, h, coverage))
+        // With a crop of the result, only the framed part is shown.
+        Ok(match recipe.result_rect(w, h) {
+            Some((x, y, rw, rh)) => {
+                let rows = coverage.chunks_exact(w).skip(y).take(rh);
+                let cut = rows.flat_map(|row| &row[x..x + rw]).copied().collect();
+                (rw, rh, cut)
+            }
+            None => (w, h, coverage),
+        })
     }
 
     /// Histograms of the picture as it arrives at step `index`, at preview

@@ -227,7 +227,8 @@ fn adjust(cli: &Cli, mut recipe: Recipe) -> Result<(Recipe, Option<u64>), Fail> 
     Ok((recipe, cli.seed))
 }
 
-/// `--encoding`, `--channels`, `--work-size`, `--scale-back`, `--crop`.
+/// `--encoding`, `--channels`, `--work-size`, `--scale-back`, `--crop`,
+/// `--crop-result`.
 fn overrides(cli: &Cli, recipe: &mut Recipe) -> Result<(), Fail> {
     if let Some(e) = cli.encoding {
         recipe.encoding = e;
@@ -243,6 +244,7 @@ fn overrides(cli: &Cli, recipe: &mut Recipe) -> Result<(), Fail> {
     }
     if let Some(c) = cli.crop {
         recipe.crop = Some(c);
+        recipe.crop_result = cli.crop_result;
     }
     recipe.validate()?;
     Ok(())
@@ -452,7 +454,11 @@ fn print_project(bytes: &[u8]) -> Result<(), Fail> {
         n => format!("{n} steps: {}", steps.join(", ")),
     };
     if p.recipe.crop.is_some() {
-        recipe.push_str("; cropped");
+        recipe.push_str(if p.recipe.crop_result {
+            "; result cropped"
+        } else {
+            "; cropped"
+        });
     }
     if let Some(w) = p.recipe.work_size {
         recipe.push_str(&format!("; work size {w}"));

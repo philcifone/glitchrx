@@ -204,6 +204,8 @@ export interface RecipeDto {
   scale_back?: boolean;
   /** The part of the photo kept, before anything else. */
   crop?: Crop;
+  /** The crop frames the finished picture instead (D-69). */
+  crop_result?: boolean;
   /** The photo's file name, recorded in saved recipes. */
   source?: string;
   steps: StepDto[];
@@ -248,6 +250,7 @@ export interface RecipeState {
   work_size?: number;
   scale_back?: boolean;
   crop?: Crop;
+  crop_result?: boolean;
   steps: StepState[];
   /** Preset groups; UI only, never sent to the server or saved in recipes. */
   groups?: PresetGroup[];

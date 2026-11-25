@@ -129,7 +129,7 @@
   const out = $derived(app.outputSize);
   const tooBigForWebp = $derived(!!out && Math.max(out.w, out.h) > WEBP_MAX_SIDE);
   const canvas = $derived(app.canvasSize);
-  const cropped = $derived(app.croppedSize);
+  const cropped = $derived(app.scaledBackSize);
   // Shrunk to a work size: the crop (or photo) and the canvas differ.
   const shrunk = $derived(!!cropped && !!canvas && canvas.w !== cropped.w);
   const blocked = $derived(!project && prefs.format === 'webp' && tooBigForWebp);

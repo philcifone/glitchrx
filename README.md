@@ -154,7 +154,7 @@ Presets (the bookmark) are your own saved recipes, kept by the server in `~/.con
 
 - **Compare:** press and hold the photo (or the `\` key) to see the untouched original. While masking or pulling, the photo is for drawing, so hold the compare button in the top bar instead.
 - **Zoom** with a pinch, ctrl + wheel or a trackpad pinch; double-tap, tap the magnifier or press Z for 100% and back. Zoomed in, drag (or scroll) to pan. Once the view holds still, what is on screen is cut from the full-resolution render, so it is sharp and exactly the export.
-- **Crop** with the button beside the zoom: free, or at the photo's own shape, 1:1, 4:5 or 16:9, turned with the portrait and landscape switch. The crop comes before every step. Masks and pulls stay on the same part of the photo when you change it.
+- **Crop** with the button beside the zoom: free, or at the photo's own shape, 1:1, 4:5 or 16:9, turned with the portrait and landscape switch. **Crop the: Photo | Result** decides when it happens. *Photo* crops first and glitches what is left, so the glitch is made for the crop (and changes with it). *Result* glitches the whole photo and then crops, so you frame the glitch you already have without changing it. Masks and pulls stay on the same part of the photo either way.
 - **Work size** (Full, 4K, 2K, 1K) runs the steps on a smaller copy: the glitch texture gets coarser and everything is faster. Export writes that size, or enlarges it back to the photo's size with hard pixel edges.
 - **Undo and redo** with the buttons, or Ctrl+Z and Ctrl+Shift+Z. History holds recipes, not images, so it costs almost nothing.
 
@@ -217,6 +217,7 @@ glitchrx --echo opacity=0.5 photo.jpg           # blend the step at half strengt
 glitchrx --levels black=20,white=230 --hsl saturation=-40 photo.jpg   # photo adjustments
 glitchrx --curves points=0:20/128:150/255:235,channel=blue photo.jpg
 glitchrx --shift --crop 0.1,0,0.8,1 photo.jpg   # crop first: X,Y,W,H as shares of the photo
+glitchrx --shift --crop 0.1,0,0.8,1 --crop-result photo.jpg   # glitch the whole photo, then crop
 glitchrx --pixelsort --work-size 1024 photo.jpg # run on a 1024 px copy: coarser, faster
 glitchrx --shift --work-size 1024 --scale-back photo.jpg   # ...enlarged back, hard pixel edges
 glitchrx --recipe moody.toml photo.jpg          # replay a saved recipe (a pull is drawn in the GUI and replayed this way)
@@ -294,7 +295,7 @@ A recipe is the whole description of a glitch: the steps, their settings and see
 
 ```toml
 format = "glitcharaxia-recipe"
-version = 7
+version = 8
 encoding = "u8"
 channels = 1
 
