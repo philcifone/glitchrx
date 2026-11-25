@@ -293,7 +293,10 @@ export interface ExportOptions {
   speed?: number;
   /** A project file (.glrx: the original, the recipe and a preview) instead of the picture. */
   project?: boolean;
-  /** Save next to the original only: over the project the photo was opened from. */
+  /**
+   * Save next to the original: over the project the photo was opened from.
+   * Save As: update the project already there under that name.
+   */
   replace?: boolean;
   /**
    * Download and Save next to original: the name typed in the Export sheet,

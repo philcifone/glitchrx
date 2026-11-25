@@ -56,7 +56,7 @@
 
 <article class:off={!step.enabled}>
   <!-- Held (not on the switch): Edit mode for the whole list. -->
-  <header {@attach hold(() => app.startEditingSteps(), { ignore: '.toggle' })}>
+  <header {@attach hold(() => app.startEditingSteps(step.uid), { ignore: '.toggle' })}>
     <span class="n">{index + 1}</span>
     <button class="name" onclick={() => app.toggleCollapsed(step.uid)} aria-expanded={open} title={info?.summary}>
       <span class="glyph"><Icon size={18} strokeWidth={1.75} /></span>

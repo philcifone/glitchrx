@@ -120,7 +120,7 @@ Icon-only buttons show their name when you hold them on a phone (with a mouse, h
 
 ### Photos
 
-- **Open** a photo from this device (it goes to your own server, nowhere else) or from the server's library folder, chosen in Settings or with `--root`. On an iPhone, a HEIC photo arrives as a JPEG.
+- **Open** a photo with **From Device** (it goes to your own server, nowhere else), a project with **Open .glrx**, or from the server's library folder, chosen in Settings or with `--root`. On an iPhone, a HEIC photo arrives as a JPEG.
 - If there are already steps, you are asked whether to keep them or start fresh (undoable; "Don't ask again" can be changed in Settings).
 - **Continue from a saved recipe.** Recipes saved beside an export remember the photo they were made on. Opening that photo again offers to continue from the newest one; Export, then "Saved on the server", lists them all.
 
@@ -132,7 +132,7 @@ Icon-only buttons show their name when you hold them on a phone (with a mouse, h
 - **Sliders** mark their default with a small tick and snap onto it; double tap a slider to go back to the default. Fields without a slider have a reset arrow.
 - **Shake** (the shuffle arrows at the top of a step's settings) rolls its settings at random, within the useful range; placement and encoding stay.
 - **Placement:** every effect starts on the whole picture. The **Bands** switch scatters it in seeded bands instead and shows `hits`, `len` and the seed. Dragging the region's two handles shades the preview outside the band. **Re-roll** (the dice beside the seed) picks a new seed, which moves where the bands land; it is greyed out when nothing is random.
-- **Edit mode:** hold a step's header to see every step on one line. Tap the circles to select several, then re-roll, duplicate or remove them together; drag the grip on the right to reorder. Hold a row (or tap Done) to go back. With nothing selected, the dice re-rolls every step.
+- **Edit mode:** hold a step's header to see every step on one line, with the one you held already selected (a green ring). Tap the circles to select more, then re-roll, duplicate or remove them together; drag the grip on the right to reorder. Hold a row (or tap Done) to go back. With nothing selected, the dice re-rolls every step.
 
 ### Blend and masks
 
@@ -193,11 +193,11 @@ Strokes are saved in the recipe as positions on the photo, so they replay exactl
 
 ## Projects
 
-A project (`.glrx`) is to glitchRx what a `.psd` is to Photoshop: the original photo, every step and a preview in one file, to open again on any device and carry on. Choose **Project** in Export; open one with **A project** in Open, or from the library, where projects show their preview.
+A project (`.glrx`) is to glitchRx what a `.psd` is to Photoshop: the original photo, every step and a preview in one file, to open again on any device and carry on. Choose **Project** in Export; open one with **Open .glrx** in Open, or from the library, where projects show their preview.
 
 - It is an ordinary zip file: anyone can unzip it and find the photo, the recipe and a JPEG preview.
 - The photo's **location is removed** as it goes in (the GPS data, as a phone does when sharing); camera, date, orientation and colour profile stay. The image data itself is untouched, so the recipe replays to the same bytes.
-- A project you opened from the library can be saved over (after a confirmation) or saved as a new one. A picture exported from a project takes the project's name.
+- A project you opened from the library can be saved over (after a confirmation) or saved as a new one. Save As onto an existing project's name offers to update it. Photos are never written over. A picture exported from a project takes the project's name.
 - From the command line: `glitchrx edit.glrx out.png` renders a project with its own steps, and `--project` writes one beside a picture.
 
 ## Command line

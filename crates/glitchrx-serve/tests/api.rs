@@ -1283,6 +1283,62 @@ async fn a_crop_of_the_result_frames_the_render() {
     assert_eq!((png.width, png.height), (120, 80));
 }
 
+/// Save As may update a project of the same name, once asked (Phil,
+/// 2026-11-25): the first try answers 409 with `X-Replaceable`, the second
+/// with `replace` writes over it. Pictures and non-projects are never
+/// replaced.
+#[tokio::test]
+async fn save_as_updates_a_project_once_asked() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join("out")).unwrap();
+    let app = app_with_settings(&home, None);
+    let doc = upload(&app, "photo.jpg", fixture("baseline-444.jpg")).await;
+    let id = doc["id"].as_str().unwrap();
+    let save = |name: &str, project: bool, replace: bool, recipe: Value| {
+        post_json(
+            &format!("/api/docs/{id}/save-to"),
+            json!({"recipe": recipe, "format": "png", "project": project,
+                   "replace": replace, "folder": "out", "name": name}),
+        )
+    };
+    let (s, _, b) = send(&app, save("edit", true, false, sample_recipe())).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let first = fs::read(home.join("out/edit.glrx")).unwrap();
+
+    // Taken: asked about, not written.
+    let mut changed = sample_recipe();
+    changed["steps"][0]["params"]["decay"] = json!("0.3");
+    let (s, h, _) = send(&app, save("edit", true, false, changed.clone())).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert_eq!(h["x-replaceable"], "1");
+    assert_eq!(fs::read(home.join("out/edit.glrx")).unwrap(), first);
+
+    // Asked: updated, and it opens with the new steps.
+    let (s, _, b) = send(&app, save("edit", true, true, changed)).await;
+    assert_eq!(s, StatusCode::OK, "{}", String::from_utf8_lossy(&b));
+    let now = fs::read(home.join("out/edit.glrx")).unwrap();
+    assert_ne!(now, first);
+    let p = glitchrx_core::project::Project::from_bytes(&now).unwrap();
+    assert_eq!(p.recipe.steps[0].params["decay"], "0.3");
+
+    // A picture never replaces; nor does a project replace a file that is
+    // not one, whatever its name.
+    let (s, _, _) = send(&app, save("pic", false, false, sample_recipe())).await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, h, _) = send(&app, save("pic", false, true, sample_recipe())).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert!(h.get("x-replaceable").is_none());
+    fs::write(home.join("out/fake.glrx"), b"not a project").unwrap();
+    let (s, h, _) = send(&app, save("fake", true, true, sample_recipe())).await;
+    assert_eq!(s, StatusCode::CONFLICT);
+    assert!(h.get("x-replaceable").is_none());
+    assert_eq!(
+        fs::read(home.join("out/fake.glrx")).unwrap(),
+        b"not a project"
+    );
+}
+
 #[tokio::test]
 async fn saved_recipes_are_listed_read_and_offered_for_their_photo() {
     let tmp = tempfile::tempdir().unwrap();

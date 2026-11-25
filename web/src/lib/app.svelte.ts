@@ -6,7 +6,7 @@
 // place that schedules a re-render and records history.
 
 import * as api from './api';
-import { ApiError, TooHeavyError } from './api';
+import { ApiError, ReplaceableError, TooHeavyError } from './api';
 import { History } from './history';
 import { LatestOnly } from './latest';
 import { ResultCache } from './results';
@@ -477,9 +477,14 @@ export class App {
         // A project (D-63) brings its own steps; undo goes back to the last ones.
         this.askNewPhoto = 0;
         this.loadRecipe(brought);
-      } else if (carried && this.newPhoto === 'fresh') this.startFresh();
-      // Steps from the last photo: keep them, clear them, or ask.
-      else if (carried && this.newPhoto === 'ask') this.askNewPhoto = carried;
+      } else {
+        // A crop belongs to the photo it was made on: a new photo starts
+        // uncropped, even when it keeps the steps (Phil, 2026-11-25).
+        this.dropCrop();
+        // Steps from the last photo: keep them, clear them, or ask.
+        if (carried && this.newPhoto === 'fresh') this.startFresh();
+        else if (carried && this.newPhoto === 'ask') this.askNewPhoto = carried;
+      }
       this.setImage(null);
       this.setOriginal(null, '');
       this.setMaskUrl(null);
@@ -492,6 +497,14 @@ export class App {
     } finally {
       this.working = null;
     }
+  }
+
+  /** Remove the crop, if any. Undo brings it back. */
+  private dropCrop(): void {
+    if (!this.recipe.crop) return;
+    delete this.recipe.crop;
+    delete this.recipe.crop_result;
+    this.changed();
   }
 
   /** Clear the steps for a new photo. Undo brings them back. */
@@ -1204,11 +1217,14 @@ export class App {
   // turns it on and off.
 
   editingSteps = $state(false);
+  /** The step held to start Edit mode: it starts out selected. */
+  editFirst: string | null = null;
 
-  startEditingSteps(): void {
+  startEditingSteps(uid?: string): void {
     if (!this.recipe.steps.length) return;
     this.stopMasking();
     this.stopPulling();
+    this.editFirst = uid ?? null;
     this.editingSteps = true;
   }
 
@@ -2041,13 +2057,25 @@ export class App {
     }
   }
 
-  /** Save As into a folder under the server's home folder (never overwrites). */
+  /**
+   * Save As into a folder under the server's home folder. Never overwrites,
+   * except a project of the same name, which it offers to update (Phil,
+   * 2026-11-25: a project is a working file; only photos need guarding).
+   */
   async saveTo(opts: ExportOptions, folder: string, name: string, withRecipe: boolean): Promise<void> {
     const doc = this.doc;
     if (!doc) return;
     this.working = this.exporting(opts);
     try {
-      const saved = await api.saveTo(doc.id, this.saved(), opts, folder, name, withRecipe);
+      let saved: string[];
+      try {
+        saved = await api.saveTo(doc.id, this.saved(), opts, folder, name, withRecipe);
+      } catch (e) {
+        if (!(e instanceof ReplaceableError)) throw e;
+        const file = /\.glrx$/i.test(name) ? name : `${name}.glrx`;
+        if (!confirm(`Update ${file}?\n\nIt is replaced with these steps. The photo inside it stays as it is.`)) return;
+        saved = await api.saveTo(doc.id, this.saved(), { ...opts, replace: true }, folder, name, withRecipe);
+      }
       this.flash(`Saved ${saved.join(', ')}`);
     } catch (e) {
       this.fail(e);

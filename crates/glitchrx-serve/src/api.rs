@@ -938,8 +938,9 @@ struct ExportRequest {
     /// then unused.
     #[serde(default)]
     project: bool,
-    /// Save next to the original only: write the project over the one the
-    /// photo was opened from (the GUI asks first).
+    /// Save next to the original: write the project over the one the photo
+    /// was opened from. Save As into a folder: update the project already
+    /// there under that name. The GUI asks first either way.
     #[serde(default)]
     replace: bool,
     /// Download and Save next to original: the name typed in the Export
@@ -1574,12 +1575,14 @@ fn free_name(dir: &std::path::Path, name: &str, with_recipe: bool) -> PathBuf {
 
 /// Save As into a folder under home, with a name chosen in the browser.
 /// Never overwrites (409, so the dialog can ask for another name) and
-/// never writes the original.
+/// never writes the original, with one exception: a project may update an
+/// existing project of that name, once asked (`replace`; Phil, 2026-11-25).
+/// Its 409 says so with `X-Replaceable: 1`, so the GUI knows to offer it.
 async fn save_to(
     State(st): State<Shared>,
     Path(id): Path<String>,
     Json(req): Json<SaveToRequest>,
-) -> ApiResult<Json<Saved>> {
+) -> ApiResult<Response> {
     let store = settings(&st)?;
     let doc = find(&st, &id)?;
     let folder = store
@@ -1595,26 +1598,45 @@ async fn save_to(
     let shown = |p: &std::path::Path| format!("~/{}", store.relative(p));
     let (out_shown, rpath) = (shown(&out), out.with_extension("recipe.toml"));
     let recipe_shown = shown(&rpath);
-    // Refuse before the long render when the name is taken.
-    if std::fs::symlink_metadata(&out).is_ok() {
-        return Err(ApiError::new(
+    // Refuse before the long render when the name is taken, unless it is a
+    // project being updated (a project only: never a photo, nor another
+    // kind of file that happens to end in .glrx).
+    let taken = std::fs::symlink_metadata(&out).is_ok();
+    let replaceable = taken && export.project && glitchrx_core::io::is_project_file(&out);
+    let update = replaceable && export.replace;
+    if taken && !update {
+        let mut res = ApiError::new(
             StatusCode::CONFLICT,
-            format!("{out_shown} already exists; choose another name"),
-        ));
+            if replaceable {
+                format!("{out_shown} already exists")
+            } else {
+                format!("{out_shown} already exists; choose another name")
+            },
+        )
+        .into_response();
+        if replaceable {
+            res.headers_mut()
+                .insert("x-replaceable", HeaderValue::from_static("1"));
+        }
+        return Ok(res);
     }
     blocking(move || {
         let bytes = output_bytes(&doc, &recipe, &export, &encode)?;
+        let conflict = |e: WriteError| ApiError::new(StatusCode::CONFLICT, e.to_string());
         let write = |path: &std::path::Path, data: &[u8]| {
-            write_output(&source, path, data, false)
-                .map_err(|e| ApiError::new(StatusCode::CONFLICT, e.to_string()))
+            write_output(&source, path, data, false).map_err(conflict)
         };
-        write(&out, &bytes)?;
+        if update {
+            write_project(&source, &out, &bytes, true).map_err(conflict)?;
+        } else {
+            write(&out, &bytes)?;
+        }
         let mut saved = vec![out_shown];
         if with_recipe {
             write(&rpath, recipe.to_toml().as_bytes())?;
             saved.push(recipe_shown);
         }
-        Ok(Json(Saved { saved }))
+        Ok(Json(Saved { saved }).into_response())
     })
     .await
 }

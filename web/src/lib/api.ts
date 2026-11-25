@@ -28,6 +28,9 @@ export class ApiError extends Error {
 /** A preview that ran over the server's time budget (SPEC 9.2). */
 export class TooHeavyError extends ApiError {}
 
+/** Save As found a project of that name, which it may update if asked. */
+export class ReplaceableError extends ApiError {}
+
 async function fail(res: Response): Promise<never> {
   let msg = `${res.status} ${res.statusText}`;
   try {
@@ -245,7 +248,11 @@ export async function saveOnServer(
   return (await json<{ saved: string[] }>(res)).saved;
 }
 
-/** Save As into a folder under the server's home folder; refuses to overwrite (409). */
+/**
+ * Save As into a folder under the server's home folder; refuses to
+ * overwrite (409). A project of the same name throws ReplaceableError,
+ * and is updated when saved again with `replace`.
+ */
 export async function saveTo(
   docId: string,
   recipe: RecipeDto,
@@ -255,6 +262,15 @@ export async function saveTo(
   withRecipe: boolean,
 ): Promise<string[]> {
   const res = await postJson(`/api/docs/${docId}/save-to`, { recipe, ...opts, folder, name, with_recipe: withRecipe });
+  if (res.status === 409 && res.headers.get('x-replaceable')) {
+    let msg = 'already exists';
+    try {
+      msg = (await res.json()).error ?? msg;
+    } catch {
+      // keep the default
+    }
+    throw new ReplaceableError(409, msg);
+  }
   return (await json<{ saved: string[] }>(res)).saved;
 }
 

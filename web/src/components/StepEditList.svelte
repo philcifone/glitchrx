@@ -5,6 +5,10 @@
   // removed together. A preset group keeps its panel and has a grip of its
   // own, so it drags as a block; its steps drag only inside it.
   //
+  // The step held to start Edit mode comes in selected: its row draws a
+  // green ring inside its edge and sinks a little to make room for it, as
+  // every selected row does (Phil, 2026-11-25). Rows keep their size.
+  //
   // Holding a row (anywhere but its grip) leaves Edit mode, as holding a
   // card started it. The bar at the bottom is icons only; holding one shows
   // its name. Its dice re-rolls the selected steps, or all of them.
@@ -44,6 +48,18 @@
     const all = uids.every(isSel);
     selected = all ? live.filter((u) => !uids.includes(u)) : [...new Set([...live, ...uids])];
   }
+  // Select the held step a frame after the list appears, so its ring
+  // draws in rather than being there from the start.
+  $effect(() => {
+    const first = app.editFirst;
+    app.editFirst = null;
+    if (!first) return;
+    const id = requestAnimationFrame(() => {
+      if (!isSel(first)) selected = [...live, first];
+    });
+    return () => cancelAnimationFrame(id);
+  });
+
   function selectAll() {
     selected = allSelected ? [] : app.recipe.steps.map((s) => s.uid);
   }
@@ -138,6 +154,7 @@
   <div
     class="row"
     class:off={!step.enabled}
+    class:sel={isSel(step.uid)}
     class:lifted={drag?.kind === 'step' && drag.id === step.uid}
     {@attach hold(() => app.stopEditingSteps(), { ignore: '.grip' })}
   >
@@ -272,8 +289,15 @@
     min-height: 48px;
     padding: 0 4px;
     transition:
-      box-shadow 0.15s,
-      transform 0.15s;
+      box-shadow 0.22s var(--ease-out, cubic-bezier(0.32, 0.72, 0, 1)),
+      transform 0.22s var(--ease-out, cubic-bezier(0.32, 0.72, 0, 1));
+  }
+
+  /* Selected: a green ring inside the edge, and the row sinks a little,
+     as iOS does when it picks up an item. Neither changes the layout. */
+  .row.sel {
+    box-shadow: inset 0 0 0 2.5px var(--accent);
+    transform: scale(0.975);
   }
 
   .row.off .what {
@@ -286,6 +310,13 @@
     transform: scale(1.02);
     position: relative;
     z-index: 1;
+  }
+
+  /* Picked up while selected: keep the ring. */
+  .row.sel.lifted {
+    box-shadow:
+      inset 0 0 0 2.5px var(--accent),
+      0 6px 18px rgb(0 0 0 / 0.18);
   }
 
   .pick {
