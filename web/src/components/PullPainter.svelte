@@ -276,10 +276,14 @@
           <!-- How far this pin reaches. -->
           <circle class="reach" cx={b.x} cy={b.y} r={(pin.size / 2) * long} />
         {/if}
-        <line class="shade" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
-        <line class="tie" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
-        <circle class="home" cx={a.x} cy={a.y} r="4" />
-        <circle class="handle" class:chosen cx={b.x} cy={b.y} r={chosen ? 9 : 7} />
+        <!-- Pins look like stroke markers: plain unless selected, then
+             green and larger (Phil, 2026-11-24: hard to see on a phone). -->
+        <g class:faded={!chosen}>
+          <line class="shade" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
+          <line class="tie" x1={a.x} y1={a.y} x2={b.x} y2={b.y} />
+          <circle class="home" cx={a.x} cy={a.y} r="4" />
+        </g>
+        <circle class="marker" class:chosen cx={b.x} cy={b.y} r={chosen ? 10 : 6} />
         {/if}
       {/each}
     </svg>
@@ -364,14 +368,9 @@
     stroke-width: 1.5;
   }
 
-  .handle {
-    fill: var(--accent);
-    stroke: white;
-    stroke-width: 2;
-  }
-
-  .handle.chosen {
-    stroke-width: 3;
+  /* An unselected pin's tie and home step back. */
+  .faded {
+    opacity: 0.55;
   }
 
   .marker {
@@ -383,7 +382,7 @@
   .marker.chosen {
     fill: var(--accent);
     stroke: white;
-    stroke-width: 2;
+    stroke-width: 2.5;
   }
 
   .reach {
