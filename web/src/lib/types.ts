@@ -48,9 +48,9 @@ export interface DocInfo {
   /** EXIF orientation that was applied (1 = none). */
   orientation: number;
   has_icc: boolean;
-  /** The colour profile's name, if it has one. */
+  /** The color profile's name, if it has one. */
   profile: string | null;
-  /** An AVIF export keeps these colours (no profile, sRGB or Display P3). */
+  /** An AVIF export keeps these colors (no profile, sRGB or Display P3). */
   avif_keeps_profile: boolean;
   file_len: number;
   /** Raw RGB bytes the effects work on. */
@@ -99,7 +99,7 @@ export interface ServerConfig {
 
 /**
  * How many interleaved channels the samples form: mono, stereo, or three
- * (with 8-bit samples, one per colour, so R, G and B are processed alone).
+ * (with 8-bit samples, one per color, so R, G and B are processed alone).
  */
 export type Channels = 1 | 2 | 3;
 

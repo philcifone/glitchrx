@@ -119,7 +119,7 @@ impl Effect for Reverb {
     fn run(&self, w: &mut Window<'_>, _rng: &mut Rng) -> Result<()> {
         // Every delay keeps Freeverb's ratio to the longest comb. They are
         // worked out in full-resolution bytes and only then mapped into this
-        // raster, so each one rotates the colours the same way in a preview
+        // raster, so each one rotates the colors the same way in a preview
         // as in the export. Capped at the window (longer would be silent).
         let longest = w.units.full_bytes(self.size) + self.phase;
         let frames = w.frames().max(1);

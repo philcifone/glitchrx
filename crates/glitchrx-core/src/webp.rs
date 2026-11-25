@@ -1,7 +1,7 @@
 //! WebP export through libwebp (built from the source bundled with
 //! `libwebp-sys`, so every build encodes the same bytes).
 //!
-//! Lossy WebP is VP8 with a quality setting; lossless is VP8L. The colour
+//! Lossy WebP is VP8 with a quality setting; lossless is VP8L. The color
 //! profile goes in an `ICCP` chunk, which libwebp's mux API adds around the
 //! encoded image.
 
@@ -55,7 +55,7 @@ pub fn encode(r: &Raster, quality: u8, lossless: bool, icc: Option<&[u8]>) -> Re
 
 /// Wrap an encoded image with an ICC profile chunk.
 fn with_profile(bitstream: &[u8], icc: &[u8]) -> Result<Vec<u8>> {
-    let fail = || Error::Malformed("webp: could not add the colour profile".into());
+    let fail = || Error::Malformed("webp: could not add the color profile".into());
     // SAFETY: every libwebp object made here is released before returning,
     // and the data handed in outlives the calls (copy_data = 1 copies it).
     unsafe {

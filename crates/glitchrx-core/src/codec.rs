@@ -2,8 +2,8 @@
 //! encode a raster as TIFF, PNG, JPEG, WebP or AVIF.
 //!
 //! Decoding applies the EXIF orientation (so the raster is upright) and
-//! keeps the ICC colour profile, which is written into the output so the
-//! colours match the original in Photoshop and other colour-managed apps.
+//! keeps the ICC color profile, which is written into the output so the
+//! colors match the original in Photoshop and other color-managed apps.
 
 use std::borrow::Cow;
 use std::fmt;
@@ -228,7 +228,7 @@ fn decode_tiff(bytes: &[u8]) -> Result<(Raster, Option<Vec<u8>>, u8)> {
         C::RGB(_) => (3, false),
         C::RGBA(_) => (4, false),
         C::CMYK(_) => (4, true),
-        other => return Err(Error::Unsupported(format!("tiff: colour type {other:?}"))),
+        other => return Err(Error::Unsupported(format!("tiff: color type {other:?}"))),
     };
     let raster = to_rgb(w as usize, h as usize, &samples, channels, cmyk)?;
     Ok((raster, icc, orientation))
@@ -323,7 +323,7 @@ pub fn encode_with(
             PixelFormat::Rgb,
             EncodeOptions {
                 quality: quality(EncodeSettings::JPEG_QUALITY),
-                // Full chroma: glitch colour fringes are the point.
+                // Full chroma: glitch color fringes are the point.
                 subsampling: Subsampling::S444,
                 progressive: false,
                 restart_rows: 0,
@@ -567,7 +567,7 @@ mod tests {
     }
 
     #[test]
-    fn webp_carries_the_colour_profile() {
+    fn webp_carries_the_color_profile() {
         let icc = profile("Display P3", true);
         let bytes = encode(&picture(), Format::Webp, Some(&icc)).unwrap();
         let at = bytes
@@ -601,7 +601,7 @@ mod tests {
         let a = encode_with(&img, Format::Avif, None, &fast).unwrap();
         assert_eq!(&a[4..12], b"ftypavif");
         assert_eq!(a, encode_with(&img, Format::Avif, None, &fast).unwrap());
-        // sRGB is what readers assume, so it has no colour box; Display P3
+        // sRGB is what readers assume, so it has no color box; Display P3
         // gets one naming its primaries (code point 12), around the same AV1 data.
         let primaries = |f: &[u8]| {
             f.windows(8)

@@ -187,7 +187,7 @@ pub struct Cli {
     pub encoding: Option<Encoding>,
 
     /// 1 (mono), 2 (stereo: alternate samples are left and right) or 3 (one
-    /// channel per colour, like importing raw data with 3 channels) [default: 1].
+    /// channel per color, like importing raw data with 3 channels) [default: 1].
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u8).range(1..=3))]
     pub channels: Option<u8>,
 
@@ -200,7 +200,7 @@ pub struct Cli {
     #[arg(long)]
     pub batch: bool,
 
-    /// Show format, size, orientation and colour profile of the input(s), then exit.
+    /// Show format, size, orientation and color profile of the input(s), then exit.
     #[arg(long)]
     pub info: bool,
 

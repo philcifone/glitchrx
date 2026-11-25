@@ -1,5 +1,5 @@
 //! Whole-image tests over the committed fixtures: decoders, orientation,
-//! colour profiles, robustness, golden hashes and preview fidelity.
+//! color profiles, robustness, golden hashes and preview fidelity.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -218,7 +218,7 @@ fn lossless_variants_agree_exactly() {
     let png = decode("rgb8.png").raster;
     // 16-bit values v * 257 round back to v.
     assert_eq!(decode("rgb16.png").raster, png);
-    // Alpha is dropped, colour kept.
+    // Alpha is dropped, color kept.
     assert_eq!(decode("rgba8.png").raster, png);
     let tif = decode("rgb8.tif").raster;
     assert_eq!(decode("lzw.tif").raster, tif);
@@ -234,7 +234,7 @@ fn lossless_variants_agree_exactly() {
 }
 
 #[test]
-fn colour_profiles_are_read() {
+fn color_profiles_are_read() {
     let icc = b"glitcharaxia test profile; not a real ICC profile.";
     for name in ["icc-profile.jpg", "rgb8.png", "rgb8.tif"] {
         assert_eq!(decode(name).icc.as_deref(), Some(&icc[..]), "{name}");

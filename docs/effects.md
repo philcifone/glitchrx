@@ -4,13 +4,13 @@ Generated from the effect registry (`crates/glitchrx-core/src/effects`). Do not 
 
 Every effect works on the decoded image as raw bytes: R, G, B for each pixel, row after row, the way an uncompressed TIFF stores it. Each step reads those bytes as audio samples in an *encoding* (as Audacity's Import Raw Data does), applies the effect, and clips the result back to bytes.
 
-Sizes take units: `%` of the image (which runs top to bottom), `rows` (a fractional row is that share of the width), `px`, or plain bytes. A distance of whole pixels keeps colours; `phase` adds 1 or 2 bytes, which rotates red into green into blue.
+Sizes take units: `%` of the image (which runs top to bottom), `rows` (a fractional row is that share of the width), `px`, or plain bytes. A distance of whole pixels keeps colors; `phase` adds 1 or 2 bytes, which rotates red into green into blue.
 
 ## Encodings
 
 | Encoding | Bytes | Character |
 | --- | --- | --- |
-| `u8` | 1 | unsigned 8-bit: clean ghosts, colours rotate |
+| `u8` | 1 | unsigned 8-bit: clean ghosts, colors rotate |
 | `s8` | 1 | signed 8-bit: clips at mid-brightness, inverts highlights |
 | `s16le` | 2 | signed 16-bit: ghosts under rainbow grain |
 | `s16be` | 2 | signed 16-bit: ghosts under rainbow grain |
@@ -39,7 +39,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `delay` | `0.33rows` | distance to the repeat (rows, px, % or bytes) |
-| `phase` | `1` | extra bytes on top of the distance: 0 keeps colours, 1 or 2 rotates them |
+| `phase` | `1` | extra bytes on top of the distance: 0 keeps colors, 1 or 2 rotates them |
 | `decay` | `0.5` | loudness of each repeat relative to the one before |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
 | `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
@@ -64,7 +64,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `delay` | `0.33rows` | distance between repeats (rows, px, % or bytes) |
-| `phase` | `1` | extra bytes on top of the distance: 0 keeps colours, 1 or 2 rotates them |
+| `phase` | `1` | extra bytes on top of the distance: 0 keeps colors, 1 or 2 rotates them |
 | `decay` | `0.5` | loudness of each repeat relative to the one before |
 | `taps` | `3` | number of repeats |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
@@ -90,7 +90,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `size` | `0.5rows` | longest comb delay (rows, px, % or bytes) |
-| `phase` | `1` | extra bytes on top of the distance: 0 keeps colours, 1 or 2 rotates them |
+| `phase` | `1` | extra bytes on top of the distance: 0 keeps colors, 1 or 2 rotates them |
 | `room` | `0.7` | length of the tail |
 | `damping` | `0.5` | how fast detail fades from the tail |
 | `wet` | `0.33` | level of the reverb |
@@ -154,7 +154,7 @@ glitchrx --invert encoding=s16le,hits=8 photo.jpg
 
 Reduce every sample to `bits` bits of resolution.
 
-Posterizes. With `u8` it is plain colour banding; with the multi-byte encodings the lower bytes of each sample are wiped, so whole channels drop to flat values while the others keep their detail.
+Posterizes. With `u8` it is plain color banding; with the multi-byte encodings the lower bytes of each sample are wiped, so whole channels drop to flat values while the others keep their detail.
 
 Follows Audacity's a bitcrusher (Audacity has none built in; the usual Nyquist plug-ins). Version: 1.
 
@@ -177,7 +177,7 @@ glitchrx --bitcrush bits=2,encoding=s16be photo.jpg
 
 Play each window backwards.
 
-Reverses the order of the samples (not the bytes inside a sample). A window covering whole rows mirrors them left to right and flips their order; with `u8` the colour channels also swap, red with blue.
+Reverses the order of the samples (not the bytes inside a sample). A window covering whole rows mirrors them left to right and flips their order; with `u8` the color channels also swap, red with blue.
 
 Follows Audacity's Reverse. Version: 2.
 
@@ -199,7 +199,7 @@ glitchrx --backwards hits=10,len=3rows photo.jpg
 
 Rotate each window forward by `by`; what falls off the end wraps to the start.
 
-A fraction of a row slides a band of the picture sideways. `phase` adds bytes to the distance, which moves the colour channels out of step (red into green, green into blue). Edits move whole samples, so with multi-byte encodings the distance is rounded down to a whole sample.
+A fraction of a row slides a band of the picture sideways. `phase` adds bytes to the distance, which moves the color channels out of step (red into green, green into blue). Edits move whole samples, so with multi-byte encodings the distance is rounded down to a whole sample.
 
 Follows Audacity's cut and paste. Version: 2.
 
@@ -208,7 +208,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `by` | `0.25rows` | distance (rows, px, % or bytes) |
-| `phase` | `1` | extra bytes on top of the distance: 0 keeps colours, 1 or 2 rotates them |
+| `phase` | `1` | extra bytes on top of the distance: 0 keeps colors, 1 or 2 rotates them |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
 | `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
 | `len` | `3%` | length of each window (%, rows, px or bytes); unused when hits=0 |
@@ -352,7 +352,7 @@ glitchrx --distort curve=fold,drive=18 photo.jpg
 
 Play each window faster or slower, wrapping around to keep its length: shears and stretches.
 
-Output sample `i` reads the input at `i * factor`, between samples by linear interpolation, wrapping back to the start of the window. Faster than 1 squeezes the window's rows and repeats it, and since a squeezed row no longer lines up with the picture's rows, everything leans into a diagonal shear. Slower than 1 stretches the start of the window across all of it. With `step=pixel` (the default) whole pixels are resampled, so colours hold. `step=sample` resamples each sample like Audacity, which drifts across the R, G and B bytes and blends them into grey stripes.
+Output sample `i` reads the input at `i * factor`, between samples by linear interpolation, wrapping back to the start of the window. Faster than 1 squeezes the window's rows and repeats it, and since a squeezed row no longer lines up with the picture's rows, everything leans into a diagonal shear. Slower than 1 stretches the start of the window across all of it. With `step=pixel` (the default) whole pixels are resampled, so colors hold. `step=sample` resamples each sample like Audacity, which drifts across the R, G and B bytes and blends them into grey stripes.
 
 Follows Audacity's Change Speed. Version: 2.
 
@@ -361,7 +361,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `factor` | `1.5` | playback speed; above 1 squeezes and repeats, below 1 stretches |
-| `step` | `pixel` | resample whole pixels (colours hold) or single samples (grey stripes) |
+| `step` | `pixel` | resample whole pixels (colors hold) or single samples (grey stripes) |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
 | `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
 | `len` | `8%` | length of each window (%, rows, px or bytes); unused when hits=0 |
@@ -430,7 +430,7 @@ glitchrx --recipe pulled.toml photo.jpg
 
 Set the black point, white point and midtone gamma.
 
-Input values at or below `black` become `out_black`, at or above `white` become `out_white`, and the range between is stretched to fit. `gamma` bends the middle: above 1 lightens the midtones, below 1 darkens them. `channel` limits it to one colour, which shifts the colour balance.
+Input values at or below `black` become `out_black`, at or above `white` become `out_white`, and the range between is stretched to fit. `gamma` bends the middle: above 1 lightens the midtones, below 1 darkens them. `channel` limits it to one color, which shifts the color balance.
 
 Version: 2.
 
@@ -440,7 +440,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
-| `channel` | `rgb` | which colours it changes: all three, or one |
+| `channel` | `rgb` | which colors it changes: all three, or one |
 | `black` | `0` | input black point: this value and below become out_black |
 | `white` | `255` | input white point: this value and above become out_white |
 | `gamma` | `1` | midtones: above 1 lighter, below 1 darker |
@@ -460,7 +460,7 @@ glitchrx --levels black=20,white=230,gamma=1.2 photo.jpg
 
 Reshape the tones with a curve through a few points.
 
-`points` lists `IN:OUT` pairs from 0 to 255, inputs rising, joined by `/`. The default `0:0/255:255` changes nothing; `0:0/64:52/192:204/255:255` is a gentle S that adds contrast, and `0:255/255:0` is a negative. The curve passes smoothly through every point without overshooting. `channel` limits it to one colour.
+`points` lists `IN:OUT` pairs from 0 to 255, inputs rising, joined by `/`. The default `0:0/255:255` changes nothing; `0:0/64:52/192:204/255:255` is a gentle S that adds contrast, and `0:255/255:0` is a negative. The curve passes smoothly through every point without overshooting. `channel` limits it to one color.
 
 Version: 2.
 
@@ -470,7 +470,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
-| `channel` | `rgb` | which colours it changes: all three, or one |
+| `channel` | `rgb` | which colors it changes: all three, or one |
 | `points` | `0:0/255:255` | IN:OUT pairs, 0 to 255, inputs rising, joined by / |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
 | `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
@@ -486,7 +486,7 @@ glitchrx --curves points=0:20/128:150/255:235,channel=blue photo.jpg
 
 Turn the hues, and change saturation and lightness.
 
-`range` limits it to one family of colours (`reds`, `yellows`, ...), fading softly into the neighbouring ones; greys are left alone. `hue` turns every colour round the colour wheel, in degrees (120 makes red green, green blue and blue red). `saturation` from -100 (grey) to 100 (twice as vivid, clipping at full). `lightness` from -100 (black) to 100 (white). Greys stay grey under hue and saturation.
+`range` limits it to one family of colors (`reds`, `yellows`, ...), fading softly into the neighbouring ones; greys are left alone. `hue` turns every color round the color wheel, in degrees (120 makes red green, green blue and blue red). `saturation` from -100 (grey) to 100 (twice as vivid, clipping at full). `lightness` from -100 (black) to 100 (white). Greys stay grey under hue and saturation.
 
 Version: 2.
 
@@ -496,8 +496,8 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
-| `range` | `all` | which colours change: all, or families joined by + (reds+blues) |
-| `hue` | `0` | turn the colours round the wheel, in degrees |
+| `range` | `all` | which colors change: all, or families joined by + (reds+blues) |
+| `hue` | `0` | turn the colors round the wheel, in degrees |
 | `saturation` | `0` | -100 grey, 0 unchanged, 100 twice as vivid |
 | `lightness` | `0` | -100 black, 0 unchanged, 100 white |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
@@ -514,7 +514,7 @@ glitchrx --hsl hue=40,saturation=-50 photo.jpg
 
 Tint the shadows, midtones or highlights.
 
-Pick the `tones`, then push them towards red or cyan, green or magenta, blue or yellow (-100 to 100; at 100 a full-weight pixel moves by about 100 of 255). Add a step for each range you want to tint: warm highlights and cool shadows are two steps. `luminosity=keep` restores each pixel's brightness so only the colour changes.
+Pick the `tones`, then push them towards red or cyan, green or magenta, blue or yellow (-100 to 100; at 100 a full-weight pixel moves by about 100 of 255). Add a step for each range you want to tint: warm highlights and cool shadows are two steps. `luminosity=keep` restores each pixel's brightness so only the color changes.
 
 Version: 2.
 
@@ -528,7 +528,7 @@ The seed only picks where hits land, so it has no effect with `hits=0`.
 | `red` | `0` | towards red; below 0 towards cyan |
 | `green` | `0` | towards green; below 0 towards magenta |
 | `blue` | `0` | towards blue; below 0 towards yellow |
-| `luminosity` | `keep` | keep each pixel's brightness, so only the colour changes |
+| `luminosity` | `keep` | keep each pixel's brightness, so only the color changes |
 | `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
 | `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
 | `len` | `10%` | length of each window (%, rows, px or bytes); unused when hits=0 |

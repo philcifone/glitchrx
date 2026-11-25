@@ -23,7 +23,7 @@ pub static INFO: EffectInfo = EffectInfo {
               the window's rows and repeats it, and since a squeezed row no longer lines up \
               with the picture's rows, everything leans into a diagonal shear. Slower than 1 \
               stretches the start of the window across all of it. With `step=pixel` (the \
-              default) whole pixels are resampled, so colours hold. `step=sample` resamples \
+              default) whole pixels are resampled, so colors hold. `step=sample` resamples \
               each sample like Audacity, which drifts across the R, G and B bytes and blends \
               them into grey stripes.",
     params: &[
@@ -40,7 +40,7 @@ pub static INFO: EffectInfo = EffectInfo {
             name: "step",
             kind: Kind::Choice(&["pixel", "sample"]),
             default: "pixel",
-            help: "resample whole pixels (colours hold) or single samples (grey stripes)",
+            help: "resample whole pixels (colors hold) or single samples (grey stripes)",
         },
     ],
     placement: PlacementDefaults {
@@ -139,7 +139,7 @@ mod tests {
     }
 
     #[test]
-    fn pixel_step_keeps_colours_together() {
+    fn pixel_step_keeps_colors_together() {
         // Two pixels per row: red, green, blue, white. Double speed takes
         // every other pixel, whole: red, blue, red, blue.
         let (r, g, b, wh) = ([255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 255]);

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Write web/public/icon.svg: an eclipse sliced into scanlines, some slid
-sideways (the shift effect) with a green colour fringe. Edit the numbers
+sideways (the shift effect) with a green color fringe. Edit the numbers
 here, then run scripts/icons.sh to render the PNGs."""
 
 from pathlib import Path

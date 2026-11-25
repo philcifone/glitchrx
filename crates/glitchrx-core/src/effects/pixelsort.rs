@@ -320,7 +320,7 @@ mod tests {
     }
 
     #[test]
-    fn hue_key_orders_by_colour() {
+    fn hue_key_orders_by_color() {
         // Blue (hue 4), red (0), green (2), all bright enough to sort.
         let e = make(&INFO, "key=hue,order=ascending,low=0");
         let mut b = vec![0, 0, 255, 255, 0, 0, 0, 255, 0];

@@ -61,7 +61,7 @@ impl Encoding {
     /// One-line description for help text.
     pub fn describe(self) -> &'static str {
         match self {
-            Encoding::U8 => "unsigned 8-bit: clean ghosts, colours rotate",
+            Encoding::U8 => "unsigned 8-bit: clean ghosts, colors rotate",
             Encoding::S8 => "signed 8-bit: clips at mid-brightness, inverts highlights",
             Encoding::S16Le | Encoding::S16Be => "signed 16-bit: ghosts under rainbow grain",
             Encoding::S24Le | Encoding::S24Be => "signed 24-bit: one sample per pixel",

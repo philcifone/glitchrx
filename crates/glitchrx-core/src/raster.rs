@@ -145,7 +145,7 @@ impl Raster {
     }
 
     /// Enlarge to exactly `ow` x `oh` (each no smaller than the raster) by
-    /// repeating pixels (nearest neighbour): hard edges, no new colours.
+    /// repeating pixels (nearest neighbour): hard edges, no new colors.
     /// Integer arithmetic only, so it is the same everywhere.
     pub fn enlarge(&self, ow: usize, oh: usize) -> Raster {
         let (ow, oh) = (ow.max(self.width), oh.max(self.height));

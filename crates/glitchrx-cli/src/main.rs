@@ -370,7 +370,7 @@ fn process(cli: &Cli, base: Option<&(Recipe, Option<u64>)>, job: &Job) -> Result
         && !cli.quiet
     {
         eprintln!(
-            "glitchrx: {}: AVIF cannot carry this photo's colour profile; colours may shift (TIFF, PNG, JPEG and WebP keep it)",
+            "glitchrx: {}: AVIF cannot carry this photo's color profile; colors may shift (TIFF, PNG, JPEG and WebP keep it)",
             input.display()
         );
     }
@@ -494,10 +494,10 @@ fn print_photo(bytes: &[u8]) -> Result<(), Fail> {
     println!("  orientation  {} ({turn})", img.orientation);
     match &img.icc {
         Some(p) => println!(
-            "  colour       ICC profile, {} (kept in the output)",
+            "  color       ICC profile, {} (kept in the output)",
             human_size(p.len())
         ),
-        None => println!("  colour       no ICC profile (sRGB assumed)"),
+        None => println!("  color       no ICC profile (sRGB assumed)"),
     }
     println!("  raw data     {} as samples", human_size(r.bytes.len()));
     Ok(())

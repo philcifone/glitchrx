@@ -41,7 +41,7 @@ Good news for privacy, already true:
 - Uploaded photos live only in memory. Nothing is written to disk unless
   someone uses the save endpoints above, and they are switched off in the
   public mode described below.
-- Exports keep the colour profile but drop EXIF, so no GPS position,
+- Exports keep the color profile but drop EXIF, so no GPS position,
   camera serial or date leaves with the picture.
 - No network calls at runtime, no analytics, no external fonts or scripts.
 

@@ -18,7 +18,7 @@ pub static INFO: EffectInfo = EffectInfo {
     audacity: "cut and paste",
     summary: "Rotate each window forward by `by`; what falls off the end wraps to the start.",
     details: "A fraction of a row slides a band of the picture sideways. `phase` adds bytes \
-              to the distance, which moves the colour channels out of step (red into green, \
+              to the distance, which moves the color channels out of step (red into green, \
               green into blue). Edits move whole samples, so with multi-byte encodings the \
               distance is rounded down to a whole sample.",
     params: &[

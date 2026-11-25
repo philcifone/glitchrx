@@ -1,6 +1,6 @@
 <script lang="ts">
   // A `set` parameter (D-57): any of a few options, as a row of toggles.
-  // Colour names (hsl's `range`) show as colour dots. Tap one to turn it
+  // Color names (hsl's `range`) show as color dots. Tap one to turn it
   // on, again to turn it off; several on work together. None on is `all`.
   import Check from '@lucide/svelte/icons/check';
 
@@ -18,7 +18,7 @@
     onchange: (value: string) => void;
   } = $props();
 
-  /** Muted Gruvbox, one per colour range. */
+  /** Muted Gruvbox, one per color range. */
   const SWATCH: Record<string, string> = {
     reds: '#cc241d',
     yellows: '#d79921',
@@ -41,26 +41,26 @@
   const label = (o: string) => o.charAt(0).toUpperCase() + o.slice(1);
 </script>
 
-<div {id} class="set" role="group" aria-label="Colours">
+<div {id} class="set" role="group" aria-label="Colors">
   {#each options as o (o)}
-    {@const colour = SWATCH[o]}
+    {@const color = SWATCH[o]}
     <button
       class="opt"
-      class:dot={!!colour}
+      class:dot={!!color}
       aria-pressed={on.has(o)}
       onclick={() => toggle(o)}
       title={label(o)}
       aria-label={label(o)}
-      style:--swatch={colour}
+      style:--swatch={color}
     >
-      {#if colour}
+      {#if color}
         {#if on.has(o)}<Check size={14} strokeWidth={2.5} />{/if}
       {:else}
         {o}
       {/if}
     </button>
   {/each}
-  <span class="what dim">{on.size ? options.filter((o) => on.has(o)).map(label).join(', ') : 'All colours'}</span>
+  <span class="what dim">{on.size ? options.filter((o) => on.has(o)).map(label).join(', ') : 'All colors'}</span>
 </div>
 
 <style>
@@ -83,7 +83,7 @@
     color: #fbf1c7;
     display: grid;
     place-items: center;
-    /* Off: a quieter dot. On: full colour with a ring. */
+    /* Off: a quieter dot. On: full color with a ring. */
     opacity: 0.45;
     transition:
       opacity 0.12s,

@@ -1,6 +1,6 @@
 //! Shared parts of the adjustments (the `adjust` group, SPEC D-49): the
 //! photo tools that are not glitches at all. Levels, curves, hue and
-//! saturation, and colour balance work on whole RGB pixels like pixel
+//! saturation, and color balance work on whole RGB pixels like pixel
 //! sorting, and are ordinary steps, so masks, opacity and placement apply
 //! to them as to any other step.
 //!
@@ -12,12 +12,12 @@ use super::Window;
 use crate::error::{Error, Result};
 use crate::params::{Kind, ParamSpec, Params};
 
-/// Which colours an adjustment changes.
+/// Which colors an adjustment changes.
 pub(crate) const CHANNEL: ParamSpec = ParamSpec {
     name: "channel",
     kind: Kind::Choice(&["rgb", "red", "green", "blue"]),
     default: "rgb",
-    help: "which colours it changes: all three, or one",
+    help: "which colors it changes: all three, or one",
 };
 
 /// The channels `channel` selects, as R, G, B.

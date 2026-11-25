@@ -333,9 +333,9 @@ pub struct DocDto {
     /// The EXIF orientation that was applied (1 = none).
     pub orientation: u8,
     pub has_icc: bool,
-    /// The colour profile's name, when it has one.
+    /// The color profile's name, when it has one.
     pub profile: Option<String>,
-    /// AVIF export keeps these colours (no profile, sRGB or Display P3).
+    /// AVIF export keeps these colors (no profile, sRGB or Display P3).
     pub avif_keeps_profile: bool,
     pub file_len: usize,
     /// Raw RGB bytes the effects work on.

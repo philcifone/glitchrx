@@ -4,8 +4,8 @@ Shared terms for glitcharaxia, so we can name things precisely. Grouped by topic
 
 ## Pixel engine (SPEC v0.3)
 
-- **A-law / U-law.** Two telephone audio encodings that squeeze a 16-bit sample into one byte along a curve. Reading pixel bytes this way and back gives posterized, neon colour blocks.
-- **Channel phase.** How many extra bytes (0, 1 or 2) a delay adds beyond whole pixels. Phase 0 keeps a ghost's colours; 1 or 2 rotates red into green into blue.
+- **A-law / U-law.** Two telephone audio encodings that squeeze a 16-bit sample into one byte along a curve. Reading pixel bytes this way and back gives posterized, neon color blocks.
+- **Channel phase.** How many extra bytes (0, 1 or 2) a delay adds beyond whole pixels. Phase 0 keeps a ghost's colors; 1 or 2 rotates red into green into blue.
 - **Channels (mono / stereo / RGB).** With 2 or 3 channels, samples alternate between them, and effects treat each channel separately, as Audacity does. With `u8` and 3 channels, the channels are exactly red, green and blue ("RGB" in the GUI).
 - **Clipping.** Clamping samples to the encoding's range after an effect. It loses information, which is why effects can no longer be reversed exactly, and it gives the bright, saturated look.
 - **Databending.** Opening a file as the wrong kind of data (here: an image as audio), editing it with that kind of tool, and opening it as an image again.
@@ -30,7 +30,7 @@ Shared terms for glitcharaxia, so we can name things precisely. Grouped by topic
 Background, mostly from the archived JPEG byte engine (`archive/jpeg-bytes`). JPEG is still read and written as a file format.
 
 - **EXIF orientation.** A tag saying how a camera photo must be turned to display upright (values 1-8). The decoder applies it, so effects see upright rows.
-- **ICC profile.** The colour profile embedded in a photo. It is carried from input to output so colours match in Photoshop.
+- **ICC profile.** The color profile embedded in a photo. It is carried from input to output so colors match in Photoshop.
 
 - **Byte stuffing.** Inside scan data, a real `0xFF` byte is always written as `FF 00`, so it cannot be mistaken for a marker. "De-stuffing" removes the `00`s. "Re-stuffing" puts them back.
 - **DC drift.** Each block's average brightness (its DC value) is stored as a difference from the previous block. Corrupt one, and every later block in that component is shifted. This causes the color and brightness bands that run to the end of the image.
@@ -56,13 +56,13 @@ Background, mostly from the archived JPEG byte engine (`archive/jpeg-bytes`). JP
 - **Backwards.** The effect that reverses the order of samples inside each window, like playing audio in reverse (Audacity's Reverse). The name dates from when `--reverse` meant undo.
 - **Chain.** Several effects applied in order. On the CLI, the order of the effect flags is the chain order.
 - **Contact sheet.** A grid image showing one effect at a range of parameter values, side by side. Used to tune defaults.
-- **Effect.** One operation, such as echo or shuffle. Most follow one of Audacity's and work on the raster's raw bytes as samples. **Pixel effects** (pixelsort) work on whole pixels as colours, in rows and columns, instead.
+- **Effect.** One operation, such as echo or shuffle. Most follow one of Audacity's and work on the raster's raw bytes as samples. **Pixel effects** (pixelsort) work on whole pixels as colors, in rows and columns, instead.
 - **Adjustment.** A photo tool rather than a glitch (levels, curves, hsl, balance), in the effect group `adjust`. Adjustments are ordinary steps, so masks, opacity and placement apply.
 - **Levels.** Black point (input values at or below it become black), white point, and **gamma**, which bends the midtones lighter (above 1) or darker.
 - **Histogram.** How many pixels have each value, 0 to 255, drawn as a mountain range behind a curve: the picture as it reaches the step.
 - **Curve.** A tone curve: points `IN:OUT` mapping input values to output values, joined by a **monotone cubic**, a smooth curve that never overshoots between its points (Fritsch-Carlson).
-- **Colour range.** One family of colours on the colour wheel (reds, yellows, greens, cyans, blues, magentas) that an hsl step can be limited to, alone or several together (tapped on as colour dots); neighbouring ranges fade into each other, and greys belong to none.
-- **Colour balance.** Tinting one tone range (shadows, midtones or highlights) towards red or cyan, green or magenta, blue or yellow; with luminosity kept, only the colour changes.
+- **Color range.** One family of colors on the color wheel (reds, yellows, greens, cyans, blues, magentas) that an hsl step can be limited to, alone or several together (tapped on as color dots); neighbouring ranges fade into each other, and greys belong to none.
+- **Color balance.** Tinting one tone range (shadows, midtones or highlights) towards red or cyan, green or magenta, blue or yellow; with luminosity kept, only the color changes.
 - **Pixel sorting.** Reordering pixels along a column or row by a key (brightness, hue, saturation). The classic version (Kim Asendorf's ASDF sort) only sorts **runs**: stretches of pixels whose brightness lies inside a band (`low` to `high`). Pixels outside the band stay put and break the runs, which is why shadows keep the picture recognisable while bright areas melt into streaks.
 - **Luma (Rec. 709).** Perceived brightness from R, G and B: 0.2126 R + 0.7152 G + 0.0722 B. Pixelsort uses it scaled to integers, so its comparisons are exact everywhere.
 - **Golden test.** A test that checks the output's hash matches a stored value. It proves that the same input, recipe and seed always give the same bytes.
@@ -104,7 +104,7 @@ Background, mostly from the archived JPEG byte engine (`archive/jpeg-bytes`). JP
 - **Remembered picture.** An exact result the browser keeps, keyed by the recipe that made it, so going back to that recipe (a step switched off and on) shows it without rendering.
 - **Midtone handle.** The grey handle of the levels editor; where it sits in the stretch between black and white sets `gamma`.
 - **Upgrade.** How a step saved with an older version of its effect is brought up to date when its only change was a moved default: the old value is written in, so the picture stays the same.
-- **Set (parameter).** Any of a fixed list of words, joined by `+` (`reds+blues`), or `all`; shown as toggles, such as hsl's colour dots.
+- **Set (parameter).** Any of a fixed list of words, joined by `+` (`reds+blues`), or `all`; shown as toggles, such as hsl's color dots.
 - **Seed.** The number that drives a step's randomness: where its hits land, and anything else the effect randomizes. The same seed always gives the same result on any machine, which is what makes recipes replay. Any whole number from 0 to 2^64 - 1; the dice picks one under a million so it is easy to type. No seed is stronger than another and neighbours are unrelated (41 and 42 differ as much as 41 and 900,000): think of it as a variation number. With `hits=0` nothing is random, so the dice is greyed out. In the GUI it sits at the end of Placement.
 - **Target.** Choosing a byte region by image position, for example "rows 40-60%" (Phase 3). It is approximate, because damage bleeds downward.
 - **Bottom sheet.** On a phone, the step panel sits under the preview and can be pulled taller with its handle. A common mobile pattern.
@@ -147,7 +147,7 @@ Terms from Phase 1 and 2a, when effects edited the compressed data inside a JPEG
 - **Comb filter.** An echo fed back into itself at a fixed delay. Several in series make a cheap reverb.
 - **Waveshaping / fold.** Passing each sample through a fixed curve (`distort`). Hard clipping flattens at full scale, soft clipping rounds off before it, and folding reflects anything past full scale back in, so highlights turn into stacked bands.
 - **Resampling.** Reading a signal at a different rate, interpolating between samples (`speed`).
-- **Endianness.** The order in which a multi-byte number is stored. Big endian puts the most significant byte first; little endian puts it last. It only matters for 16- and 24-bit encodings, where it decides which colour byte is the loud part.
+- **Endianness.** The order in which a multi-byte number is stored. Big endian puts the most significant byte first; little endian puts it last. It only matters for 16- and 24-bit encodings, where it decides which color byte is the loud part.
 - **Feed-forward vs feedback.** A feed-forward echo adds delayed copies of the *input*. A feedback echo adds delayed copies of its own *output*, so the echoes repeat and decay.
 - **Basic IEEE operations.** `+ - * /` and square root on floating-point numbers are exactly specified, so they give identical bits on every machine; library functions like `exp` and `sin` are not. Effects use only the former (`dsp.rs` has its own `exp`).
 - **Modular (wraparound) arithmetic.** Byte values wrap at 256, so 250 + 10 = 4. The archived engine used it to make effects exactly reversible.
@@ -164,8 +164,8 @@ Terms from Phase 1 and 2a, when effects edited the compressed data inside a JPEG
 - **just.** A small command runner, like `make` but simpler. The recipes live in `justfile`.
 - **libjpeg-turbo / TurboJPEG.** The JPEG library used by browsers and most viewers. TurboJPEG is its simple API. It is our JPEG decoder and encoder.
 - **WebP, libwebp.** Google's image format, lossy or lossless, and its reference library, built into glitchrx from source.
-- **AVIF, rav1e, ravif.** An image format built on the AV1 video codec; rav1e is a pure-Rust AV1 encoder and ravif wraps it for still images. Slow, and its **speed** setting (1-10) trades encoding time for file size. It stores colour as codes (primaries, transfer), not as an ICC profile.
-- **Display P3.** The wider colour space of Apple devices and most recent phones. Photos from them carry a Display P3 profile.
+- **AVIF, rav1e, ravif.** An image format built on the AV1 video codec; rav1e is a pure-Rust AV1 encoder and ravif wraps it for still images. Slow, and its **speed** setting (1-10) trades encoding time for file size. It stores color as codes (primaries, transfer), not as an ICC profile.
+- **Display P3.** The wider color space of Apple devices and most recent phones. Photos from them carry a Display P3 profile.
 - **png / tiff crates.** Pure-Rust PNG and TIFF readers and writers.
 - **proptest.** Property-based testing: it throws hundreds of random inputs at a rule (such as "an effect writes only inside its windows") and shrinks any failure to the smallest example.
 - **Svelte.** The frontend framework for the web GUI (Phase 2). It compiles to small plain JavaScript.

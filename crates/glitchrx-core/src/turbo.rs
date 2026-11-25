@@ -88,7 +88,7 @@ impl Drop for Handle {
     }
 }
 
-/// A decoded JPEG: RGB pixels plus its embedded colour profile, if any.
+/// A decoded JPEG: RGB pixels plus its embedded color profile, if any.
 #[derive(Debug, Clone)]
 pub struct Decoded {
     pub width: u32,
@@ -164,7 +164,7 @@ pub fn decode(jpeg: &[u8], scale: Scale) -> Result<Decoded, String> {
 
 /// Naive CMYK to RGB. libjpeg delivers CMYK as stored, and nearly every
 /// CMYK JPEG comes from Adobe software, which stores the values inverted;
-/// for those `r = c * k / 255`. (Colour-managed conversion would need the
+/// for those `r = c * k / 255`. (Color-managed conversion would need the
 /// file's CMYK profile; this is for getting usable pixels to bend.)
 fn cmyk_to_rgb(px: &[u8]) -> Vec<u8> {
     px.chunks_exact(4)

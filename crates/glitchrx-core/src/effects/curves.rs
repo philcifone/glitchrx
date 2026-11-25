@@ -27,7 +27,7 @@ pub static INFO: EffectInfo = EffectInfo {
     details: "`points` lists `IN:OUT` pairs from 0 to 255, inputs rising, joined by `/`. \
               The default `0:0/255:255` changes nothing; `0:0/64:52/192:204/255:255` \
               is a gentle S that adds contrast, and `0:255/255:0` is a negative. The curve passes smoothly \
-              through every point without overshooting. `channel` limits it to one colour.",
+              through every point without overshooting. `channel` limits it to one color.",
     params: &[
         CHANNEL,
         ParamSpec {

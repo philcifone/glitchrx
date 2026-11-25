@@ -819,7 +819,7 @@ struct MaskRequest {
     step: usize,
     max_w: u32,
     max_h: u32,
-    /// Overlay colour; the GUI passes its theme's.
+    /// Overlay color; the GUI passes its theme's.
     #[serde(default = "mask_tint")]
     tint: [u8; 3],
 }
@@ -1032,7 +1032,7 @@ fn output_bytes(
     Ok(Project::new(recipe.clone(), &doc.name, &doc.file, Some(preview))?.to_bytes()?)
 }
 
-/// Bend the full image and encode it, keeping the colour profile.
+/// Bend the full image and encode it, keeping the color profile.
 fn export_bytes(
     doc: &Doc,
     recipe: &Recipe,

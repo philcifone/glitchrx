@@ -132,7 +132,7 @@ fn parse_channels(s: &str) -> Result<usize> {
         "2" => Ok(2),
         "3" => Ok(3),
         other => Err(Error::Recipe(format!(
-            "channels must be 1 (mono), 2 (stereo) or 3 (one per colour), not `{other}`"
+            "channels must be 1 (mono), 2 (stereo) or 3 (one per color), not `{other}`"
         ))),
     }
 }

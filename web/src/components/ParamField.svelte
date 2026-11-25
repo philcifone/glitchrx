@@ -2,7 +2,7 @@
   // Editor for one effect parameter, chosen by its kind:
   //   int / float  slider (log scale for wide ranges) + exact number
   //   choice       dropdown
-  //   set          a row of toggles (colour dots for colour ranges)
+  //   set          a row of toggles (color dots for color ranges)
   //   size         text (rows, px, % or bytes) + log slider for rows and %
   //   region       one two-handle slider while both ends are percents, + text;
   //                dragging draws the band on the preview
