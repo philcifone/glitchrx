@@ -5,6 +5,9 @@ circle, later perhaps the general public. Written 2026-11-23 against the
 code as it is on `main`; the "must build first" lists are work that has not
 been done yet.
 
+For running it for yourself, in a container of your own with your photo
+library mounted, see [section 8](#8-personal-use-your-own-container-from-github).
+
 ## 1. Where it stands today
 
 `glitchrx serve` is built for one trusted person on their own network:
@@ -232,3 +235,163 @@ Stage 2 (public), after building public mode:
 - [ ] Terms and privacy page
 - [ ] Load test: several phones at once, a 50-megapixel photo, a
       decompression bomb (refused)
+
+## 8. Personal use: your own container, from GitHub
+
+Phil's setup (2026-11-24): an Arch Linux LXC container that clones the
+code from GitHub, builds it, and runs it as a service for himself over the
+LAN and WireGuard, with his photography dataset and a glitch dataset
+bind-mounted from ZFS. Unlike section 2, this container holds personal
+files on purpose; that is fine because only you reach it. Never put it
+behind a tunnel or a forwarded port as it is.
+
+### 8.1 GitHub
+
+Everything so far is committed locally only. Pushing `main` sends its whole
+history (every branch was merged into it); the old branch names can stay
+local.
+
+1. On GitHub, create an **empty** repository: no README, licence or
+   `.gitignore` (the project has its own).
+2. On the development machine:
+
+       git remote add origin git@github.com:USER/glitcharaxia.git
+       git push -u origin main
+       git push origin archive/jpeg-bytes     # the README points old recipes here
+
+3. In the container, clone it:
+   - public repository: `git clone https://github.com/USER/glitcharaxia.git`
+   - private repository: make an SSH key in the container
+     (`ssh-keygen -t ed25519`), add the public half to the repository as a
+     **read-only deploy key** (Settings, Deploy keys), and clone with the
+     `git@github.com:` address.
+
+`samples/` (personal photos) is in `.gitignore` and has never been
+committed; nothing in the history needs removing before a push.
+
+### 8.2 Packages (Arch)
+
+    sudo pacman -S --needed base-devel git rustup nodejs npm libjpeg-turbo just
+    rustup default stable
+
+Building needs about 2 GB of memory and a few minutes on four cores;
+running needs only `libjpeg-turbo`. Give the container 4 GB of RAM and a
+few cores.
+
+### 8.3 Folders
+
+The folder pickers in Settings and Save As only reach folders **inside the
+home folder of the user running the server**, and refuse symlinks that lead
+out of it. So mount both datasets inside that home, under one parent,
+rather than at `/mnt` with a symlink:
+
+    /home/phil/media/photography    bind mount, read-only
+    /home/phil/media/glitch         bind mount, read-write
+
+Then start the server with `--root /home/phil/media` (Open browses both)
+and set the export folder in Settings to `~/media/glitch`. Mounting the
+photography dataset read-only is a second guard on top of glitchRx never
+writing a photo; the cost is that "Save next to original" cannot write
+beside those photos, so save into the glitch folder (Save As, or the
+export folder).
+
+On the host, plain LXC (`/var/lib/lxc/NAME/config`):
+
+    lxc.mount.entry = /tank/photography home/phil/media/photography none bind,ro,create=dir 0 0
+    lxc.mount.entry = /tank/glitch home/phil/media/glitch none bind,create=dir 0 0
+
+Proxmox:
+
+    pct set ID -mp0 /tank/photography,mp=/home/phil/media/photography,ro=1
+    pct set ID -mp1 /tank/glitch,mp=/home/phil/media/glitch
+
+(`/tank/...` stands for your dataset's mountpoint.)
+
+**User ids in an unprivileged container.** The container's uid 1000 is
+uid 101000 on the host, so files your host user (uid 1000) owns look like
+`nobody` inside, and the container cannot write to the glitch dataset. Two
+ways out:
+
+- Simple: on the host, `chown -R 101000:101000 /tank/glitch`. The host user
+  then needs group or ACL access to read the results.
+- Cleaner: map uid and gid 1000 straight through. In the container's config:
+
+      lxc.idmap = u 0 100000 1000
+      lxc.idmap = g 0 100000 1000
+      lxc.idmap = u 1000 1000 1
+      lxc.idmap = g 1000 1000 1
+      lxc.idmap = u 1001 101001 64535
+      lxc.idmap = g 1001 101001 64535
+
+  and add `root:1000:1` to both `/etc/subuid` and `/etc/subgid` on the
+  host. The container's user `phil` must have uid 1000. Restart the
+  container afterwards.
+
+### 8.4 Build and run as a service
+
+    cd ~/glitcharaxia
+    just build-all
+
+A token keeps anyone else on the network out. Keep it in a file rather
+than the unit, so the unit can be shared:
+
+    mkdir -p ~/.config/glitchrx
+    printf 'GLITCHRX_TOKEN=%s\n' "$(openssl rand -hex 16)" > ~/.config/glitchrx/env
+    chmod 600 ~/.config/glitchrx/env
+
+`/etc/systemd/system/glitchrx.service`:
+
+    [Unit]
+    Description=glitchRx
+    After=network-online.target
+    Wants=network-online.target
+
+    [Service]
+    User=phil
+    EnvironmentFile=/home/phil/.config/glitchrx/env
+    ExecStart=/home/phil/glitcharaxia/target/release/glitchrx serve --host 0.0.0.0 --port 7878 --token=${GLITCHRX_TOKEN} --root /home/phil/media
+    Restart=on-failure
+    NoNewPrivileges=yes
+    PrivateTmp=yes
+    ProtectSystem=full
+
+    [Install]
+    WantedBy=multi-user.target
+
+Then `sudo systemctl daemon-reload && sudo systemctl enable --now glitchrx`.
+`journalctl -u glitchrx` shows the URLs it printed; the token is the one in
+the env file. Open `http://CONTAINER-IP:7878/?token=...` once on each
+device (and once in the home-screen app); a cookie remembers it.
+
+Reach it on the LAN or over WireGuard only: no port forwarding, no tunnel.
+
+### 8.5 Updating
+
+`git pull` alone does not update the running program: the GUI is built into
+the binary. After a pull, build and restart:
+
+    cd ~/glitcharaxia && git pull --ff-only && just build-all && sudo systemctl restart glitchrx
+
+Recipes and projects from older versions always open in newer ones. If a
+build fails, the old binary keeps running until the restart, so nothing is
+lost; fix the build (usually a newer Rust: `rustup update`) and run the
+line again.
+
+### 8.6 Backups
+
+- The glitch dataset: ZFS snapshots on the host, as for any dataset.
+- Presets and settings live in the container, in `~/.config/glitchrx`
+  (`presets/` and `config.toml`). Include the container's root in
+  snapshots or backups, or move presets onto the glitch dataset with
+  `--presets /home/phil/media/glitch/presets`.
+
+Checklist:
+
+- [ ] Empty repository on GitHub; `main` and the `archive/jpeg-bytes` tag pushed
+- [ ] Clone in the container (deploy key if private)
+- [ ] Packages, `just build-all`
+- [ ] Datasets mounted inside `/home/phil/media`, photography read-only
+- [ ] Glitch dataset writable from the container (chown or idmap)
+- [ ] Token file, service enabled, URL opened once per device
+- [ ] Export folder set to `~/media/glitch` in Settings
+- [ ] Snapshots for the glitch dataset and the container
