@@ -403,6 +403,13 @@
       grid-template-rows: 0px minmax(0, 100fr) minmax(var(--peek), 0fr) 0px;
     }
 
+    /* The sheet's rounded top overlaps the stage by its radius; the
+       preview stops above it, or a zoomed picture's bottom edge could
+       never be panned into view (Phil, 2026-11-25). */
+    .stage {
+      --under-sheet: var(--radius-lg);
+    }
+
     /* A bottom sheet: rounded top corners over the stage, with a grabber. */
     .sheet {
       border-left: none;

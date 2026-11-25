@@ -6,6 +6,14 @@ All notable changes to glitchRx. The format follows
 the middle number and a fix the last. Recipes and projects made by any
 earlier version always open in a later one.
 
+## [Unreleased]
+
+### Fixed
+
+- On a phone, a zoomed photo can be panned all the way to its bottom
+  edge. The step panel's rounded top used to hide the last 14 px, so a
+  mask could not reach it.
+
 ## [0.2.0] - 2026-11-25
 
 ### Added
