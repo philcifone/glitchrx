@@ -65,8 +65,8 @@ Distribution Node.js packages are sometimes old; if the GUI build complains, ins
 ### Build
 
 ```
-git clone <this repository's URL> glitcharaxia
-cd glitcharaxia
+git clone <this repository's URL> glitchrx
+cd glitchrx
 just build-all                       # the GUI, then the program with the GUI inside
 cp target/release/glitchrx ~/.local/bin/     # optional: put it on your PATH
 ```

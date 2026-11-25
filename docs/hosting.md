@@ -1,4 +1,4 @@
-# Hosting glitcharaxia for other people
+# Hosting glitchRx for other people
 
 How to put the web GUI where other people can use it: first a close
 circle, later perhaps the general public. Written 2026-11-23 against the
@@ -259,12 +259,12 @@ local.
    `.gitignore` (the project has its own).
 2. On the development machine:
 
-       git remote add origin git@github.com:USER/glitcharaxia.git
+       git remote add origin git@github.com:USER/glitchrx.git
        git push -u origin main
        git push origin archive/jpeg-bytes     # the README points old recipes here
 
 3. In the container, clone it:
-   - public repository: `git clone https://github.com/USER/glitcharaxia.git`
+   - public repository: `git clone https://github.com/USER/glitchrx.git`
    - private repository: make an SSH key in the container
      (`ssh-keygen -t ed25519`), add the public half to the repository as a
      **read-only deploy key** (Settings, Deploy keys), and clone with the
@@ -349,7 +349,7 @@ ways out:
 
 ### 8.4 Build and run as a service
 
-    cd ~/glitcharaxia
+    cd ~/glitchrx
     just build-all
 
 A token keeps anyone else on the network out. Keep it in a file rather
@@ -369,7 +369,7 @@ than the unit, so the unit can be shared:
     [Service]
     User=phil
     EnvironmentFile=/home/phil/.config/glitchrx/env
-    ExecStart=/home/phil/glitcharaxia/target/release/glitchrx serve --host 0.0.0.0 --port 7878 --token=${GLITCHRX_TOKEN} --root /home/phil/media
+    ExecStart=/home/phil/glitchrx/target/release/glitchrx serve --host 0.0.0.0 --port 7878 --token=${GLITCHRX_TOKEN} --root /home/phil/media
     Restart=on-failure
     NoNewPrivileges=yes
     PrivateTmp=yes
@@ -385,7 +385,7 @@ This is the unit for a personal container. Section 6's is stricter
 personal files; here the service runs as you and needs your home folder.
 `MemoryMax` makes systemd stop and restart the service, rather than the
 container running out of memory. If you cloned somewhere other than
-`~/glitcharaxia`, change the path in `ExecStart` (and in 8.5).
+`~/glitchrx`, change the path in `ExecStart` (and in 8.5).
 
 Then `sudo systemctl daemon-reload && sudo systemctl enable --now glitchrx`.
 `journalctl -u glitchrx` shows the URLs it printed; the token is the one in
@@ -399,7 +399,7 @@ Reach it on the LAN or over WireGuard only: no port forwarding, no tunnel.
 `git pull` alone does not update the running program: the GUI is built into
 the binary. After a pull, build and restart:
 
-    cd ~/glitcharaxia && git pull --ff-only && just build-all && sudo systemctl restart glitchrx
+    cd ~/glitchrx && git pull --ff-only && just build-all && sudo systemctl restart glitchrx
 
 Recipes and projects from older versions always open in newer ones. If a
 build fails, the old binary keeps running until the restart, so nothing is
