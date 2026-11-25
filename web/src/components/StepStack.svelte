@@ -6,6 +6,8 @@
   import Plus from '@lucide/svelte/icons/plus';
   import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
+  import Pencil from '@lucide/svelte/icons/pencil';
+  import { tip } from '../lib/hold';
   import { blocksOf } from '../lib/groups';
   import { tick } from 'svelte';
   import { app } from '../lib/app.svelte';
@@ -87,9 +89,26 @@
     {#if editing}
       <button class="plain strong" onclick={() => app.stopEditingSteps()} title="Back to the cards (or hold a step)">Done</button>
     {:else if app.recipe.steps.length}
-      <!-- Edit mode has no button of its own (Phil, 2026-11-24): a step is
-           held to edit the list, so say so here. -->
-      <span class="dim hint">Hold a step to edit the list</span>
+      <!-- Fold every card shut or open them all, and Edit mode, which
+           holding a step also starts (Phil, 2026-11-25). -->
+      <button
+        class="icon"
+        {@attach tip}
+        onclick={() => app.setAllCollapsed(!app.allCollapsed)}
+        title={app.allCollapsed ? 'Expand all steps' : 'Collapse all steps'}
+        aria-label={app.allCollapsed ? 'Expand all steps' : 'Collapse all steps'}
+      >
+        {#if app.allCollapsed}<ChevronDown size={20} strokeWidth={1.75} />{:else}<ChevronUp size={20} strokeWidth={1.75} />{/if}
+      </button>
+      <button
+        class="icon"
+        {@attach tip}
+        onclick={() => app.startEditingSteps()}
+        title="Edit the list: select, reorder, duplicate, remove (or hold a step)"
+        aria-label="Edit the list of steps"
+      >
+        <Pencil size={19} strokeWidth={1.75} />
+      </button>
     {/if}
   </div>
 
@@ -328,7 +347,7 @@
     }
   }
 
-  /* As tall with the hint as with Done, so nothing jumps between modes. */
+  /* As tall with the buttons as with Done, so nothing jumps between modes. */
   .head {
     display: flex;
     align-items: center;
@@ -343,11 +362,6 @@
 
   .strong {
     font-weight: 600;
-  }
-
-  .hint {
-    font-size: 0.8rem;
-    padding: 0 4px;
   }
 
   .steps {

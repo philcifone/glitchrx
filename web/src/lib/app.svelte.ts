@@ -290,6 +290,17 @@ export class App {
     if (this.collapsed[uid]) delete this.collapsed[uid];
     else this.collapsed[uid] = true;
   }
+
+  /** Every step's card is folded shut. */
+  get allCollapsed(): boolean {
+    const steps = this.recipe.steps;
+    return steps.length > 0 && steps.every((s) => this.collapsed[s.uid]);
+  }
+
+  /** Fold every card shut, or open them all. */
+  setAllCollapsed(shut: boolean): void {
+    this.collapsed = shut ? Object.fromEntries(this.recipe.steps.map((s) => [s.uid, true])) : {};
+  }
   /**
    * The mask component being edited (its index in the mask), or null.
    * Its handles show on the photo, and the photo's gestures act on it.
@@ -1622,7 +1633,9 @@ export class App {
     if (this.zoomed) this.toggleZoom();
     this.cropping = {
       rect: { ...(this.recipe.crop ?? { x: 0, y: 0, w: 1, h: 1 }) },
-      result: this.cropsResult,
+      // A new crop frames the result, the picture on screen (Phil,
+      // 2026-11-25); an existing one keeps its own choice.
+      result: this.recipe.crop ? this.cropsResult : true,
       photo: null,
       bent: null,
     };

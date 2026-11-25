@@ -132,7 +132,7 @@ Icon-only buttons show their name when you hold them on a phone (with a mouse, h
 - **Sliders** mark their default with a small tick and snap onto it; double tap a slider to go back to the default. Fields without a slider have a reset arrow.
 - **Shake** (the shuffle arrows at the top of a step's settings) rolls its settings at random, within the useful range; placement and encoding stay.
 - **Placement:** every effect starts on the whole picture. The **Bands** switch scatters it in seeded bands instead and shows `hits`, `len` and the seed. Dragging the region's two handles shades the preview outside the band. **Re-roll** (the dice beside the seed) picks a new seed, which moves where the bands land; it is greyed out when nothing is random.
-- **Edit mode:** hold a step's header to see every step on one line, with the one you held already selected (a green ring). Tap the circles to select more, then re-roll, duplicate or remove them together; drag the grip on the right to reorder. Hold a row (or tap Done) to go back. With nothing selected, the dice re-rolls every step.
+- **Collapse and Edit mode:** the arrow beside Steps folds every card shut or opens them all. The pencil (or holding a step's header) shows every step on one line; a held step starts out selected (a green ring). Tap the circles to select more, then re-roll, duplicate or remove them together; drag the grip on the right to reorder. Hold a row (or tap Done) to go back. With nothing selected, the dice re-rolls every step.
 
 ### Blend and masks
 
@@ -154,7 +154,7 @@ Presets (the bookmark) are your own saved recipes, kept by the server in `~/.con
 
 - **Compare:** press and hold the photo (or the `\` key) to see the untouched original. While masking or pulling, the photo is for drawing, so hold the compare button in the top bar instead.
 - **Zoom** with a pinch, ctrl + wheel or a trackpad pinch; double-tap, tap the magnifier or press Z for 100% and back. Zoomed in, drag (or scroll) to pan. Once the view holds still, what is on screen is cut from the full-resolution render, so it is sharp and exactly the export.
-- **Crop** with the button beside the zoom: free, or at the photo's own shape, 1:1, 4:5 or 16:9, turned with the portrait and landscape switch. **Crop the: Photo | Result** decides when it happens. *Photo* crops first and glitches what is left, so the glitch is made for the crop (and changes with it). *Result* glitches the whole photo and then crops, so you frame the glitch you already have without changing it. Masks and pulls stay on the same part of the photo either way.
+- **Crop** with the button beside the zoom: free, or at the photo's own shape, 1:1, 4:5 or 16:9, turned with the portrait and landscape switch. **Crop the: Photo | Result** decides when it happens; a new crop starts on Result. *Photo* crops first and glitches what is left, so the glitch is made for the crop (and changes with it). *Result* glitches the whole photo and then crops, so you frame the glitch you already have without changing it. Masks and pulls stay on the same part of the photo either way.
 - **Work size** (Full, 4K, 2K, 1K) runs the steps on a smaller copy: the glitch texture gets coarser and everything is faster. Export writes that size, or enlarges it back to the photo's size with hard pixel edges.
 - **Undo and redo** with the buttons, or Ctrl+Z and Ctrl+Shift+Z. History holds recipes, not images, so it costs almost nothing.
 
