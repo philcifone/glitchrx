@@ -19,6 +19,12 @@ Everything runs locally. No image is ever uploaded anywhere besides the server o
 
 It reads JPEG, PNG and TIFF photos and its own project files (`.glrx`), and writes TIFF (the default), PNG, JPEG, WebP and AVIF. There are 20 effects: 14 audio and data effects that read the pixels as sound, pixel sorting, a hand-drawn pull, and four photo adjustments.
 
+**One engine, three ways in.** All three use the same engine, so every effect, format and safety rule is the same everywhere, and an export from the GUI is byte for byte what the command line writes (the tests check this). Recipes and projects move freely between them: make something in the GUI, replay it with `glitchrx --recipe`, open the project on another device. The differences are in how you work, not in what comes out:
+
+- The command line cannot draw: masks and pulls are made in the GUI, and the command line replays them exactly from a recipe or project.
+- The desktop app uses the system's Open and Save dialogs instead of the in-app folder browser.
+- Appearance, export format and brush settings are remembered per browser or device. Presets are kept per machine; they are plain recipe files, so copy them to share.
+
 ## Contents
 
 - [Install](#install)
