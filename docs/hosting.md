@@ -328,8 +328,20 @@ ways out:
       lxc.idmap = g 1001 101001 64535
 
   and add `root:1000:1` to both `/etc/subuid` and `/etc/subgid` on the
-  host. The container's user `phil` must have uid 1000. Restart the
-  container afterwards.
+  host. The container's user `phil` must have uid 1000.
+
+  **Then re-own the home folder,** or you are locked out of it: what the
+  container made before (the home folder, the clone) belongs to host uid
+  101000, which nothing inside maps to any more, so it shows as `nobody`
+  and login says "Could not chdir to home directory". On the host, with
+  the container stopped:
+
+      pct stop 120
+      zfs get -H -o value mountpoint rpool/data/subvol-120-disk-0
+      chown -R 1000:1000 /rpool/data/subvol-120-disk-0/home/phil
+      pct start 120
+
+  (Use the mountpoint `zfs get` prints; `120` is the container's id.)
 
 ### 8.4 Build and run as a service
 
@@ -395,7 +407,7 @@ Checklist:
 - [ ] Clone in the container (deploy key if private)
 - [ ] Packages, `just build-all`
 - [ ] Datasets mounted inside `/home/phil/media`, photography read-only
-- [ ] Glitch dataset writable from the container (chown or idmap)
+- [ ] Glitch dataset writable from the container (chown or idmap; with idmap, home re-owned)
 - [ ] Token file, service enabled, URL opened once per device
 - [ ] Export folder set to `~/media/glitch` in Settings
 - [ ] Snapshots for the glitch dataset and the container
