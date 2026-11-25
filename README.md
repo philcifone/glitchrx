@@ -48,14 +48,14 @@ There are no ready-made downloads yet: you build it from source. It takes a few 
 
 ### Requirements
 
-- **Rust**, stable, 1.88 or newer. The usual way is [rustup](https://rustup.rs), then `rustup default stable`.
+- **Rust**, stable, 1.88 or newer: your distribution's package if it is new enough (Arch's is), otherwise [rustup](https://rustup.rs), then `rustup default stable`.
 - **Node.js and npm** (a current LTS), only to build the GUI. Without them you get the command line alone.
 - **libjpeg-turbo** with its TurboJPEG headers.
 - **git**, and optionally [just](https://github.com/casey/just), which runs the build steps below by name.
 
 | System | Install |
 | --- | --- |
-| Arch Linux | `sudo pacman -S --needed base-devel git rustup nodejs npm libjpeg-turbo just` |
+| Arch Linux | `sudo pacman -S --needed base-devel git rust nodejs npm libjpeg-turbo just` |
 | Debian, Ubuntu | `sudo apt install build-essential git pkg-config nodejs npm libturbojpeg0-dev`, then rustup from rustup.rs |
 | Fedora | `sudo dnf install gcc git pkgconf nodejs npm turbojpeg-devel`, then rustup |
 | macOS, Windows | rustup and Node.js; build with `--features glitchrx-core/vendored` (below), which builds libjpeg-turbo itself and needs cmake and nasm |

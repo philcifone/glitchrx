@@ -271,8 +271,12 @@ committed; nothing in the history needs removing before a push.
 
 ### 8.2 Packages (Arch)
 
-    sudo pacman -S --needed base-devel git rustup nodejs npm libjpeg-turbo just
-    rustup default stable
+    sudo pacman -S --needed base-devel git rust nodejs npm libjpeg-turbo just
+
+Arch's `rust` package is current and updates with `pacman -Syu`, which is
+all a server needs. `rust` and `rustup` conflict; if `rust` is already
+installed (paru pulls it in), keep it. rustup is only worth it for
+switching toolchains or cross-compiling.
 
 Building needs about 2 GB of memory and a few minutes on four cores;
 running needs only `libjpeg-turbo`. Give the container 4 GB of RAM and a
@@ -374,7 +378,7 @@ the binary. After a pull, build and restart:
 
 Recipes and projects from older versions always open in newer ones. If a
 build fails, the old binary keeps running until the restart, so nothing is
-lost; fix the build (usually a newer Rust: `rustup update`) and run the
+lost; fix the build (usually a newer Rust: `sudo pacman -Syu`) and run the
 line again.
 
 ### 8.6 Backups
