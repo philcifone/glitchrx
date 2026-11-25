@@ -21,7 +21,7 @@
     class:on={!!app.recipe.crop}
     onclick={() => app.startCrop()}
     disabled={busy}
-    title="Crop: keep part of the photo, before the steps"
+    title="Crop: keep part of the photo, or of the result"
     aria-label="Crop"
   >
     <CropIcon size={18} strokeWidth={1.75} />
