@@ -455,7 +455,7 @@ The same gestures with a finger or the mouse:
 - **Double tap**, the **magnifier** (in the photo toolbox, D-62) or **Z**: fit to 100% and back. Zoomed, the magnifier shows the zoom.
 - **A single tap:** full view and back (D-59).
 - **Pinch** with two fingers, ctrl + wheel, or a trackpad pinch: zoom about the fingers or the pointer.
-- **Zoomed in:** one finger, the middle mouse button or the wheel pans.
+- **Zoomed in:** one finger, the middle mouse button or the wheel pans. Each edge of the picture can be dragged a little way into the stage, a quarter of the stage's side up to 160 px, so the photo's border can be worked on clear of the screen's edge and, on a phone, of the step panel, whose rounded top the stage stops above (Phil, 2026-11-25). The fit stays centered; the overpan grows in up to 1.5x.
 - **While masking:** one finger works the tool; two fingers pinch and pan; the edit bar has a compare button (hold), since holding the photo paints.
 - The status bar says exact once the sharp patch for the current recipe is on screen.
 

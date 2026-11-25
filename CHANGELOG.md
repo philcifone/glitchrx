@@ -6,6 +6,15 @@ All notable changes to glitchRx. The format follows
 the middle number and a fix the last. Recipes and projects made by any
 earlier version always open in a later one.
 
+## [0.2.1] - 2026-11-25
+
+### Fixed
+
+- A zoomed photo can be panned a little past its edges (a quarter of the
+  screen, up to 160 px), so its border can be masked or pulled away from
+  the edge of the screen. On a phone, the step panel's rounded top used
+  to hide the bottom 14 px for good.
+
 ## [0.2.0] - 2026-11-25
 
 ### Added
@@ -41,5 +50,6 @@ First release: the engine (14 audio and data effects, pixel sort, pull,
 four adjustments), recipes, projects (`.glrx`), the web GUI, the desktop
 app and the command line.
 
+[0.2.1]: https://github.com/USER/glitchrx/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/USER/glitchrx/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/USER/glitchrx/releases/tag/v0.1.0

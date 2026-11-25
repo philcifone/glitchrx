@@ -65,14 +65,29 @@ export function placement(v: View, g: Geometry): Rect {
 }
 
 /**
- * The view made valid: zoom within range, and no gap at an edge the
- * picture could cover. A side smaller than the stage stays centred.
+ * How far past the stage's edge a zoomed picture's edge may be dragged:
+ * this share of the stage's side, but no more than `OVERPAN_MAX` CSS
+ * pixels. Stopping exactly at the edge made the photo's border hard to
+ * work on, a mask along the bottom above all (Phil, 2026-11-25).
+ */
+export const OVERPAN = 0.25;
+export const OVERPAN_MAX = 160;
+
+/**
+ * The view made valid: zoom within range, and the picture's edges no
+ * further inside the stage than the overpan. At the fit the picture is
+ * centred; the overpan grows in from there (full by 1.5x), so pinching
+ * out to the fit settles smoothly rather than jumping.
  */
 export function clampView(v: View, g: Geometry): View {
   const z = clamp(v.z, 1, g.zMax);
+  const ramp = clamp((z - 1) / 0.5, 0, 1);
   const centre = (c: number, len: number, box: number) => {
-    if (len <= box + 0.5) return 0.5;
-    const half = box / 2 / len;
+    if (len <= 0) return 0.5;
+    const slack = ramp * Math.min(box * OVERPAN, OVERPAN_MAX);
+    // The picture's edge may sit `slack` pixels inside the stage's edge.
+    // A side smaller than the stage moves `slack` either way of centre.
+    const half = len > box ? (box / 2 - slack) / len : 0.5 - slack / len;
     return clamp(c, half, 1 - half);
   };
   return { z, x: centre(v.x, g.fit.w * z, g.box.w), y: centre(v.y, g.fit.h * z, g.box.h) };

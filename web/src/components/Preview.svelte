@@ -408,9 +408,12 @@
     border-radius: 999px;
   }
 
+  /* The stage less what lies under the phone's bottom sheet (App sets
+     --under-sheet): the view's edges, and so how far a zoomed picture can
+     pan, are where the photo is still visible. */
   .box {
     position: absolute;
-    inset: 0;
+    inset: 0 0 var(--under-sheet, 0px);
     display: flex;
     align-items: center;
     justify-content: center;
