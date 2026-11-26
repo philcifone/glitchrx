@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/glitchrx-core", "crates/glitchrx-cli", "crates/glitchrx-serve", "crates/glitchrx-desktop", "tools/gen-fixtures", "tools/contact-sheet"]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 rust-version = "1.88"

@@ -15,7 +15,7 @@ export interface ParamInfo {
 }
 
 /** Picker section. Pixel effects work on whole pixels: no encoding or channels. */
-export type EffectGroup = 'audio' | 'data' | 'pixel' | 'adjust';
+export type EffectGroup = 'audio' | 'data' | 'filter' | 'pixel' | 'adjust';
 
 export interface EffectInfo {
   id: string;
@@ -142,6 +142,8 @@ export interface MaskCommon {
   opacity?: number;
   /** Blur of its edges, as a share of the longer side (default 0). */
   feather?: number;
+  /** Switched off: kept, but the mask is drawn without it (D-75). */
+  off?: boolean;
 }
 
 export type MaskShape = MaskOp['shape'];
@@ -149,6 +151,8 @@ export type MaskShape = MaskOp['shape'];
 /** Where a step's result shows. The server omits empty and default fields. */
 export interface Mask {
   invert?: boolean;
+  /** Switched off: kept, but the step shows everywhere (D-73). */
+  off?: boolean;
   op?: MaskOp[];
 }
 

@@ -2,27 +2,25 @@
   // The photo's toolbox, at the top of the step panel: crop, the zoom, and
   // the work size. They used to float over the photo, where they got in
   // the way of looking at it (Phil, 2026-11-24); here they sit with the
-  // other recipe-wide settings, in a card beside the encoding's: crop,
-  // zoom and an info button on top, the work size below. The info button
-  // shows the work size's note under the cards (`info`), inline like the
-  // encoding's, rather than in a popup the app has nowhere else.
+  // other recipe-wide settings, in a card beside the encoding's, under the
+  // heading Canvas (the picture the steps run on: crop, then work size):
+  // crop and zoom on top, the work size below, then More info.
   import CropIcon from '@lucide/svelte/icons/crop';
   import ZoomIn from '@lucide/svelte/icons/zoom-in';
   import ZoomOut from '@lucide/svelte/icons/zoom-out';
-  import Info from '@lucide/svelte/icons/info';
-  import { tip } from '../lib/hold';
   import { app } from '../lib/app.svelte';
   import { WORK_SIZES } from '../lib/canvas';
   import { percent } from '../lib/view';
-
-  let { info = $bindable(false) }: { info?: boolean } = $props();
+  import MoreInfo from './MoreInfo.svelte';
 
   const g = $derived(app.geometry);
   /** Crop has the stage while it is open; the rest waits for Done. */
   const busy = $derived(!!app.cropping);
 </script>
 
-<section class="card tools" aria-label="Photo">
+<div class="col">
+<h3 class="section-label">Canvas</h3>
+<section class="card tools" aria-label="Canvas">
   <div class="line">
   <button
     class="tool"
@@ -51,17 +49,6 @@
       <ZoomIn size={18} strokeWidth={1.75} />
     {/if}
   </button>
-  <button
-    class="tool info"
-    class:on={info}
-    {@attach tip}
-    onclick={() => (info = !info)}
-    aria-pressed={info}
-    title={info ? 'Hide the note on sizes' : 'What the sizes do'}
-    aria-label={info ? 'Hide the note on sizes' : 'What the sizes do'}
-  >
-    <Info size={18} strokeWidth={1.75} />
-  </button>
   </div>
   <!-- Work size (5b): the size the steps run on. Smaller is faster and
        exact at once, with coarser glitch texture. -->
@@ -83,7 +70,12 @@
       </button>
     {/each}
   </div>
+  <MoreInfo>
+    The work size is the size the steps run on. Smaller sizes render faster and coarsen the glitch; Full gives the finest
+    texture. Compare a few before exporting.
+  </MoreInfo>
 </section>
+</div>
 
 <style>
   .card {
@@ -92,7 +84,7 @@
     padding: 10px 12px;
   }
 
-  /* Crop, zoom and info on top; the work size below, the card's width. */
+  /* Crop and zoom on top; the work size below, the card's width. */
   .tools {
     display: flex;
     flex-direction: column;
@@ -107,15 +99,11 @@
     gap: 4px;
   }
 
-  .info {
-    margin-left: auto;
-  }
-
   .tool {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    min-height: 34px;
+    min-height: 36px; /* as tall as the encoding menu beside it */
     min-width: 40px;
     justify-content: center;
     padding: 4px 10px;

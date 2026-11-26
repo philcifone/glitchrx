@@ -60,6 +60,7 @@ fn mean_diff(a: &Raster, b: &Raster) -> f64 {
 fn busy_mask() -> Mask {
     Mask {
         invert: true,
+        off: false,
         ops: vec![
             // Feathered: a brightness range follows pixel-level detail,
             // which a preview-sized picture cannot have, and the blur keeps
@@ -128,6 +129,7 @@ fn busy_mask() -> Mask {
 fn shapes_mask() -> Mask {
     Mask {
         invert: false,
+        off: false,
         ops: vec![
             MaskOp::new(
                 Shape::Rect {

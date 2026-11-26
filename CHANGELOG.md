@@ -6,6 +6,44 @@ All notable changes to glitchRx. The format follows
 the middle number and a fix the last. Recipes and projects made by any
 earlier version always open in a later one.
 
+## [Unreleased]
+
+## [0.3.0] - 2026-11-26
+
+### Added
+
+- **Filters**, a new group in the palette (D-71): `lowpass`, `highpass`,
+  `bandpass`, `notch` and `basstreble`, after Audacity's Low-Pass Filter,
+  High-Pass Filter, Notch Filter and Bass and Treble. The cutoff is a size
+  (`size=8px`), not a frequency, since a picture has no sample rate.
+
+- **Masks switch off without being lost.** The venetian mask on a step's
+  header (and beside Add to mask) switches the whole mask off and on;
+  the one beside each part switches just that part. The whole-mask switch
+  wins while off, and turning a part on brings the mask back with just
+  that part. Off is kept as `off = true` (recipe version 9, written only
+  when something is off, so such files need 0.3.0 to open; the rest
+  still open on 0.2).
+
+- **An apple hides the red overlay** while you edit a part, to see the
+  picture. The overlay shows parts even while they are switched off.
+- Tapping the part you are editing closes it, as its check does.
+
+### Changed
+
+- The two cards above the steps have headings, Encoding and Canvas, and
+  each has its own More info in place of the info button and the notes
+  under both.
+- The mask list is tidier: a red trash can removes a part, a check ends
+  editing (the Mask row with Edit and Done is gone), Add / Subtract /
+  Intersect are tabs under the part's sliders, and the explanatory notes
+  are gone.
+- Effect settings with a few options show them all as buttons instead of
+  a dropdown, and sizes in px get a slider.
+- A linear gradient mask stays level more easily: only its dashed end
+  turns it (settling on level and plumb), the solid end slides along it,
+  and tapping both ends selects them so a drag moves the whole gradient.
+
 ## [0.2.1] - 2026-11-25
 
 ### Fixed
@@ -50,6 +88,8 @@ First release: the engine (14 audio and data effects, pixel sort, pull,
 four adjustments), recipes, projects (`.glrx`), the web GUI, the desktop
 app and the command line.
 
+[Unreleased]: https://github.com/USER/glitchrx/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/USER/glitchrx/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/USER/glitchrx/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/USER/glitchrx/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/USER/glitchrx/releases/tag/v0.1.0

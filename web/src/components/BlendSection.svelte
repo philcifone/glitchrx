@@ -6,6 +6,12 @@
   // the mask, so the step shows everywhere again. A long press (or a
   // shift / cmd / ctrl click) selects several: opacity, feather, copy and
   // cut then act on all of them.
+  //
+  // Icons in place of switches (Phil, 2026-11-26, D-75): the venetian mask
+  // beside each part switches that part off and on, and the one beside
+  // Add to mask the whole mask (as on the step's header). The part being
+  // edited also has the apple, which hides the red overlay (rubylith) to
+  // show the picture, and a check that ends editing. Trash removes a part.
   import Paintbrush from '@lucide/svelte/icons/paintbrush';
   import Eraser from '@lucide/svelte/icons/eraser';
   import Blinds from '@lucide/svelte/icons/blinds';
@@ -20,6 +26,11 @@
   import Scissors from '@lucide/svelte/icons/scissors';
   import ClipboardPaste from '@lucide/svelte/icons/clipboard-paste';
   import X from '@lucide/svelte/icons/x';
+  import Trash2 from '@lucide/svelte/icons/trash-2';
+  import Apple from '@lucide/svelte/icons/apple';
+  import { OFF_PATHS } from '../lib/icons';
+  import MaskToggle from './MaskToggle.svelte';
+  import Slashed from './Slashed.svelte';
   import { revealIn } from '../lib/scroll';
   import { app } from '../lib/app.svelte';
   import { SLIDER_STEPS } from '../lib/slider';
@@ -50,14 +61,6 @@
     { id: 'subtract', label: 'Subtract' },
     { id: 'intersect', label: 'Intersect' },
   ];
-  const HINT: Record<MaskShape, string> = {
-    brush: 'Paint on the photo. Erase takes back only this brush.',
-    linear: 'Full at the solid line, faded out at the other. Drag a line or the middle; drag elsewhere to draw it again.',
-    radial: 'Drag the center to move it and the ring to resize it; drag elsewhere to draw it again. Feather softens its edge.',
-    rect: 'Drag a corner to resize, the top handle to turn (shift: 15 degree steps), inside to move; drag elsewhere to draw it again.',
-    path: 'Drag a point to move it, its handles to bend the sides; tap a side to add a point, drag inside to move it all.',
-    brightness: 'Pixels in this range, read from the picture as it reaches this step.',
-  };
   /** While a pen path is being drawn. */
   const PLACING_HINT = 'Tap to add points; drag as you place one to curve its sides. Tap the first point to close.';
 
@@ -78,11 +81,12 @@
   const several = $derived(editing && app.selected.length > 1);
   const plural = (n: number) => `${n} ${n === 1 ? 'part' : 'parts'}`;
 
-  /** A row's second line: what it holds, and its blend if not the default. */
+  /** A row's second line: what it holds, and how it combines and blends if not the default. */
   function detail(op: MaskOp): string {
     const o = opOpacity(op);
     const f = opFeather(op);
-    return [opDetail(op), o < 1 ? `${Math.round(o * 100)}%` : '', f > 0 ? `feather ${percent(f)}` : '']
+    const mode = op.mode === 'add' ? '' : op.mode;
+    return [opDetail(op), mode, o < 1 ? `${Math.round(o * 100)}%` : '', f > 0 ? `feather ${percent(f)}` : '']
       .filter(Boolean)
       .join(', ');
   }
@@ -119,6 +123,9 @@
     // The long press already acted; this is the click that follows it.
     if (longPressed) return void (longPressed = false);
     if (e.shiftKey || e.metaKey || e.ctrlKey) app.toggleSelected(uid, i);
+    // Tapping the open part closes it, as its check does (Phil,
+    // 2026-11-26); with several selected, a tap first narrows to this one.
+    else if (isActive(i) && !several) app.stopMasking();
     else app.selectComponent(uid, i);
   }
 
@@ -194,16 +201,6 @@
       </button>
     {/if}
   {:else}
-    <div class="row">
-      <span class="lbl">Mask</span>
-      <span class="grow"></span>
-      {#if editing}
-        <button class="primary" onclick={() => app.stopMasking()}>Done</button>
-      {:else}
-        <button onclick={() => app.startMasking(uid)} disabled={!usable}>Edit</button>
-      {/if}
-    </div>
-
     <div class="segmented" role="radiogroup" aria-label="Where the glitch shows">
       <button role="radio" aria-checked={!mask.invert} class:on={!mask.invert} onclick={() => app.updateMask(uid, { invert: false })}>
         Paint in
@@ -212,17 +209,15 @@
         Paint out
       </button>
     </div>
-    <p class="note dim">
-      {mask.invert ? 'The glitch shows everywhere except the mask.' : 'The glitch shows only inside the mask.'}
-    </p>
-
     <ul class="ops" aria-label="Mask components">
       {#each ops as op, i (i)}
         {@const Icon = ICON[op.shape]}
         {@const on = isActive(i)}
         {@const text = detail(op)}
-        <li class:active={on} class:selected={isSelected(i)}>
-          <div class="row">
+        <!-- With the whole mask off, every part shows off (D-75). -->
+        {@const partOff = !!op.off || !!mask.off}
+        <li class:active={on} class:selected={isSelected(i)} class:off={partOff}>
+          <div class="row head">
             <button
               class="pick"
               aria-pressed={isSelected(i)}
@@ -233,7 +228,7 @@
               onpointercancel={pressEnd}
               oncontextmenu={(e) => e.preventDefault()}
               disabled={!usable}
-              title={on ? 'Being edited' : 'Edit this part (shift-click to select several)'}
+              title={on ? 'Tap to finish editing' : 'Edit this part (shift-click to select several)'}
             >
               <span class="glyph"><Icon size={16} strokeWidth={1.75} /></span>
               <span class="text">
@@ -241,12 +236,28 @@
                 {#if text}<span class="detail dim">{text}</span>{/if}
               </span>
             </button>
-            <select value={op.mode} onchange={(e) => app.setMaskOpMode(uid, i, e.currentTarget.value as MaskMode)} aria-label="How it combines">
-              {#each MODES as m (m.id)}<option value={m.id}>{m.label}</option>{/each}
-            </select>
-            <button class="icon" onclick={() => app.removeMaskOps(uid, [i])} title="Remove" aria-label="Remove {SHAPE_LABEL[op.shape]}">
-              <X size={16} strokeWidth={1.75} />
+            <MaskToggle off={partOff} what="this part" onclick={() => app.toggleMaskOff(uid, i)} disabled={!usable} />
+            {#if on}
+              <button
+                class="icon over"
+                onclick={() => app.setTool({ show: !app.tool.show })}
+                aria-pressed={app.tool.show}
+                aria-label="Show the red overlay"
+                title={app.tool.show ? 'Hide the red overlay to see the picture' : 'Show the red overlay'}
+              >
+                <!-- Filled with the overlay's red while it shows; hollow and struck through while hidden. -->
+                {#if app.tool.show}<Apple size={17} strokeWidth={1.75} style="fill: var(--rubylith)" />{:else}<Slashed paths={OFF_PATHS.apple} size={17} />{/if}
+              </button>
+            {/if}
+            <span class="grow"></span>
+            <button class="icon danger" onclick={() => app.removeMaskOps(uid, [i])} title="Remove this part" aria-label="Remove {SHAPE_LABEL[op.shape]}">
+              <Trash2 size={17} strokeWidth={1.75} />
             </button>
+            {#if on}
+              <button class="icon" onclick={() => app.stopMasking()} title="Done editing the mask (Enter)" aria-label="Done editing the mask">
+                <Check size={18} strokeWidth={2} />
+              </button>
+            {/if}
           </div>
 
           {#if on}
@@ -378,9 +389,12 @@
                 </div>
               {/if}
             {/if}
-            {#if !(op.shape === 'path' && app.penPlacing)}
-              <p class="note dim">{HINT[op.shape]}</p>
-            {/if}
+            <!-- How it joins the parts above it (Phil, 2026-11-26: tabs, not a menu). -->
+            <div class="segmented" role="radiogroup" aria-label="How it combines">
+              {#each MODES as m (m.id)}
+                <button role="radio" aria-checked={op.mode === m.id} class:on={op.mode === m.id} onclick={() => app.setMaskOpMode(uid, i, m.id)}>{m.label}</button>
+              {/each}
+            </div>
           {/if}
         </li>
       {/each}
@@ -395,6 +409,7 @@
         <Plus size={16} strokeWidth={1.75} />
         Add to mask
       </button>
+      <MaskToggle off={!!mask.off} what="this step's mask" onclick={() => app.toggleMaskOff(uid)} />
       <span class="grow flash dim" aria-live="polite">{flash}</span>
       <button
         class="icon"
@@ -420,14 +435,6 @@
     </div>
     {#if adding || ops.length === 0}
       {@render addButtons()}
-    {/if}
-
-    {#if editing}
-      <label class="row">
-        <span class="lbl wide">Show mask</span>
-        <span class="grow"></span>
-        <input class="switch" type="checkbox" checked={app.tool.show} onchange={(e) => app.setTool({ show: e.currentTarget.checked })} />
-      </label>
     {/if}
   {/if}
 </section>
@@ -568,12 +575,36 @@
     padding-right: 4px;
   }
 
+  /* A part switched off, or the whole mask: still editable, dimmed. */
+  .ops li.off .text,
+  .ops li.off .glyph {
+    opacity: 0.55;
+  }
+
+  /* The name makes the part active, and so does the rest of its top row:
+     the name's ::after stretches over the row, under the row's controls
+     (a "stretched link"; a button cannot hold buttons). */
+  .head {
+    position: relative;
+  }
+
+  .head .pick::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+
+  .head > :global(:not(.pick, .grow)) {
+    position: relative;
+    z-index: 1;
+  }
+
   /* The row's name area: tap to make the component active. */
   .pick {
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
     justify-content: flex-start;
     gap: 8px;
@@ -588,6 +619,7 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+    overflow: hidden;
     line-height: 1.2;
   }
 
@@ -606,24 +638,18 @@
     gap: 8px;
   }
 
-  .ops select {
-    width: auto;
-    min-height: 30px;
-    font-size: 0.85rem;
-  }
-
   .ops .icon {
     min-height: 30px;
     min-width: 30px;
     padding: 4px;
   }
 
+  /* Trimmed rather than run under the switches on a narrow panel. */
   .name {
     font-size: 0.9rem;
-  }
-
-  .lbl.wide {
-    width: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .glyph {

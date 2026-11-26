@@ -104,11 +104,21 @@
    * each move starts from there, and a cancel puts it back).
    */
   type Drag = { index: number; start: Pt; moved: boolean } & (
-    | { kind: 'ends'; grabbed: Grab; from: [number, number]; to: [number, number] }
+    | { kind: 'ends'; grabbed: Grab; from: [number, number]; to: [number, number]; pin: 'from' | 'to' | null }
     | { kind: 'rect'; grab: RectGrab; orig: RectOp }
     | { kind: 'pen'; grab: PenGrab | { kind: 'place'; i: number }; orig: number[][] }
   );
   let drag: Drag | null = null;
+  /**
+   * A linear gradient's selected ends. A tap on an end selects it or lets
+   * it go, a tap elsewhere lets both go; while both are selected, dragging
+   * either moves the whole gradient (Phil, 2026-11-25).
+   */
+  let pins = $state({ from: false, to: false });
+  $effect(() => {
+    void app.activeOp;
+    pins = { from: false, to: false };
+  });
   /** Mouse position (CSS pixels), and the cursor for what it is over. */
   let cursor = $state<{ x: number; y: number } | null>(null);
   let hover = $state('default');
@@ -149,6 +159,7 @@
     void app.activeOp;
     void app.penPoint;
     void app.penPlacing;
+    void [pins.from, pins.to];
     redrawGuides();
   });
 
@@ -209,8 +220,15 @@
     ctx.restore();
   }
 
-  /** A round handle: filled for the main one, hollow for the other. */
-  function dot(ctx: CanvasRenderingContext2D, x: number, y: number, filled: boolean) {
+  /** A round handle: filled for the main one, hollow for the other; a ring when selected. */
+  function dot(ctx: CanvasRenderingContext2D, x: number, y: number, filled: boolean, selected = false) {
+    if (selected) {
+      ctx.beginPath();
+      ctx.arc(x, y, 12, 0, 2 * Math.PI);
+      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = HANDLE;
+      ctx.stroke();
+    }
     ctx.beginPath();
     ctx.arc(x, y, 6, 0, 2 * Math.PI);
     ctx.fillStyle = filled ? HANDLE : 'white';
@@ -248,8 +266,9 @@
       ctx.stroke();
       ctx.setLineDash([]);
     }
-    dot(ctx, ax, ay, true);
-    dot(ctx, bx, by, false);
+    const linear = op.shape === 'linear';
+    dot(ctx, ax, ay, true, linear && pins.from);
+    dot(ctx, bx, by, false, linear && pins.to);
   }
 
   function drawRect(ctx: CanvasRenderingContext2D, op: RectOp) {
@@ -407,8 +426,11 @@
     if (index === null) return;
     const base = { index, start: p, moved: false };
     if (isShape(active)) {
-      const grabbed = (handle as Grab | null) ?? grab(active, p, w, h, tol);
-      drag = { ...base, kind: 'ends', grabbed, from: [...active.from], to: [...active.to] };
+      let grabbed = (handle as Grab | null) ?? grab(active, p, w, h, tol);
+      // An end handle itself (not its line) can be tapped to select it.
+      const pin = active.shape === 'linear' && (handle === 'from' || handle === 'to') ? handle : null;
+      if (pin && pins.from && pins.to) grabbed = 'move';
+      drag = { ...base, kind: 'ends', grabbed, from: [...active.from], to: [...active.to], pin };
     } else if (active?.shape === 'rect') {
       const g = (handle as RectGrab | null) ?? grabRect(active, p, w, h, tol);
       drag = { ...base, kind: 'rect', grab: g, orig: $state.snapshot(active) as RectOp };
@@ -524,7 +546,15 @@
       const d = drag;
       drag = null;
       if (d.kind === 'pen') return penUp(d);
-      if (!d.moved) return;
+      if (!d.moved) {
+        // A tap on a linear gradient's end selects it or lets it go; a tap
+        // anywhere else lets both go.
+        if (d.kind === 'ends') {
+          if (d.pin) pins = { ...pins, [d.pin]: !pins[d.pin] };
+          else if (d.grabbed === 'draw') pins = { from: false, to: false };
+        }
+        return;
+      }
       // Drawing a new placement needs a real drag; a short one puts it back.
       const p = at(e);
       const short = Math.hypot(p[0] - d.start[0], p[1] - d.start[1]) < 8;

@@ -19,6 +19,7 @@ export interface Group {
 const GROUPS: { id: EffectGroup; label: string }[] = [
   { id: 'audio', label: 'Audio' },
   { id: 'data', label: 'Data' },
+  { id: 'filter', label: 'Filters' },
   { id: 'pixel', label: 'Pixel' },
   { id: 'adjust', label: 'Adjust' },
 ];
@@ -27,6 +28,7 @@ const GROUPS: { id: EffectGroup; label: string }[] = [
 const ORDER = [
   'echo', 'delay', 'reverb', 'phaser', 'wahwah', 'amplify', 'distort', 'speed', 'stutter',
   'invert', 'bitcrush', 'backwards', 'shift', 'shuffle',
+  'lowpass', 'highpass', 'bandpass', 'notch', 'basstreble',
   'pixelsort',
   'levels', 'curves', 'hsl', 'balance',
 ];

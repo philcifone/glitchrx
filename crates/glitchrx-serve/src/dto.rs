@@ -199,7 +199,7 @@ impl RecipeDto {
 pub struct EffectDto {
     pub id: &'static str,
     pub version: u32,
-    /// Picker section: "audio", "data", "pixel" or "adjust". Pixel and adjust effects ignore
+    /// Picker section: "audio", "data", "filter", "pixel" or "adjust". Pixel and adjust effects ignore
     /// the encoding and channels.
     pub group: &'static str,
     /// The Audacity effect this one follows.

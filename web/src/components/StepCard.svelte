@@ -5,8 +5,7 @@
   // arrangement buttons.
   import Dices from '@lucide/svelte/icons/dices';
   import Shuffle from '@lucide/svelte/icons/shuffle';
-  import VenetianMask from '@lucide/svelte/icons/venetian-mask';
-  import ChevronUp from '@lucide/svelte/icons/chevron-up';
+    import ChevronUp from '@lucide/svelte/icons/chevron-up';
   import ChevronDown from '@lucide/svelte/icons/chevron-down';
   import Copy from '@lucide/svelte/icons/copy';
   import Trash2 from '@lucide/svelte/icons/trash-2';
@@ -20,6 +19,7 @@
   import LevelsField from './LevelsField.svelte';
   import BlendSection from './BlendSection.svelte';
   import PullSection from './PullSection.svelte';
+  import MaskToggle from './MaskToggle.svelte';
 
   let { step, index }: { step: StepState; index: number } = $props();
 
@@ -56,20 +56,20 @@
 
 <article class:off={!step.enabled}>
   <!-- Held (not on the switch): Edit mode for the whole list. -->
-  <header {@attach hold(() => app.startEditingSteps(step.uid), { ignore: '.toggle' })}>
+  <header {@attach hold(() => app.startEditingSteps(step.uid), { ignore: '.toggle, .mask-toggle' })}>
     <span class="n">{index + 1}</span>
     <button class="name" onclick={() => app.toggleCollapsed(step.uid)} aria-expanded={open} title={info?.summary}>
       <span class="glyph"><Icon size={18} strokeWidth={1.75} /></span>
       <!-- The number in the system font: Young Serif's old-style 1 reads as "i". -->
       <span class="label serif">{step.effect}{#if app.stepNumber(step)}<span class="num">-{app.stepNumber(step)}</span>{/if}</span>
       {#if stepEncoding}<span class="enc">{stepEncoding}</span>{/if}
-      {#if step.mask}
-        <span class="enc tag-icon" class:live={app.masking === step.uid} title="Masked" aria-label="Masked">
-          <VenetianMask size={14} strokeWidth={1.75} />
-        </span>
-      {/if}
-      {#if opacity < 1}<span class="enc">{Math.round(opacity * 100)}%</span>{/if}
     </button>
+    <!-- The badge is the mask's switch (D-75). -->
+    {#if step.mask}
+      <MaskToggle off={!!step.mask.off} what="this step's mask" onclick={() => app.toggleMaskOff(step.uid)} />
+    {/if}
+    {#if opacity < 1}<span class="enc">{Math.round(opacity * 100)}%</span>{/if}
+    <span class="grow"></span>
     <label class="toggle" title={step.enabled ? 'Turn this step off' : 'Turn this step on'}>
       <input class="switch" type="checkbox" checked={step.enabled} onchange={() => app.toggleStep(step.uid)} />
       <span class="visually-hidden">Enabled</span>
@@ -242,8 +242,15 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* The name folds the card, and so does the rest of the header: its
+     ::after stretches over the header, under the mask switch and the
+     on/off switch (a "stretched link"; a button cannot hold buttons). */
+  header {
+    position: relative;
+  }
+
   .name {
-    flex: 1;
+    flex: 0 1 auto;
     min-width: 0;
     justify-content: flex-start;
     gap: 8px;
@@ -254,6 +261,22 @@
 
   .name:hover:not(:disabled) {
     background: none;
+  }
+
+  .name::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+  }
+
+  header :global(.mask-toggle),
+  .toggle {
+    position: relative;
+    z-index: 1;
+  }
+
+  .grow {
+    flex: 1;
   }
 
   .glyph {
@@ -271,16 +294,6 @@
     border-radius: 5px;
   }
 
-  .enc.tag-icon {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 5px;
-  }
-
-  .enc.live {
-    color: var(--accent-fg);
-    background: var(--accent);
-  }
 
   .toggle {
     display: inline-flex;

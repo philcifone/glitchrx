@@ -19,6 +19,7 @@
   import StepCard from './StepCard.svelte';
   import StepEditList from './StepEditList.svelte';
   import PhotoTools from './PhotoTools.svelte';
+  import MoreInfo from './MoreInfo.svelte';
 
   const encodings = $derived(app.config?.encodings ?? []);
   const current = $derived(encodings.find((e) => e.id === app.recipe.encoding));
@@ -26,8 +27,6 @@
   const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
   let list = $state<HTMLOListElement>();
-  /** The work size's note, shown by the toolbox's info button. */
-  let info = $state(false);
   /** Edit mode (held on a step): one line per step, select several, drag to reorder. */
   const editing = $derived(app.editingSteps);
 
@@ -56,11 +55,13 @@
 
 <div class="wrap">
 <div class="stack" class:editing>
-  <!-- Two cards side by side (Phil, 2026-11-25): how the steps read the
-       pixels on the left, the photo's tools on the right; what they mean
-       in one line of notes under both. -->
+  <!-- Two cards side by side (Phil, 2026-11-25), each under its heading
+       and with its own More info (2026-11-26): how the steps read the
+       pixels on the left, the canvas (crop, zoom, work size) on the right. -->
   <div class="top" class:alone={!app.doc}>
-    <section class="card sample" aria-label="Samples">
+    <div class="col">
+    <h3 class="section-label">Encoding</h3>
+    <section class="card sample" aria-label="Encoding">
       <select id="encoding" value={app.recipe.encoding} onchange={(e) => app.setEncoding(e.currentTarget.value)} aria-label="Encoding" title="Encoding: how the steps read the pixels as audio samples">
         {#each encodings as enc (enc.id)}
           <option value={enc.id}>{enc.id}</option>
@@ -79,20 +80,13 @@
           </button>
         {/each}
       </div>
+      {#if current}
+        <MoreInfo>{cap(current.describe)}. Any step can override it.</MoreInfo>
+      {/if}
     </section>
+    </div>
     {#if app.doc}
-      <PhotoTools bind:info />
-    {/if}
-  </div>
-  <div class="notes dim">
-    {#if current}
-      <p><span class="what">Encoding {current.id}.</span> {cap(current.describe)}. Any step can override it.</p>
-    {/if}
-    {#if info && app.doc}
-      <p>
-        <span class="what">Size.</span> Smaller sizes render faster and coarsen the glitch; Full gives the finest texture. Compare a few
-        before exporting.
-      </p>
+      <PhotoTools />
     {/if}
   </div>
 
@@ -248,6 +242,19 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  /* A heading over each card. Cards keep their own height, so opening
+     More info in one does not stretch the other. */
+  .top :global(.col) {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .top :global(.col > .section-label) {
+    margin: 0 4px;
+  }
+
   /* Each card: a control on top, a segmented row below. */
   .sample {
     display: flex;
@@ -274,19 +281,6 @@
     font-size: 0.85rem;
   }
 
-  .notes {
-    margin: -4px 4px 0;
-    font-size: 0.85rem;
-  }
-
-  .notes p {
-    margin: 0 0 4px;
-  }
-
-  .notes .what {
-    color: var(--fg);
-    font-weight: 500;
-  }
 
 
 

@@ -11,7 +11,7 @@ Create your own glitch art from digital images through databending. Inspired by 
 
 Everything runs locally. No image is ever uploaded anywhere besides the server or computer you host it on
 
-**Status: beta (0.2.1; see `CHANGELOG.md`).** Three ways to use it, all from one build:
+**Status: beta (0.3.0; see `CHANGELOG.md`).** Three ways to use it, all from one build:
 
 - **A web GUI** (`glitchrx serve`) for a browser on the same computer, or a phone or tablet over your LAN or a VPN. It can be added to a phone's home screen and used like an app.
 - **A desktop app** (Linux today; macOS planned) with the same GUI in its own window.
@@ -112,7 +112,7 @@ To use it from your phone, see [Running it on a server or for a phone](#running-
 ### The screen
 
 - **Top bar:** Open, Presets, Undo, Redo, Export, Settings. While you paint a mask or pull, it becomes an edit bar instead: what you are working on, compare, undo, redo and **Done**.
-- **The photo.** Above the steps, two cards: the encoding and channels on the left; crop, zoom and the work size on the right (the (i) explains sizes).
+- **The photo.** Above the steps, two cards: **Encoding** (the encoding and channels) on the left; **Canvas** (crop, zoom and the work size) on the right. More info at the foot of each explains it.
 - **The steps:** a card per effect, top to bottom, in the order they run. On a phone the effect palette sits behind the floating **+** button.
 - **Status bar:** the photo's name and size, how long the last render took, and whether the view is approximate or exact.
 
@@ -127,7 +127,7 @@ Icon-only buttons show their name when you hold them on a phone (with a mouse, h
 ### Steps
 
 - **Encoding** for the whole recipe (and mono, stereo or RGB) sits above the steps. Any step can override both. See [Encodings](#encodings).
-- **Add steps** from the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter), data effects (invert, bitcrush, backwards, shift, shuffle), pixel effects (pixelsort, pull) and adjustments (levels, curves, hsl, balance).
+- **Add steps** from the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter), data effects (invert, bitcrush, backwards, shift, shuffle), filters (lowpass, highpass, bandpass, notch, basstreble), pixel effects (pixelsort, pull) and adjustments (levels, curves, hsl, balance).
 - Each step can be switched off, moved up or down, duplicated or removed (the icons at the foot of its card).
 - **Sliders** mark their default with a small tick and snap onto it; double tap a slider to go back to the default. Fields without a slider have a reset arrow.
 - **Shake** (the shuffle arrows at the top of a step's settings) rolls its settings at random, within the useful range; placement and encoding stay.
@@ -144,7 +144,7 @@ Every step has an **opacity**, and can have a **mask** that limits where it show
 - **Pen** paths: tap out points, drag while placing one to curve the sides, tap the first to close. Points stay editable.
 - **Brightness ranges** that limit the mask to light or dark parts.
 
-Tap a component to make it active; a radial, linear or rectangle then shows handles on the photo, and the others show small pins to tap. Each component adds, subtracts or intersects, and has its own opacity and feather; long-press to select several and set them together. Copy, Cut and Paste move components between steps. **Paint in** shows the step only inside the mask; **Paint out** everywhere else. The red overlay shows the mask; Done ends editing. On a keyboard, B and E paint and erase, and `[` and `]` size the brush. Masks are saved as strokes and shapes, so they replay exactly at full resolution.
+Tap a component to make it active; a radial, linear or rectangle then shows handles on the photo, and the others show small pins to tap. Each component adds, subtracts or intersects, and has its own opacity and feather; long-press to select several and set them together. Copy, Cut and Paste move components between steps. **Paint in** shows the step only inside the mask; **Paint out** everywhere else. The venetian mask switches a mask off and on without losing it: on the step's header (or beside Add to mask) the whole mask, beside a component just that one. With the whole mask off every component shows off; switching the mask on brings each back as it was, and switching one component on turns the mask back on with just that one. The red overlay shows the mask (the apple hides it); the check, or Done in the top bar, ends editing. On a keyboard, B and E paint and erase, and `[` and `]` size the brush. Masks are saved as strokes and shapes, so they replay exactly at full resolution.
 
 ### Presets
 

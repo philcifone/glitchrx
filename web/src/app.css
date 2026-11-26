@@ -21,6 +21,7 @@
   --accent-fg: #fbf7ec;
   --accent-soft: rgb(121 116 14 / 0.16);
   --danger: #9d0006;
+  --rubylith: #cc241d; /* the mask overlay's red (the server draws it in this color) */
   --warn: #b57614;
   --stage: #e9e1cb; /* behind the photo */
   --bar: rgb(251 247 236 / 0.82); /* translucent bars */
