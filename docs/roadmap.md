@@ -139,8 +139,9 @@ single piece of work here.
 
 **High priority: what the databending community uses**
 
-Specced on 2026-11-25 (SPEC 6.7, D-71), not built: Bass and Treble and the
-four pass filters (items 1 to 4), in a new Filters palette group.
+Built on 2026-11-25 (SPEC 6.7, D-71), on branch `filters` for Phil to try:
+Bass and Treble and the four pass filters (items 1 to 4), in a new
+Filters palette group.
 
 1. **Bass and Treble.** Probably the most used after Echo: a low and a
    high shelf. Bass smears color in soft horizontal waves; treble

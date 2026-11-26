@@ -6,6 +6,15 @@ All notable changes to glitchRx. The format follows
 the middle number and a fix the last. Recipes and projects made by any
 earlier version always open in a later one.
 
+## [Unreleased]
+
+### Added
+
+- **Filters**, a new group in the palette (D-71): `lowpass`, `highpass`,
+  `bandpass`, `notch` and `basstreble`, after Audacity's Low-Pass Filter,
+  High-Pass Filter, Notch Filter and Bass and Treble. The cutoff is a size
+  (`size=8px`), not a frequency, since a picture has no sample rate.
+
 ## [0.2.1] - 2026-11-25
 
 ### Fixed

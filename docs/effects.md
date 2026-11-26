@@ -372,6 +372,139 @@ Example:
 glitchrx --speed factor=1.1,hits=6 photo.jpg
 ```
 
+## lowpass
+
+Removes detail finer than a size: smears along the rows; in Mono, colors drain to grey.
+
+A Butterworth low-pass: detail finer than `size` fades out, broad shapes pass. It runs forward through the data, so it smears to the right and on into the next row; larger sizes smear further. Steep rolloffs ring into faint repeated edges. In Mono, R, G and B sit side by side in one stream, the finest detail there is, so the filter blends them and colors drain to grey; with RGB channels each color is smeared on its own and keeps its hue.
+
+Follows Audacity's Low-Pass Filter. Version: 1.
+
+Live previews of this effect are approximate; the GUI renders it at full resolution when you pause.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `size` | `16px` | the finest detail kept (rows, px, % or bytes) |
+| `rolloff` | `12` | how sharply it cuts past the size, in dB per octave; steep ones ring |
+| `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
+| `len` | `10%` | length of each window (%, rows, px or bytes); unused when hits=0 |
+
+Example:
+
+```
+glitchrx --lowpass size=40px,rolloff=24 photo.jpg
+```
+
+## highpass
+
+Keeps only detail finer than a size: brightness flattens, edges stand out; RGB gives a grey emboss.
+
+A Butterworth high-pass: broad shapes lose their brightness and only detail finer than `size` stays, so edges stand out and lean to the right. In Mono, R, G and B alternate in the data, which is finer than any size, so color survives while brightness flattens: a washed, lit-from-the-side look. With RGB channels each color is filtered alone and flat areas fall to the middle value (grey in u8): the classic grey emboss. Larger sizes keep more of the picture; steep rolloffs ring.
+
+Follows Audacity's High-Pass Filter. Version: 1.
+
+Live previews of this effect are approximate; the GUI renders it at full resolution when you pause.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `size` | `8px` | the broadest detail kept (rows, px, % or bytes) |
+| `rolloff` | `12` | how sharply it cuts past the size, in dB per octave; steep ones ring |
+| `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
+| `len` | `10%` | length of each window (%, rows, px or bytes); unused when hits=0 |
+
+Example:
+
+```
+glitchrx --highpass size=12px photo.jpg
+```
+
+## bandpass
+
+Keeps one scale of detail around a size: one texture picked out on grey.
+
+A band-pass biquad (the cookbook's, peaking at 0 dB): detail around `size` passes, finer and broader detail fade. Like high-pass, flat areas sink to the middle value, but softer, with one texture picked out. High `q` narrows the band until it rings into ripples. In Mono, colors fade towards a muted tint.
+
+Follows Audacity's Filter Curve EQ (a band). Version: 1.
+
+Live previews of this effect are approximate; the GUI renders it at full resolution when you pause.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `size` | `6px` | the scale of detail kept (rows, px, % or bytes) |
+| `q` | `1` | how narrow the band is; high values ring |
+| `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
+| `len` | `10%` | length of each window (%, rows, px or bytes); unused when hits=0 |
+
+Example:
+
+```
+glitchrx --bandpass size=10px,q=4 photo.jpg
+```
+
+## notch
+
+Removes one scale of detail around a size: reshapes patterns and moire.
+
+A notch biquad (the cookbook's): detail around `size` is removed and the rest passes. Subtle on most photos; on regular patterns (fabric, screens, halftones) it removes or reshapes the moire, and on a size near a pattern's own it leaves ghostly beats.
+
+Follows Audacity's Notch Filter. Version: 1.
+
+Live previews of this effect are approximate; the GUI renders it at full resolution when you pause.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `size` | `6px` | the scale of detail removed (rows, px, % or bytes) |
+| `q` | `1` | how narrow the band is; high values ring |
+| `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
+| `len` | `10%` | length of each window (%, rows, px or bytes); unused when hits=0 |
+
+Example:
+
+```
+glitchrx --notch size=3px,q=2 photo.jpg
+```
+
+## basstreble
+
+Boosts or cuts broad shapes (bass) and fine detail (treble): waves of color, sharp fringes.
+
+Two shelving biquads, as Audacity's Bass and Treble: `bass` raises or lowers detail broader than `low`, `treble` detail finer than `high`, then `gain` sets the level. Results clip at the limits, as amplify's do. Bass boosts give soft horizontal waves of brightness that blow out to white and black when pushed. Treble sharpens and fringes edges; in Mono it also boosts the alternation of R, G and B, so colors grow vivid and neon.
+
+Follows Audacity's Bass and Treble. Version: 1.
+
+Live previews of this effect are approximate; the GUI renders it at full resolution when you pause.
+
+The seed only picks where hits land, so it has no effect with `hits=0`.
+
+| Parameter | Default | Meaning |
+| --- | --- | --- |
+| `bass` | `6` | dB for broad shapes, below low |
+| `treble` | `0` | dB for fine detail, above high |
+| `gain` | `0` | dB for everything, after the shelves |
+| `low` | `32px` | where bass begins: detail broader than this (rows, px, % or bytes) |
+| `high` | `3px` | where treble begins: detail finer than this (rows, px, % or bytes) |
+| `region` | `0%:100%` | where hits may land, START:END; percent of the image runs top to bottom |
+| `hits` | `0` | number of windows at seeded places; 0 = one window over the whole region |
+| `len` | `10%` | length of each window (%, rows, px or bytes); unused when hits=0 |
+
+Example:
+
+```
+glitchrx --basstreble bass=12,treble=-6 photo.jpg
+```
+
 ## pixelsort
 
 Sort runs of pixels by brightness, hue or saturation: streaks that melt down or across the picture.

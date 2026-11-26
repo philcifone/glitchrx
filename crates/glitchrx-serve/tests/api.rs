@@ -99,8 +99,16 @@ async fn effects_and_config() {
     assert_eq!(s, StatusCode::OK);
     assert!(h.contains_key(header::CONTENT_SECURITY_POLICY));
     let effects = json_of(&b);
-    assert_eq!(effects.as_array().unwrap().len(), 20);
+    assert_eq!(effects.as_array().unwrap().len(), 25);
     assert_eq!(effects[0]["id"], "echo");
+    // The filters (D-71) come in their own picker section.
+    let high = effects
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "highpass")
+        .unwrap();
+    assert_eq!(high["group"], "filter");
     // The curve kind reaches the GUI, which draws an editor for it.
     let curves = effects
         .as_array()

@@ -4,7 +4,7 @@
 //! of the raster at a time, in one of two ways:
 //!
 //! - **Filters** (echo, delay, reverb, amplify, invert, bitcrush, phaser,
-//!   wahwah, distort) read the
+//!   wahwah, distort, and the filters of `filters.rs`) read the
 //!   window's bytes as audio samples in the step's encoding, process them as
 //!   floating point, and clip them back to bytes ([`Window::filter`]). They
 //!   stream in blocks, so even a whole 26 MP photo never sits in memory as
@@ -36,6 +36,7 @@ mod curves;
 mod delay;
 mod distort;
 mod echo;
+mod filters;
 mod hsl;
 mod invert;
 mod levels;
@@ -155,6 +156,9 @@ pub enum Group {
     Audio,
     /// Treats the bytes as data: flipping, crushing, moving them around.
     Data,
+    /// Audio filters (D-71): low-pass, high-pass, band-pass, notch, and
+    /// Bass and Treble. Samples, like Audio.
+    Filter,
     /// Works on whole RGB pixels in two dimensions (pixel sorting); the
     /// sample encoding and channels do not apply.
     Pixel,
@@ -167,6 +171,7 @@ impl Group {
         match self {
             Group::Audio => "audio",
             Group::Data => "data",
+            Group::Filter => "filter",
             Group::Pixel => "pixel",
             Group::Adjust => "adjust",
         }
@@ -266,6 +271,11 @@ pub static REGISTRY: &[&EffectInfo] = &[
     &wahwah::INFO,
     &distort::INFO,
     &speed::INFO,
+    &filters::LOWPASS,
+    &filters::HIGHPASS,
+    &filters::BANDPASS,
+    &filters::NOTCH,
+    &filters::BASSTREBLE,
     &pixelsort::INFO,
     &crate::pull::INFO,
     &levels::INFO,

@@ -26,6 +26,11 @@ import ChartColumn from '@lucide/svelte/icons/chart-column';
 import Spline from '@lucide/svelte/icons/spline';
 import Palette from '@lucide/svelte/icons/palette';
 import SunMoon from '@lucide/svelte/icons/sun-moon';
+import Waves from '@lucide/svelte/icons/waves';
+import Activity from '@lucide/svelte/icons/activity';
+import AudioWaveform from '@lucide/svelte/icons/audio-waveform';
+import Funnel from '@lucide/svelte/icons/funnel';
+import SlidersVertical from '@lucide/svelte/icons/sliders-vertical';
 
 export type IconComponent = typeof Mountain;
 
@@ -56,6 +61,14 @@ const ICONS: Record<string, IconComponent> = {
   curves: Spline,
   hsl: Palette,
   balance: SunMoon,
+  // The filters (D-71), provisional until Phil picks: soft waves for
+  // low-pass, a spiky trace for high-pass, one waveform picked out for
+  // band-pass, a funnel for the notch, and an EQ's sliders.
+  lowpass: Waves,
+  highpass: Activity,
+  bandpass: AudioWaveform,
+  notch: Funnel,
+  basstreble: SlidersVertical,
 };
 
 /** The effect's icon; effects added later fall back to sparkles. */
