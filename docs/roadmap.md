@@ -3,14 +3,45 @@
 Where glitcharaxia is going after the planned phases. `SPEC.md` section 10
 holds the phases that were planned and built; this file holds everything
 else: ideas not yet scheduled, things deliberately put off, and what is
-needed before sharing the tool more widely. Updated 2026-11-24.
+needed before sharing the tool more widely. Updated 2026-11-25.
 
 ## Where it stands
 
 Phases 1 to 8 are built and merged into `main` (2026-11-24): the CLI, the
 web GUI and desktop app, 19 effects (audio-style, data, pixel and
 adjustments), masks, presets, crop, work size, picking up old edits,
-project files, and the pull effect with brushes and pins.
+project files, and the pull effect with brushes and pins. Releases since:
+0.2.0 (crop the result) and 0.2.1 (panning past the edges); see
+`CHANGELOG.md`. It runs on Phil's Arch LXC behind a Cloudflare Tunnel with
+Access, and Phil is using it for a week (from 2026-11-25), collecting notes
+before more changes.
+
+## Next round (after the week of use)
+
+Agreed on 2026-11-25, to be done together with Phil's notes from the week.
+
+- **Keep the token off the command line and out of the journal.** Today
+  the systemd unit passes `--token=${GLITCHRX_TOKEN}`, so any user on the
+  machine can read it with `ps` or in `/proc`, and the startup lines print
+  the URL with the token, which the journal keeps. Plan: `serve` reads the
+  token from the `GLITCHRX_TOKEN` environment variable (and a
+  `--token-file`), the unit drops `--token=...`, and a token that came
+  from there prints as `?token=...` (masked); only a token generated on
+  the spot is printed in full, since there is no other way to learn it.
+  Tests for each source; update `docs/hosting.md` sections 6 and 8. No
+  change to the app. Plain text in a `chmod 600` env file stays: the
+  server must hold the secret to compare it, and a random token is not a
+  reused password, so hashing it buys little.
+- **One set of setup steps across the docs.** Setting up prod from the
+  README, `docs/hosting.md` and the rest felt scattered, with steps missing
+  from each (Phil, 2026-11-25). Review every place that tells someone how
+  to build, install, serve or host it (README, `docs/hosting.md`,
+  `docs/macos.md`, `CLAUDE.md`, `justfile` comments, the CLI's own help),
+  give each step one home, and have the others link to it instead of
+  repeating it. Then walk a fresh Arch container through the hosting doc
+  from top to bottom and fix whatever is missing: packages, users and the
+  idmap, the bind mounts, the env file, the unit, the tunnel, updating and
+  rolling back.
 
 ## For Phil before sharing
 
