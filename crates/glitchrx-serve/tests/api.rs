@@ -799,6 +799,23 @@ async fn masks_travel_and_show() {
         alpha(w - 3)
     );
 
+    // Switched off, the mask and its parts still show as drawn: the
+    // switches change the render, not the overlay.
+    let mut off = recipe.clone();
+    off["steps"][1]["mask"]["off"] = json!(true);
+    off["steps"][1]["mask"]["op"][0]["off"] = json!(true);
+    let (s, _, b2) = send(
+        &app,
+        post_json(
+            &format!("/api/docs/{id}/mask"),
+            json!({"recipe": off, "step": 1, "max_w": 200, "max_h": 200,
+                   "tint": [10, 20, 30]}),
+        ),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    assert_eq!(rgba(&b2).2, px);
+
     // A step without a mask shows everywhere; a missing step is an error.
     let (_, _, b) = send(&app, ask(0)).await;
     assert!(rgba(&b).2.chunks(4).all(|p| p[3] == 255));

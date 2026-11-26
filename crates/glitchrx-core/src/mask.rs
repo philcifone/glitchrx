@@ -369,6 +369,25 @@ impl Mask {
         Ok(())
     }
 
+    /// The mask as drawn, with every switch on: the whole mask and each
+    /// component. The GUI's overlay shows this, so a component switched off
+    /// can still be seen while it is edited (D-74); the switches change
+    /// the render only.
+    pub fn as_drawn(&self) -> Mask {
+        Mask {
+            off: false,
+            ops: self
+                .ops
+                .iter()
+                .map(|op| MaskOp {
+                    off: false,
+                    ..op.clone()
+                })
+                .collect(),
+            ..self.clone()
+        }
+    }
+
     /// This mask moved onto a cropped canvas (see [`Frame`]). The result is
     /// only for rendering: its values may lie beyond the limits `validate`
     /// checks, which apply to the mask as stored.

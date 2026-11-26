@@ -320,7 +320,9 @@ impl Doc {
     /// Step `index`'s mask at preview size, as coverage 0..1 per pixel, with
     /// the preview's width and height. Brightness operations read the
     /// picture as it arrives at the step, which comes from the cache. A step
-    /// without a mask shows everywhere.
+    /// without a mask shows everywhere. Drawn as drawn: the mask's and its
+    /// components' off switches are ignored (they change the render, not
+    /// the overlay).
     pub fn mask(
         &self,
         recipe: &Recipe,
@@ -343,7 +345,8 @@ impl Doc {
         let (w, h) = (input.width, input.height);
         // Drawn on the whole photo; moved onto the cropped canvas.
         let frame = recipe.mask_frame(self.photo_size());
-        let coverage = match (&step.mask, frame) {
+        let drawn = step.mask.as_ref().map(|m| m.as_drawn());
+        let coverage = match (&drawn, frame) {
             (Some(m), Some(f)) => m.reframed(&f).render(w, h, &input.bytes, cancel)?,
             (Some(m), None) => m.render(w, h, &input.bytes, cancel)?,
             (None, _) => vec![1.0; w * h],

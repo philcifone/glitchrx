@@ -23,7 +23,8 @@ earlier version always open in a later one.
   `off = true` (recipe version 9, written only when something is off).
 
 - **An apple hides the red overlay** while you edit a part, to see the
-  picture.
+  picture. The overlay shows parts even while they are switched off.
+- Tapping the part you are editing closes it, as its check does.
 
 ### Changed
 

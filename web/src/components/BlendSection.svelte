@@ -123,6 +123,9 @@
     // The long press already acted; this is the click that follows it.
     if (longPressed) return void (longPressed = false);
     if (e.shiftKey || e.metaKey || e.ctrlKey) app.toggleSelected(uid, i);
+    // Tapping the open part closes it, as its check does (Phil,
+    // 2026-11-26); with several selected, a tap first narrows to this one.
+    else if (isActive(i) && !several) app.stopMasking();
     else app.selectComponent(uid, i);
   }
 
@@ -225,7 +228,7 @@
               onpointercancel={pressEnd}
               oncontextmenu={(e) => e.preventDefault()}
               disabled={!usable}
-              title={on ? 'Being edited' : 'Edit this part (shift-click to select several)'}
+              title={on ? 'Tap to finish editing' : 'Edit this part (shift-click to select several)'}
             >
               <span class="glyph"><Icon size={16} strokeWidth={1.75} /></span>
               <span class="text">
