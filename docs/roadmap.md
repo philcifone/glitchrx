@@ -122,6 +122,108 @@ No action until then. Today there are undo and redo (Ctrl or Cmd with Z,
 Y), `\` held for the original, `Z` to zoom, Esc to leave full view, and
 the mask shortcuts (B, E, `[` and `]`, Enter, Esc, Delete).
 
+### More Audacity effects
+
+Phil wants to try nearly all of these (2026-11-25): build them, let him
+use them, then decide together which to keep and which to sunset. Listed
+by priority. Already built: Echo, Delay, Reverb, Amplify, Invert, a
+bitcrusher, Reverse, cut and paste (shift, shuffle), Repeat (stutter),
+Phaser, Wahwah, Distortion and Change Speed.
+
+Rules for all of them: the raster's length never changes, and the result
+is deterministic (D-25: basic f64 operations, our own sine and FFT, seeded
+ChaCha8). Effects that change length in Audacity (Change Tempo,
+Paulstretch, Sliding Stretch) work inside their window, as `speed` does.
+Several need an FFT, ours, written once and shared; that is the biggest
+single piece of work here.
+
+**High priority: what the databending community uses**
+
+Specced on 2026-11-25 (SPEC 6.7, D-71), not built: Bass and Treble and the
+four pass filters (items 1 to 4), in a new Filters palette group.
+
+1. **Bass and Treble.** Probably the most used after Echo: a low and a
+   high shelf. Bass smears color in soft horizontal waves; treble
+   sharpens and fringes edges. Cheap (two biquads).
+2. **Low-pass filter.** Smears along the rows like a motion blur that
+   wraps.
+3. **High-pass filter.** Leaves edges and outlines on grey, close to an
+   emboss.
+4. **Band-pass and Notch filters.** The same family: keep or remove one
+   band of detail. Possibly one `filter` effect with a type setting
+   rather than four effects; decide when building.
+5. **Filter Curve EQ / Graphic EQ.** A drawn frequency curve, the general
+   form of all the above. Could reuse the curves editor.
+6. **Change Pitch.** Keeps the length, so it fits as is. Repeats and
+   squeezes detail with a seam pattern, different from speed. (FFT or
+   a time-domain pitch shifter.)
+7. **Paulstretch.** Extreme stretching: soft streaks and washes, popular
+   for dreamy results. Needs the FFT.
+8. **Noise Reduction.** Used for its artifacts: smeary, watercolor-like
+   blocks. Needs the FFT and a "noise profile" (a region of the picture,
+   or the whole of it).
+9. **Tremolo.** A wave on the volume: regular bands of light and dark that
+   drift across the rows. Audacity's waveforms: sine, triangle, sawtooth,
+   inverse sawtooth and square (the square gives hard stripes).
+
+**Second priority: recommended, less common in the community**
+
+1. **Vocoder, with a second picture.** One photo's texture carried by
+   another's shapes. The first two-input effect: it needs a way to pick
+   the second picture (a recipe path, a project asset) and a home for it
+   in `.glrx` projects.
+2. **Ring modulation.** Multiplying by a carrier wave: hard, regular
+   stripes and moire. (A Nyquist plug-in in Audacity, not built in.)
+3. **Flanger and Chorus.** Short delays that sway: wavy, doubled ghosts,
+   a cousin of phaser. (Plug-ins in Audacity.)
+4. **Sliding Stretch.** Speed or pitch that changes along the window: a
+   gradient from intact to smeared, which masks only approximate today.
+5. **Change Tempo.** Stretch without changing pitch, inside a window.
+   Close to Paulstretch at small amounts; try both and keep one if they
+   look alike.
+6. **Generate Noise, mixed in.** Grain in the data domain (white, pink,
+   brown noise), seeded.
+7. **Generate Tone, mixed in.** A stripe or moire pattern laid over the
+   photo (sine, square, sawtooth, at a chosen period in rows or px).
+
+**Low priority: rarely wanted results, listed for completeness**
+
+- **Compressor and Limiter.** Mostly move contrast, which levels and
+  curves do with more control; the compressor's attack and release give a
+  smeared contrast along the rows that levels cannot.
+- **Normalize and Loudness Normalization.** Stretch contrast to the full
+  range; close to auto levels.
+- **Fade In, Fade Out, Adjustable Fade.** A brightness ramp, mostly
+  covered by a gradient mask with amplify.
+- **Leveler.** A soft, gentle distortion; likely looks like `distort` at
+  low settings.
+- **Click Removal, Clip Fix, Repair.** Meant to smooth spikes; on a photo
+  probably a faint softening. Try once.
+- **Auto Duck, Truncate Silence.** Need a second track or change length;
+  probably not worth adapting.
+
+**Organizing the palette.** Today it has four groups (Audio, Data, Pixel,
+Adjust) in rows of five. With up to twenty more effects, Audio alone
+would run to five rows. Plan before building: split Audio into smaller
+groups, for example
+
+- *Time:* echo, delay, reverb, stutter, speed, pitch, tempo, Paulstretch,
+  sliding stretch
+- *Filters:* bass and treble, the pass filters, EQ, phaser, wahwah,
+  flanger, chorus
+- *Volume:* amplify, tremolo, ring modulation, distort, compressor,
+  normalize, fade
+- *Spectral:* noise reduction, vocoder
+- *Generate:* noise, tone
+
+plus Data, Pixel and Adjust as now. Possibly also groups that fold shut,
+or the most used ones first. Mock it up with Phil before building.
+
+**Sunsetting.** An effect taken out must still render in old recipes and
+projects, byte for byte. So "sunset" means hidden from the palette (and
+`--list`, perhaps behind a flag), not removed from the engine. Decide the
+details before the first one goes.
+
 ### Smaller ideas
 
 - Dragging mask parts from one step to another (copy and paste already
