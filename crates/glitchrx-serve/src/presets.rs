@@ -294,12 +294,12 @@ mod tests {
         let p = Presets::new(tmp.path().to_path_buf());
         fs::write(
             tmp.path().join("old.toml"),
-            "format = \"glitcharaxia-recipe\"\nversion = 9\n",
+            "format = \"glitcharaxia-recipe\"\nversion = 99\n",
         )
         .unwrap();
         fs::write(tmp.path().join(".partial.toml.tmp"), "junk").unwrap();
         let list = p.list().unwrap();
         assert_eq!(list.len(), 1);
-        assert!(list[0].error.as_deref().unwrap().contains("version 9"));
+        assert!(list[0].error.as_deref().unwrap().contains("version 99"));
     }
 }

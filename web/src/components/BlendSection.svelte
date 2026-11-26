@@ -196,6 +196,15 @@
   {:else}
     <div class="row">
       <span class="lbl">Mask</span>
+      <!-- On and off without losing it, to compare (Phil, 2026-11-25). -->
+      <input
+        class="switch"
+        type="checkbox"
+        checked={!mask.off}
+        onchange={(e) => app.updateMask(uid, { off: !e.currentTarget.checked })}
+        aria-label="Use the mask"
+        title={mask.off ? 'The mask is off: the glitch shows everywhere' : 'Switch the mask off to see the glitch everywhere'}
+      />
       <span class="grow"></span>
       {#if editing}
         <button class="primary" onclick={() => app.stopMasking()}>Done</button>
@@ -213,7 +222,11 @@
       </button>
     </div>
     <p class="note dim">
-      {mask.invert ? 'The glitch shows everywhere except the mask.' : 'The glitch shows only inside the mask.'}
+      {mask.off
+        ? 'Off: the glitch shows everywhere. The mask is kept for when it goes back on.'
+        : mask.invert
+          ? 'The glitch shows everywhere except the mask.'
+          : 'The glitch shows only inside the mask.'}
     </p>
 
     <ul class="ops" aria-label="Mask components">

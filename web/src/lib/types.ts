@@ -149,6 +149,8 @@ export type MaskShape = MaskOp['shape'];
 /** Where a step's result shows. The server omits empty and default fields. */
 export interface Mask {
   invert?: boolean;
+  /** Switched off: kept, but the step shows everywhere (D-73). */
+  off?: boolean;
   op?: MaskOp[];
 }
 

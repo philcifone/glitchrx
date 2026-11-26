@@ -209,6 +209,10 @@ pub struct Mask {
     /// Swap shown and hidden: paint where the glitch should *not* be.
     #[serde(default, skip_serializing_if = "is_false")]
     pub invert: bool,
+    /// Switched off: the mask is kept but not used, so the step shows
+    /// everywhere until it is switched back on (D-73, recipe version 9).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub off: bool,
     #[serde(rename = "op", default, skip_serializing_if = "Vec::is_empty")]
     pub ops: Vec<MaskOp>,
 }
@@ -431,6 +435,7 @@ impl Mask {
             .collect();
         Mask {
             invert: self.invert,
+            off: self.off,
             ops,
         }
     }

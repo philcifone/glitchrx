@@ -111,7 +111,7 @@ use crate::samples::Encoding;
 /// Magic string identifying a recipe file.
 pub const FORMAT: &str = "glitcharaxia-recipe";
 /// Recipe file format version.
-pub const VERSION: u32 = 8;
+pub const VERSION: u32 = 9;
 
 /// Step keys that are not effect parameters: per-step overrides of the
 /// recipe's sample format, and how strongly the result is blended in.
@@ -302,7 +302,8 @@ impl Step {
             encoding,
             channels,
             opacity,
-            mask: self.mask.clone(),
+            // A mask switched off is kept in the recipe but not used.
+            mask: self.mask.clone().filter(|m| !m.off),
             pull,
         })
     }
@@ -541,7 +542,7 @@ impl Recipe {
         }
         let version = raw.get("version").and_then(|v| v.as_integer());
         match version {
-            Some(2..=8) => {}
+            Some(2..=9) => {}
             Some(1) => {
                 return Err(Error::Recipe(
                     "version 1 recipes are for the JPEG byte engine, which was retired; \
@@ -581,9 +582,19 @@ impl Recipe {
     /// that uses nothing new still opens in builds that know only the
     /// version before (a project saved on a newer build, opened on an
     /// older server). Never below 7, the version every build since Phase 8
-    /// writes; only version 8's `crop_result` raises it.
+    /// writes; version 8's `crop_result` and version 9's mask `off` raise it.
     pub fn needed_version(&self) -> u32 {
-        if self.result_crop().is_some() { 8 } else { 7 }
+        if self
+            .steps
+            .iter()
+            .any(|s| s.mask.as_ref().is_some_and(|m| m.off))
+        {
+            9
+        } else if self.result_crop().is_some() {
+            8
+        } else {
+            7
+        }
     }
 
     /// Bring every step up to its effect's current version (D-56).
@@ -903,6 +914,7 @@ mod tests {
         let mut s = Step::new("invert", "hits=0,opacity=0.5", 1).unwrap();
         s.mask = Some(Mask {
             invert: false,
+            off: false,
             ops: vec![MaskOp::new(
                 Shape::Linear {
                     from: [0.0, 0.0],
@@ -1200,7 +1212,7 @@ mod tests {
         let r = Recipe::from_toml(v2).unwrap();
         assert_eq!(r.version, VERSION);
         assert_eq!(r.steps[0].mask, None);
-        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 9")).is_err());
+        assert!(Recipe::from_toml(&v2.replace("version = 2", "version = 10")).is_err());
     }
 
     /// A 6 x 4 picture whose every pixel differs, so resizing shows.
@@ -1218,6 +1230,7 @@ mod tests {
         let mut step = Step::new("invert", "hits=0", 1).unwrap();
         step.mask = Some(Mask {
             invert: false,
+            off: false,
             ops: vec![
                 MaskOp::new(
                     Shape::Radial {
@@ -1357,6 +1370,31 @@ mod tests {
         // Without one, nothing about it is written.
         assert!(!Recipe::default().to_toml().contains("work_size"));
         assert!(!Recipe::default().to_toml().contains("scale_back"));
+    }
+
+    #[test]
+    fn a_mask_switched_off_is_kept_but_not_used() {
+        // Paint out with a mask that covers everything: the step is hidden.
+        let mut r = Recipe::default();
+        r.steps.push(masked_invert());
+        r.steps[0].mask.as_mut().unwrap().invert = true;
+        let mut hidden = Raster::new(4, 2, vec![0; 24]);
+        r.apply(&mut hidden).unwrap();
+        assert!(hidden.bytes.iter().all(|&b| b == 0));
+        assert!(r.to_toml().contains("version = 7"));
+        // Switched off, the step shows everywhere (at its opacity, half).
+        r.steps[0].mask.as_mut().unwrap().off = true;
+        let mut shown = Raster::new(4, 2, vec![0; 24]);
+        r.apply(&mut shown).unwrap();
+        assert!(shown.bytes.iter().all(|&b| b == 128), "{:?}", shown.bytes);
+        // The mask is still in the file, marked off, as version 9.
+        let text = r.to_toml();
+        assert!(
+            text.contains("version = 9") && text.contains("off = true"),
+            "{text}"
+        );
+        let back = Recipe::from_toml(&text).unwrap();
+        assert_eq!(back.steps[0].mask, r.steps[0].mask);
     }
 
     #[test]

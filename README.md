@@ -127,7 +127,7 @@ Icon-only buttons show their name when you hold them on a phone (with a mouse, h
 ### Steps
 
 - **Encoding** for the whole recipe (and mono, stereo or RGB) sits above the steps. Any step can override both. See [Encodings](#encodings).
-- **Add steps** from the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter), data effects (invert, bitcrush, backwards, shift, shuffle), pixel effects (pixelsort, pull) and adjustments (levels, curves, hsl, balance).
+- **Add steps** from the palette, grouped into audio effects (echo, delay, reverb, phaser, wahwah, amplify, distort, speed, stutter), data effects (invert, bitcrush, backwards, shift, shuffle), filters (lowpass, highpass, bandpass, notch, basstreble), pixel effects (pixelsort, pull) and adjustments (levels, curves, hsl, balance).
 - Each step can be switched off, moved up or down, duplicated or removed (the icons at the foot of its card).
 - **Sliders** mark their default with a small tick and snap onto it; double tap a slider to go back to the default. Fields without a slider have a reset arrow.
 - **Shake** (the shuffle arrows at the top of a step's settings) rolls its settings at random, within the useful range; placement and encoding stay.
@@ -144,7 +144,7 @@ Every step has an **opacity**, and can have a **mask** that limits where it show
 - **Pen** paths: tap out points, drag while placing one to curve the sides, tap the first to close. Points stay editable.
 - **Brightness ranges** that limit the mask to light or dark parts.
 
-Tap a component to make it active; a radial, linear or rectangle then shows handles on the photo, and the others show small pins to tap. Each component adds, subtracts or intersects, and has its own opacity and feather; long-press to select several and set them together. Copy, Cut and Paste move components between steps. **Paint in** shows the step only inside the mask; **Paint out** everywhere else. The red overlay shows the mask; Done ends editing. On a keyboard, B and E paint and erase, and `[` and `]` size the brush. Masks are saved as strokes and shapes, so they replay exactly at full resolution.
+Tap a component to make it active; a radial, linear or rectangle then shows handles on the photo, and the others show small pins to tap. Each component adds, subtracts or intersects, and has its own opacity and feather; long-press to select several and set them together. Copy, Cut and Paste move components between steps. **Paint in** shows the step only inside the mask; **Paint out** everywhere else. The switch beside "Mask" turns the mask off and on, to compare, without losing it. The red overlay shows the mask; Done ends editing. On a keyboard, B and E paint and erase, and `[` and `]` size the brush. Masks are saved as strokes and shapes, so they replay exactly at full resolution.
 
 ### Presets
 

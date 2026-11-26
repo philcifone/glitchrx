@@ -15,6 +15,10 @@ earlier version always open in a later one.
   High-Pass Filter, Notch Filter and Bass and Treble. The cutoff is a size
   (`size=8px`), not a frequency, since a picture has no sample rate.
 
+- **A switch for each step's mask**, beside "Mask" in Blend: off shows
+  the glitch everywhere and keeps the mask for later (`off = true`, recipe
+  version 9, written only when a mask is off).
+
 ### Changed
 
 - Effect settings with a few options show them all as buttons instead of
