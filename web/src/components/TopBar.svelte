@@ -10,8 +10,6 @@
   import Redo2 from '@lucide/svelte/icons/redo-2';
   import SquareSplitHorizontal from '@lucide/svelte/icons/square-split-horizontal';
   import Settings from '@lucide/svelte/icons/settings';
-  import Eye from '@lucide/svelte/icons/eye';
-  import EyeOff from '@lucide/svelte/icons/eye-off';
   import { app } from '../lib/app.svelte';
 
   let {
@@ -31,20 +29,6 @@
       <span class="what">Step {t.n}: {t.step.effect}{t.step.enabled ? '' : ' (off)'}</span>
     </div>
     <div class="actions">
-      <!-- The red overlay (rubylith) on and off, to see the picture while
-           masking; the same setting as Show mask in the Blend section
-           (Phil, 2026-11-25). -->
-      {#if !pull}
-        <button
-          class="icon"
-          onclick={() => app.setTool({ show: !app.tool.show })}
-          aria-pressed={!app.tool.show}
-          title={app.tool.show ? 'Hide the red overlay' : 'Show the red overlay'}
-          aria-label={app.tool.show ? 'Hide the mask overlay' : 'Show the mask overlay'}
-        >
-          {#if app.tool.show}<Eye size={18} strokeWidth={1.75} />{:else}<EyeOff size={18} strokeWidth={1.75} />{/if}
-        </button>
-      {/if}
       <!-- Holding the photo paints here, so comparing has its own button. -->
       <button
         class="icon compare"

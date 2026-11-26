@@ -15,15 +15,20 @@ earlier version always open in a later one.
   High-Pass Filter, Notch Filter and Bass and Treble. The cutoff is a size
   (`size=8px`), not a frequency, since a picture has no sample rate.
 
-- **A switch for each step's mask**, beside "Mask" in Blend: off shows
-  the glitch everywhere and keeps the mask for later (`off = true`, recipe
-  version 9, written only when a mask is off).
+- **Masks switch off without being lost.** The venetian mask on a step's
+  header (and beside Add to mask) switches the whole mask off and on;
+  the one beside each part switches just that part. Off is kept as
+  `off = true` (recipe version 9, written only when something is off).
 
-- **An eye in the mask bar** hides and shows the red overlay while you
-  work on a mask.
+- **An apple hides the red overlay** while you edit a part, to see the
+  picture.
 
 ### Changed
 
+- The mask list is tidier: a red trash can removes a part, a check ends
+  editing (the Mask row with Edit and Done is gone), Add / Subtract /
+  Intersect are tabs under the part's sliders, and the explanatory notes
+  are gone.
 - Effect settings with a few options show them all as buttons instead of
   a dropdown, and sizes in px get a slider.
 - A linear gradient mask stays level more easily: only its dashed end

@@ -582,13 +582,13 @@ impl Recipe {
     /// that uses nothing new still opens in builds that know only the
     /// version before (a project saved on a newer build, opened on an
     /// older server). Never below 7, the version every build since Phase 8
-    /// writes; version 8's `crop_result` and version 9's mask `off` raise it.
+    /// writes; version 8's `crop_result` and version 9's mask `off` (whole or one component) raise it.
     pub fn needed_version(&self) -> u32 {
-        if self
-            .steps
-            .iter()
-            .any(|s| s.mask.as_ref().is_some_and(|m| m.off))
-        {
+        if self.steps.iter().any(|s| {
+            s.mask
+                .as_ref()
+                .is_some_and(|m| m.off || m.ops.iter().any(|op| op.off))
+        }) {
             9
         } else if self.result_crop().is_some() {
             8
@@ -1395,6 +1395,20 @@ mod tests {
         );
         let back = Recipe::from_toml(&text).unwrap();
         assert_eq!(back.steps[0].mask, r.steps[0].mask);
+
+        // One component off (the mask itself on) also needs version 9.
+        let m = r.steps[0].mask.as_mut().unwrap();
+        m.off = false;
+        m.ops[0].off = true;
+        let text = r.to_toml();
+        assert!(
+            text.contains("version = 9") && text.contains("off = true"),
+            "{text}"
+        );
+        assert_eq!(
+            Recipe::from_toml(&text).unwrap().steps[0].mask,
+            r.steps[0].mask
+        );
     }
 
     #[test]

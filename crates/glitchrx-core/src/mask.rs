@@ -160,6 +160,7 @@ pub enum Shape {
 /// mode = "add"
 /// opacity = 0.8        # optional, default 1
 /// feather = 0.01       # optional, share of the longer side
+/// off = true           # optional: kept but not used
 ///
 /// [[step.mask.op.stroke]]
 /// size = 0.06          # brush diameter, share of the longer side
@@ -186,6 +187,10 @@ pub struct MaskOp {
     /// Blur of this component's edges, as a share of the longer side.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub feather: f64,
+    /// Switched off: kept, but left out of the mask as if it were not
+    /// there (D-75, recipe version 9). The rest combine without it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub off: bool,
 }
 
 impl MaskOp {
@@ -196,6 +201,7 @@ impl MaskOp {
             mode,
             opacity: 1.0,
             feather: 0.0,
+            off: false,
         }
     }
 }
@@ -451,7 +457,8 @@ impl Mask {
         // blurs only its edges), then blended into the mask. One buffer,
         // reused.
         let mut c = vec![0f32; w * h];
-        for op in &self.ops {
+        // A component switched off counts as absent.
+        for op in self.ops.iter().filter(|op| !op.off) {
             if cancel() {
                 return Err(Error::Cancelled);
             }
@@ -1238,6 +1245,36 @@ mod tests {
             2,
         );
         assert!(m.iter().all(|&v| v == 0.0));
+    }
+
+    #[test]
+    fn a_component_switched_off_counts_as_absent() {
+        // A circle cut out of the left half; with the cut switched off the
+        // half is whole again, and with the half off nothing is left.
+        let cut = circle(Mode::Subtract, [0.25, 0.5], [0.35, 0.5]);
+        let whole = render(&masked(vec![left_half()]), 40, 20);
+        let off = MaskOp {
+            off: true,
+            ..cut.clone()
+        };
+        assert_eq!(render(&masked(vec![left_half(), off]), 40, 20), whole);
+        assert!(
+            at(
+                &render(&masked(vec![left_half(), cut.clone()]), 40, 20),
+                40,
+                10,
+                10
+            ) < 1.0
+        );
+        let half_off = MaskOp {
+            off: true,
+            ..left_half()
+        };
+        assert!(
+            render(&masked(vec![half_off, cut]), 40, 20)
+                .iter()
+                .all(|&v| v == 0.0)
+        );
     }
 
     #[test]

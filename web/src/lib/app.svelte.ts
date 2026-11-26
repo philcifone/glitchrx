@@ -949,6 +949,20 @@ export class App {
     this.selected = indices;
   }
 
+  /**
+   * Switch a step's whole mask on or off (D-73), or with `index`, one of
+   * its components (D-75). Off is kept in the recipe; on is left out, so
+   * recipes stay short and old builds can still open them.
+   */
+  toggleMaskOff(uid: string, index?: number): void {
+    const m = this.step(uid)?.mask;
+    const target = index === undefined ? m : m?.op?.[index];
+    if (!target) return;
+    if (target.off) delete target.off;
+    else target.off = true;
+    this.changed();
+  }
+
   /** Change mask-wide settings (invert, feather). */
   updateMask(uid: string, patch: Partial<Mask>, commit = true): void {
     const s = this.step(uid);

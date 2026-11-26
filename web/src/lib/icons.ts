@@ -73,3 +73,19 @@ const ICONS: Record<string, IconComponent> = {
 
 /** The effect's icon; effects added later fall back to sparkles. */
 export const iconFor = (effect: string): IconComponent => ICONS[effect] ?? Sparkles;
+
+/**
+ * The paths of Lucide icons that the app also shows struck through
+ * (Slashed.svelte), copied from Lucide 24 x 24 (ISC license). Lucide has no
+ * apple-off or venetian-mask-off.
+ */
+export const OFF_PATHS = {
+  /** The mask overlay (rubylith), hidden. */
+  apple: ['M12 6.528V3a1 1 0 0 1 1-1h0', 'M18.237 21A15 15 0 0 0 22 11a6 6 0 0 0-10-4.472A6 6 0 0 0 2 11a15.1 15.1 0 0 0 3.763 10 3 3 0 0 0 3.648.648 5.5 5.5 0 0 1 5.178 0A3 3 0 0 0 18.237 21'],
+  /** A mask, or one of its components, switched off. */
+  venetianMask: [
+    'M18 11c-1.5 0-2.5.5-3 2',
+    'M4 6a2 2 0 0 0-2 2v4a5 5 0 0 0 5 5 8 8 0 0 1 5 2 8 8 0 0 1 5-2 5 5 0 0 0 5-5V8a2 2 0 0 0-2-2h-3a8 8 0 0 0-5 2 8 8 0 0 0-5-2z',
+    'M6 11c1.5 0 2.5.5 3 2',
+  ],
+} as const;

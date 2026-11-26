@@ -142,6 +142,8 @@ export interface MaskCommon {
   opacity?: number;
   /** Blur of its edges, as a share of the longer side (default 0). */
   feather?: number;
+  /** Switched off: kept, but the mask is drawn without it (D-75). */
+  off?: boolean;
 }
 
 export type MaskShape = MaskOp['shape'];
