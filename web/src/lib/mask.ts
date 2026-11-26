@@ -12,6 +12,7 @@
 // the stack, where they act as limits on everything else. Recipes written
 // by hand can still order them any way they like.
 
+import { niceAngle } from './shapes';
 import { SLIDER_STEPS, type SliderScale } from './slider';
 import type { Mask, MaskMode, MaskOp, MaskShape, Stroke } from './types';
 
@@ -227,9 +228,16 @@ type Shape = Extract<MaskOp, { shape: 'linear' | 'radial' }>;
 
 /**
  * What a press grabs. Radial: `edge` (the edge handle or the ring) resizes,
- * `move` (inside) moves. Linear: `from` / `to` (an end handle or its line
- * across the picture) moves that end, `move` (near the axis between them)
- * moves both. Anything else is `draw`: drag out a new placement.
+ * `move` (inside) moves. Linear: `to` (the dashed end) turns and stretches
+ * the gradient, `from` (the solid end, or its line across the picture)
+ * slides along it without turning, and `move` (near the axis between them,
+ * or either end while both are selected) moves both. Anything else is
+ * `draw`: drag out a new placement.
+ *
+ * Only the dashed end turns it (Phil, 2026-11-25): with both ends free,
+ * every adjustment also tilted the gradient, so keeping it level was
+ * fiddly. The dashed end's angle settles on multiples of 45 degrees
+ * within 2, as a rectangle's turn handle does.
  */
 export type Grab = 'edge' | 'from' | 'to' | 'move' | 'draw';
 
@@ -289,14 +297,35 @@ export function dragEnds(
   const f = (q: Pt): [number, number] => [roundCoord(q[0] / w), roundCoord(q[1] / h)];
   const [dx, dy] = [(p[0] - start[0]) / w, (p[1] - start[1]) / h];
   const shift = (q: [number, number]): [number, number] => [roundCoord(q[0] + dx), roundCoord(q[1] + dy)];
+  const a = px(from, w, h);
+  const b = px(to, w, h);
   switch (grabbed) {
     case 'move':
       return { from: shift(from), to: shift(to) };
     case 'edge':
-    case 'to':
       return { from, to: f(p) };
-    case 'from':
-      return { from: f(p), to };
+    case 'to': {
+      // Turn and stretch about the solid end, settling on level.
+      const len = dist(p, a);
+      if (len < 1) return { from, to };
+      let deg = niceAngle((Math.atan2(p[1] - a[1], p[0] - a[0]) * 180) / Math.PI, false);
+      // Level and plumb hold a little wider, 4 degrees: they are what a
+      // gradient across a horizon or down a wall wants.
+      const square = Math.round(deg / 90) * 90;
+      if (Math.abs(deg - square) < 4) deg = square;
+      const r = (deg * Math.PI) / 180;
+      return { from, to: f([a[0] + Math.cos(r) * len, a[1] + Math.sin(r) * len]) };
+    }
+    case 'from': {
+      // Slide along the gradient: only the part of the drag along its
+      // direction counts, and the solid end stays short of the dashed one.
+      const len = dist(a, b);
+      if (len < 1) return { from, to };
+      const [ux, uy] = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
+      const along = (p[0] - start[0]) * ux + (p[1] - start[1]) * uy;
+      const t = Math.min(along, len - 4);
+      return { from: f([a[0] + ux * t, a[1] + uy * t]), to };
+    }
     case 'draw':
       return { from: f(start), to: f(p) };
   }

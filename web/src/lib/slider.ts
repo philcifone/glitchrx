@@ -91,3 +91,17 @@ export const percentScale: SliderScale = (() => {
     fromSlider: (t) => clamp(round(Math.exp(lo + (t / SLIDER_STEPS) * (hi - lo))), 0.01, 100),
   };
 })();
+
+/**
+ * Log scale for sizes in whole pixels, 1 .. 2000 px, used by the filters'
+ * sizes (D-71): the detail people tune sits at a few pixels, but a soft
+ * low-pass can want hundreds.
+ */
+export const pxScale: SliderScale = (() => {
+  const lo = Math.log(1);
+  const hi = Math.log(2000);
+  return {
+    toSlider: (v) => clamp(((Math.log(Math.max(v, 1)) - lo) / (hi - lo)) * SLIDER_STEPS, 0, SLIDER_STEPS),
+    fromSlider: (t) => clamp(Math.round(Math.exp(lo + (t / SLIDER_STEPS) * (hi - lo))), 1, 2000),
+  };
+})();

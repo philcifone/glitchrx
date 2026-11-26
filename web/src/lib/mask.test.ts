@@ -193,8 +193,27 @@ describe('dragEnds', () => {
   it('moves, resizes and redraws', () => {
     expect(dragEnds('move', from, to, [100, 50], [120, 60], 200, 100)).toEqual({ from: [0.6, 0.6], to: [0.7, 0.6] });
     expect(dragEnds('edge', from, to, [120, 50], [150, 50], 200, 100)).toEqual({ from, to: [0.75, 0.5] });
-    expect(dragEnds('from', from, to, [100, 50], [20, 10], 200, 100)).toEqual({ from: [0.1, 0.1], to });
     expect(dragEnds('draw', from, to, [20, 10], [40, 10], 200, 100)).toEqual({ from: [0.1, 0.1], to: [0.2, 0.1] });
+  });
+
+  it('slides the solid end along the gradient without turning it', () => {
+    // The ends are at (100, 50) and (120, 50) px: a drag up and left only
+    // counts along the line, and it never passes the dashed end.
+    expect(dragEnds('from', from, to, [100, 50], [20, 10], 200, 100)).toEqual({ from: [0.1, 0.5], to });
+    expect(dragEnds('from', from, to, [100, 50], [200, 90], 200, 100)).toEqual({ from: [0.58, 0.5], to });
+  });
+
+  it('turns with the dashed end, holding level near it', () => {
+    // 40 px out and a hair low: level wins, at the dragged length.
+    const level = dragEnds('to', from, to, [120, 50], [140, 51.5], 200, 100);
+    expect(level.from).toEqual(from);
+    expect(level.to[1]).toBe(0.5);
+    expect(level.to[0]).toBeCloseTo(0.7, 3);
+    // A real angle is kept: 30 degrees down.
+    const r = (30 * Math.PI) / 180;
+    const turned = dragEnds('to', from, to, [120, 50], [100 + 40 * Math.cos(r), 50 + 40 * Math.sin(r)], 200, 100);
+    expect(turned.to[0]).toBeCloseTo((100 + 40 * Math.cos(r)) / 200, 4);
+    expect(turned.to[1]).toBeCloseTo((50 + 40 * Math.sin(r)) / 100, 4);
   });
 });
 

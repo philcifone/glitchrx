@@ -15,6 +15,14 @@ earlier version always open in a later one.
   High-Pass Filter, Notch Filter and Bass and Treble. The cutoff is a size
   (`size=8px`), not a frequency, since a picture has no sample rate.
 
+### Changed
+
+- Effect settings with a few options show them all as buttons instead of
+  a dropdown, and sizes in px get a slider.
+- A linear gradient mask stays level more easily: only its dashed end
+  turns it (settling on level and plumb), the solid end slides along it,
+  and tapping both ends selects them so a drag moves the whole gradient.
+
 ## [0.2.1] - 2026-11-25
 
 ### Fixed

@@ -1,16 +1,17 @@
 <script lang="ts">
   // Editor for one effect parameter, chosen by its kind:
   //   int / float  slider (log scale for wide ranges) + exact number
-  //   choice       dropdown
+  //   choice       a segmented control when the options fit on one line,
+  //                a dropdown otherwise (Phil wants to see the options)
   //   set          a row of toggles (color dots for color ranges)
-  //   size         text (rows, px, % or bytes) + log slider for rows and %
+  //   size         text (rows, px, % or bytes) + log slider for rows, px and %
   //   region       one two-handle slider while both ends are percents, + text;
   //                dragging draws the band on the preview
   //   curve        a curve editor (CurveField) + text
   // Sliders update the preview live and record one history entry on release.
   import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
   import { app } from '../lib/app.svelte';
-  import { percentScale, rowsScale, sliderScale } from '../lib/slider';
+  import { percentScale, pxScale, rowsScale, sliderScale } from '../lib/slider';
   import type { ParamInfo } from '../lib/types';
   import DualRange from './DualRange.svelte';
   import RangeInput from './RangeInput.svelte';
@@ -53,6 +54,10 @@
     const m = /^\s*([\d.]+)\s*%\s*$/.exec(s);
     return m ? Number(m[1]) : null;
   };
+  const pxs = (s: string) => {
+    const m = /^\s*(\d+)\s*px\s*$/.exec(s);
+    return m ? Number(m[1]) : null;
+  };
   const rows = (s: string) => {
     const m = /^\s*([\d.]+)\s*rows?\s*$/.exec(s);
     return m ? Number(m[1]) : null;
@@ -65,12 +70,26 @@
       const d = pct(spec.default);
       return { scale: percentScale, value: p, unit: '%', dflt: d === null ? null : Math.round(percentScale.toSlider(d)) };
     }
+    const x = pxs(text);
+    if (x !== null) {
+      const d = pxs(spec.default);
+      return { scale: pxScale, value: x, unit: 'px', dflt: d === null ? null : Math.round(pxScale.toSlider(d)) };
+    }
     const r = rows(text);
     if (r !== null) {
       const d = rows(spec.default);
       return { scale: rowsScale, value: r, unit: 'rows', dflt: d === null ? null : Math.round(rowsScale.toSlider(d)) };
     }
     return null;
+  });
+
+  /**
+   * Choices as a segmented control when they fit a phone's card: a few
+   * short words. Longer lists keep the dropdown.
+   */
+  const segmented = $derived.by(() => {
+    const c = spec.choices ?? [];
+    return spec.kind === 'choice' && c.length <= 5 && c.join('').length <= 28;
   });
 
   /** Whether the field shows a slider (which resets with a double tap). */
@@ -154,6 +173,12 @@
         step={spec.kind === 'int' ? 1 : 0.01}
         onchange={(e) => commitField(e.currentTarget)}
       />
+    </div>
+  {:else if spec.kind === 'choice' && segmented}
+    <div class="segmented choice" role="radiogroup" aria-label={spec.name}>
+      {#each spec.choices ?? [] as c (c)}
+        <button role="radio" aria-checked={text === c} class:on={text === c} onclick={() => set(c === spec.default ? null : c)}>{c}</button>
+      {/each}
     </div>
   {:else if spec.kind === 'choice'}
     <select {id} value={text} onchange={(e) => set(e.currentTarget.value)}>
@@ -290,6 +315,21 @@
     display: flex;
     align-items: center;
     gap: 12px;
+  }
+
+  /* Every option in view, the card's width. */
+  .choice {
+    display: flex;
+    width: 100%;
+  }
+
+  .choice button {
+    flex: 1;
+    min-width: 0;
+    padding-left: 2px;
+    padding-right: 2px;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
   }
 
   .num {
