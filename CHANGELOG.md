@@ -19,6 +19,9 @@ earlier version always open in a later one.
   the glitch everywhere and keeps the mask for later (`off = true`, recipe
   version 9, written only when a mask is off).
 
+- **An eye in the mask bar** hides and shows the red overlay while you
+  work on a mask.
+
 ### Changed
 
 - Effect settings with a few options show them all as buttons instead of
