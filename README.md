@@ -112,7 +112,7 @@ To use it from your phone, see [Running it on a server or for a phone](#running-
 ### The screen
 
 - **Top bar:** Open, Presets, Undo, Redo, Export, Settings. While you paint a mask or pull, it becomes an edit bar instead: what you are working on, compare, undo, redo and **Done**.
-- **The photo.** Above the steps, two cards: the encoding and channels on the left; crop, zoom and the work size on the right (the (i) explains sizes).
+- **The photo.** Above the steps, two cards: **Encoding** (the encoding and channels) on the left; **Canvas** (crop, zoom and the work size) on the right. More info at the foot of each explains it.
 - **The steps:** a card per effect, top to bottom, in the order they run. On a phone the effect palette sits behind the floating **+** button.
 - **Status bar:** the photo's name and size, how long the last render took, and whether the view is approximate or exact.
 

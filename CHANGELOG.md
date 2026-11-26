@@ -28,6 +28,9 @@ earlier version always open in a later one.
 
 ### Changed
 
+- The two cards above the steps have headings, Encoding and Canvas, and
+  each has its own More info in place of the info button and the notes
+  under both.
 - The mask list is tidier: a red trash can removes a part, a check ends
   editing (the Mask row with Edit and Done is gone), Add / Subtract /
   Intersect are tabs under the part's sliders, and the explanatory notes
