@@ -240,7 +240,8 @@
                 aria-label="Show the red overlay"
                 title={app.tool.show ? 'Hide the red overlay to see the picture' : 'Show the red overlay'}
               >
-                {#if app.tool.show}<Apple size={17} strokeWidth={1.75} />{:else}<Slashed paths={OFF_PATHS.apple} size={17} />{/if}
+                <!-- Filled with the overlay's red while it shows; hollow and struck through while hidden. -->
+                {#if app.tool.show}<Apple size={17} strokeWidth={1.75} style="fill: var(--rubylith)" />{:else}<Slashed paths={OFF_PATHS.apple} size={17} />{/if}
               </button>
             {/if}
             <span class="grow"></span>
