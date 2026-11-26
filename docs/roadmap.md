@@ -3,7 +3,7 @@
 Where glitcharaxia is going after the planned phases. `SPEC.md` section 10
 holds the phases that were planned and built; this file holds everything
 else: ideas not yet scheduled, things deliberately put off, and what is
-needed before sharing the tool more widely. Updated 2026-11-25.
+needed before sharing the tool more widely. Updated 2026-11-26.
 
 ## Where it stands
 
@@ -59,6 +59,8 @@ Unscheduled; pick any.
 
 ### 16-bit pictures
 
+**Phil wants this** (2026-11-26). It stays here until it is scheduled.
+
 **What it is.** Today every picture is 8 bits per color channel (256
 levels) inside the tool. 16-bit TIFFs and PNGs already open, but they are
 reduced to 8 bits on the way in, and outputs are 8-bit.
@@ -84,6 +86,52 @@ by default, so yours may well be. To check, in a folder of them:
 **Effort.** Large. The raster type, every effect, the golden hashes and the
 encoders change. A phase of its own, probably split into a 16-bit pipeline
 first (precision, 16-bit export) and the new byte look second.
+
+### The .glrx project file: archival integrity and registration
+
+Phil, 2026-11-26: make the project file something that lasts and that
+other tools recognize. Today a `.glrx` is a zip of `mimetype`,
+`project.toml`, `recipe.toml`, the original photo (location removed) and
+`preview.jpg` (1024 px on the long side, JPEG quality 85), so the photo
+and readable steps are recoverable with any unzip tool.
+
+**First: rename the media type to `glitchrx`.** The `mimetype` entry says
+`application/vnd.glitcharaxia.project`; make it
+`application/vnd.glitchrx.project` before anything is registered. New
+files write the new name; files with the old one keep opening.
+
+**Archival integrity:**
+- **A published format spec** (`docs/glrx-format.md`): every entry, every
+  key, the versions and how they upgrade. The biggest single step: a format
+  others can read without the app is what makes it real. It should also
+  state the compatibility rule: keys that change the picture make an older
+  build refuse the file (as now), and display-only keys (notes, overlay
+  settings) are skipped by older builds, as PNG does with critical and
+  ancillary chunks.
+- **Checksums in the manifest** for each entry and for the finished
+  render, with a `glitchrx verify` command that confirms the file is
+  intact and still replays to the same picture (a fixity check, in
+  archive terms).
+- **The glitchRx version that made it**, recorded in the manifest. Every
+  release is tagged, so any file can be replayed exactly years later.
+- **Optional title, author, notes and license fields.**
+- **A `README.txt` inside the zip** saying what the file is and how to
+  read it without the app.
+- **The Easter egg:** the zip's archive comment (`unzip -z` prints it,
+  nothing else reads it), or the README. Not the `mimetype` entry, which
+  has to match exactly for the app to recognize the file.
+
+**Registration (after the spec and the rename):**
+- **IANA media type** in the vendor tree (RFC 6838): free, first come,
+  a light review; needs the public spec and a contact.
+- **shared-mime-info** (Linux desktops recognize and name the file).
+- **The `file` command's magic database** (`file x.glrx` says what it is).
+- **An exported type (UTI) in the macOS app.**
+- **PRONOM**, the UK National Archives' format registry, where archives
+  look formats up: the archival credibility.
+
+There is no registry for file extensions; `.glrx` becomes known through
+the places above.
 
 ### DNG export
 
