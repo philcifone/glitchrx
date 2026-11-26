@@ -1,7 +1,7 @@
 {
   "productName": "glitchrx",
   "mainBinaryName": "glitchrx-desktop",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "identifier": "org.glitcharaxia.glitchrx",
   "build": {
     "frontendDist": "loading"

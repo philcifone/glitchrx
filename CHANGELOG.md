@@ -8,6 +8,8 @@ earlier version always open in a later one.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-26
+
 ### Added
 
 - **Filters**, a new group in the palette (D-71): `lowpass`, `highpass`,
@@ -19,8 +21,9 @@ earlier version always open in a later one.
   header (and beside Add to mask) switches the whole mask off and on;
   the one beside each part switches just that part. The whole-mask switch
   wins while off, and turning a part on brings the mask back with just
-  that part. Off is kept as
-  `off = true` (recipe version 9, written only when something is off).
+  that part. Off is kept as `off = true` (recipe version 9, written only
+  when something is off, so such files need 0.3.0 to open; the rest
+  still open on 0.2).
 
 - **An apple hides the red overlay** while you edit a part, to see the
   picture. The overlay shows parts even while they are switched off.
@@ -85,6 +88,8 @@ First release: the engine (14 audio and data effects, pixel sort, pull,
 four adjustments), recipes, projects (`.glrx`), the web GUI, the desktop
 app and the command line.
 
+[Unreleased]: https://github.com/USER/glitchrx/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/USER/glitchrx/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/USER/glitchrx/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/USER/glitchrx/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/USER/glitchrx/releases/tag/v0.1.0

@@ -11,7 +11,7 @@ Create your own glitch art from digital images through databending. Inspired by 
 
 Everything runs locally. No image is ever uploaded anywhere besides the server or computer you host it on
 
-**Status: beta (0.2.1; see `CHANGELOG.md`).** Three ways to use it, all from one build:
+**Status: beta (0.3.0; see `CHANGELOG.md`).** Three ways to use it, all from one build:
 
 - **A web GUI** (`glitchrx serve`) for a browser on the same computer, or a phone or tablet over your LAN or a VPN. It can be added to a phone's home screen and used like an app.
 - **A desktop app** (Linux today; macOS planned) with the same GUI in its own window.

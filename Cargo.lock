@@ -634,7 +634,7 @@ checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
 name = "contact-sheet"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "glitchrx-core",
@@ -1371,7 +1371,7 @@ dependencies = [
 
 [[package]]
 name = "gen-fixtures"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "glitchrx-core",
@@ -1493,7 +1493,7 @@ dependencies = [
 
 [[package]]
 name = "glitchrx-cli"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1504,7 +1504,7 @@ dependencies = [
 
 [[package]]
 name = "glitchrx-core"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "avif-serialize",
  "blake3",
@@ -1530,7 +1530,7 @@ dependencies = [
 
 [[package]]
 name = "glitchrx-desktop"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "axum",
  "glitchrx-serve",
@@ -1542,7 +1542,7 @@ dependencies = [
 
 [[package]]
 name = "glitchrx-serve"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "axum",
  "glitchrx-core",

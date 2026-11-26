@@ -8,10 +8,11 @@ needed before sharing the tool more widely. Updated 2026-11-26.
 ## Where it stands
 
 Phases 1 to 8 are built and merged into `main` (2026-11-24): the CLI, the
-web GUI and desktop app, 19 effects (audio-style, data, pixel and
+web GUI and desktop app, the effects (audio-style, data, pixel and
 adjustments), masks, presets, crop, work size, picking up old edits,
 project files, and the pull effect with brushes and pins. Releases since:
-0.2.0 (crop the result) and 0.2.1 (panning past the edges); see
+0.2.0 (crop the result), 0.2.1 (panning past the edges) and 0.3.0
+(filters, mask switches and a tidier mask list, 2026-11-26); see
 `CHANGELOG.md`. It runs on Phil's Arch LXC behind a Cloudflare Tunnel with
 Access, and Phil is using it for a week (from 2026-11-25), collecting notes
 before more changes.
