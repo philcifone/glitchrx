@@ -206,12 +206,14 @@
         Paint out
       </button>
     </div>
-    <ul class="ops" class:all-off={mask.off} aria-label="Mask components">
+    <ul class="ops" aria-label="Mask components">
       {#each ops as op, i (i)}
         {@const Icon = ICON[op.shape]}
         {@const on = isActive(i)}
         {@const text = detail(op)}
-        <li class:active={on} class:selected={isSelected(i)} class:off={op.off}>
+        <!-- With the whole mask off, every part shows off (D-75). -->
+        {@const partOff = !!op.off || !!mask.off}
+        <li class:active={on} class:selected={isSelected(i)} class:off={partOff}>
           <div class="row head">
             <button
               class="pick"
@@ -231,7 +233,7 @@
                 {#if text}<span class="detail dim">{text}</span>{/if}
               </span>
             </button>
-            <MaskToggle off={!!op.off} what="this part" onclick={() => app.toggleMaskOff(uid, i)} disabled={!usable} />
+            <MaskToggle off={partOff} what="this part" onclick={() => app.toggleMaskOff(uid, i)} disabled={!usable} />
             {#if on}
               <button
                 class="icon over"
@@ -571,7 +573,6 @@
   }
 
   /* A part switched off, or the whole mask: still editable, dimmed. */
-  .ops.all-off,
   .ops li.off .text,
   .ops li.off .glyph {
     opacity: 0.55;

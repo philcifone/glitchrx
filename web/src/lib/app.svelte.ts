@@ -953,10 +953,26 @@ export class App {
    * Switch a step's whole mask on or off (D-73), or with `index`, one of
    * its components (D-75). Off is kept in the recipe; on is left out, so
    * recipes stay short and old builds can still open them.
+   *
+   * The two are linked (Phil, 2026-11-26): while the whole mask is off,
+   * every component shows off, and the components keep their own
+   * settings underneath, so switching the mask back on restores them.
+   * Switching one component on while the mask is off overrides it: the
+   * mask comes back on with only that component on, as the list showed.
    */
   toggleMaskOff(uid: string, index?: number): void {
     const m = this.step(uid)?.mask;
-    const target = index === undefined ? m : m?.op?.[index];
+    if (!m) return;
+    if (index !== undefined && m.off) {
+      if (!m.op?.[index]) return;
+      delete m.off;
+      m.op.forEach((op, i) => {
+        if (i === index) delete op.off;
+        else op.off = true;
+      });
+      return this.changed();
+    }
+    const target = index === undefined ? m : m.op?.[index];
     if (!target) return;
     if (target.off) delete target.off;
     else target.off = true;

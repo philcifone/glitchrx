@@ -17,7 +17,9 @@ earlier version always open in a later one.
 
 - **Masks switch off without being lost.** The venetian mask on a step's
   header (and beside Add to mask) switches the whole mask off and on;
-  the one beside each part switches just that part. Off is kept as
+  the one beside each part switches just that part. The whole-mask switch
+  wins while off, and turning a part on brings the mask back with just
+  that part. Off is kept as
   `off = true` (recipe version 9, written only when something is off).
 
 - **An apple hides the red overlay** while you edit a part, to see the
